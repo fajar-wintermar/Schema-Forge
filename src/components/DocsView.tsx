@@ -13,14 +13,16 @@ import { DetailLevel, ParsedSchema, TableDef } from '../types/schema';
 interface DocsViewProps {
   schema: ParsedSchema;
   detailLevel: DetailLevel;
-  focusedGroup: string | null;
+  selectedDomains: string[];
+  onClearDomainFilter?: () => void;
   onSelectTable: (tableId: string) => void;
 }
 
 export const DocsView: React.FC<DocsViewProps> = ({
   schema,
   detailLevel,
-  focusedGroup,
+  selectedDomains,
+  onClearDomainFilter,
   onSelectTable,
 }) => {
   const [search, setSearch] = useState('');
@@ -249,9 +251,17 @@ export const DocsView: React.FC<DocsViewProps> = ({
     );
   };
 
+  const isFilteringDomains = selectedDomains.length > 0;
   const visibleGroups = schema.tableGroups.filter(
-    (g) => !focusedGroup || g.name === focusedGroup
+    (g) => !isFilteringDomains || selectedDomains.includes(g.name)
   );
+  const visibleGroupTableSet = useMemo(() => {
+    const s = new Set<string>();
+    for (const g of visibleGroups) {
+      for (const t of g.tables) s.add(t);
+    }
+    return s;
+  }, [visibleGroups]);
 
   return (
     <div className="flex-1 h-full overflow-y-auto bg-slate-50 dark:bg-slate-950">
@@ -290,6 +300,24 @@ export const DocsView: React.FC<DocsViewProps> = ({
             />
           </div>
         </div>
+
+        {isFilteringDomains && (
+          <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 text-xs">
+            <span className="text-blue-900 dark:text-blue-100 font-medium">
+              Showing only selected domain{selectedDomains.length > 1 ? 's' : ''}:{' '}
+              {selectedDomains.join(', ')}
+            </span>
+            {onClearDomainFilter && (
+              <button
+                type="button"
+                onClick={onClearDomainFilter}
+                className="font-semibold text-blue-600 dark:text-blue-300 hover:underline shrink-0"
+              >
+                Show All Domains
+              </button>
+            )}
+          </div>
+        )}
 
         {/* Business Domains */}
         {visibleGroups.map((group) => {
@@ -331,7 +359,7 @@ export const DocsView: React.FC<DocsViewProps> = ({
         })}
 
         {/* Ungrouped Tables */}
-        {!focusedGroup &&
+        {!isFilteringDomains &&
           ungroupedTables.filter(matchesSearch).length > 0 && (
             <div className="space-y-4">
               <div className="flex items-center gap-2">
@@ -349,7 +377,7 @@ export const DocsView: React.FC<DocsViewProps> = ({
           )}
 
         {/* Enums Section */}
-        {schema.enums.length > 0 && !focusedGroup && (
+        {schema.enums.length > 0 && !isFilteringDomains && (
           <div className="space-y-4 pt-4 border-t border-slate-200 dark:border-slate-800">
             <h2 className="text-lg font-bold text-slate-900 dark:text-slate-50 flex items-center gap-2">
               <Layers className="w-4 h-4 text-slate-400" />
@@ -385,7 +413,14 @@ export const DocsView: React.FC<DocsViewProps> = ({
               Foreign Key Relationships
             </h2>
             <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 divide-y divide-slate-100 dark:divide-slate-800">
-              {schema.refs.map((r) => (
+              {schema.refs
+                .filter(
+                  (r) =>
+                    !isFilteringDomains ||
+                    (visibleGroupTableSet.has(r.fromTable) &&
+                      visibleGroupTableSet.has(r.toTable))
+                )
+                .map((r) => (
                 <div
                   key={r.id}
                   className="px-4 py-2.5 flex items-center justify-between gap-4 text-xs font-mono"

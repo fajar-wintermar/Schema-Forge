@@ -1,8 +1,11 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  Check,
+  ChevronDown,
   Edit3,
   Eye,
   EyeOff,
+  Filter,
   Grid,
   KeyRound,
   Link2,
@@ -40,8 +43,8 @@ interface DiagramCanvasProps {
   positions: Record<string, TablePosition>;
   onUpdatePositions: (next: Record<string, TablePosition>) => void;
   detailLevel: DetailLevel;
-  focusedGroup: string | null;
-  onToggleFocusGroup: (groupName: string | null) => void;
+  selectedDomains: string[];
+  onChangeSelectedDomains: (domains: string[]) => void;
   selectedTableId: string | null;
   highlightedColumn?: { tableId: string; columnName: string } | null;
   onSelectTable: (tableId: string | null) => void;
@@ -118,8 +121,8 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
   positions,
   onUpdatePositions,
   detailLevel,
-  focusedGroup,
-  onToggleFocusGroup,
+  selectedDomains,
+  onChangeSelectedDomains,
   selectedTableId,
   highlightedColumn,
   onSelectTable,
@@ -135,9 +138,11 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
   darkMode,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
+  const filterMenuRef = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState({ x: 40, y: 40, zoom: 0.85 });
   const [snapGrid, setSnapGrid] = useState(true);
   const [showMinimap, setShowMinimap] = useState(true);
+  const [domainMenuOpen, setDomainMenuOpen] = useState(false);
   const [hoveredTableId, setHoveredTableId] = useState<string | null>(null);
   const [hoveredRefId, setHoveredRefId] = useState<string | null>(null);
   const [colorPickerPosKey, setColorPickerPosKey] = useState<string | null>(
@@ -205,6 +210,75 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     [schema, positions, detailLevel, fkColsByTable]
   );
 
+  const isFilteringDomains = selectedDomains.length > 0;
+  const selectedDomainSet = useMemo(
+    () => new Set(selectedDomains),
+    [selectedDomains]
+  );
+
+  const visibleGroupBoxes = useMemo(
+    () =>
+      isFilteringDomains
+        ? groupBoxes.filter((gb) => selectedDomainSet.has(gb.name))
+        : groupBoxes,
+    [groupBoxes, isFilteringDomains, selectedDomainSet]
+  );
+
+  const visibleInstances = useMemo(
+    () =>
+      isFilteringDomains
+        ? instances.filter(
+            (inst) =>
+              inst.groupName !== null && selectedDomainSet.has(inst.groupName)
+          )
+        : instances,
+    [instances, isFilteringDomains, selectedDomainSet]
+  );
+
+  const visibleTableIdSet = useMemo(
+    () => new Set(visibleInstances.map((inst) => inst.table.id)),
+    [visibleInstances]
+  );
+
+  const visibleEdges = useMemo(
+    () =>
+      isFilteringDomains
+        ? resolvedEdges.filter(
+            (edge) =>
+              edge.fromInst.groupName !== null &&
+              edge.toInst.groupName !== null &&
+              selectedDomainSet.has(edge.fromInst.groupName) &&
+              selectedDomainSet.has(edge.toInst.groupName)
+          )
+        : resolvedEdges,
+    [resolvedEdges, isFilteringDomains, selectedDomainSet]
+  );
+
+  const visibleStickyNotes = useMemo(
+    () =>
+      isFilteringDomains
+        ? stickyNotes.filter((note) => {
+            if (!note.linkedTarget?.startsWith('table:')) return true;
+            const tableId = note.linkedTarget.slice('table:'.length);
+            return visibleTableIdSet.has(tableId);
+          })
+        : stickyNotes,
+    [stickyNotes, isFilteringDomains, visibleTableIdSet]
+  );
+
+  useEffect(() => {
+    const onPointerDownOutside = (e: PointerEvent) => {
+      if (
+        filterMenuRef.current &&
+        !filterMenuRef.current.contains(e.target as Node)
+      ) {
+        setDomainMenuOpen(false);
+      }
+    };
+    window.addEventListener('pointerdown', onPointerDownOutside);
+    return () => window.removeEventListener('pointerdown', onPointerDownOutside);
+  }, []);
+
   const fitBounds = useCallback(
     (boxes: Array<{ x: number; y: number; width: number; height: number }>) => {
       const el = containerRef.current;
@@ -244,7 +318,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
   useEffect(() => {
     if (!focusRequest) return;
     if (focusRequest.type === 'fit') {
-      const boxes = instances.map((inst) => {
+      const boxes = visibleInstances.map((inst) => {
         const p = positions[inst.posKey] || positions[inst.table.id] || { x: 0, y: 0 };
         return {
           x: p.x,
@@ -260,7 +334,9 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
       });
       fitBounds(boxes);
     } else if (focusRequest.type === 'table' && focusRequest.id) {
-      const inst = instances.find((i) => i.table.id === focusRequest.id);
+      const inst =
+        visibleInstances.find((i) => i.table.id === focusRequest.id) ||
+        instances.find((i) => i.table.id === focusRequest.id);
       const el = containerRef.current;
       if (!inst || !el) return;
       const p = positions[inst.posKey] || positions[inst.table.id] || { x: 0, y: 0 };
@@ -429,11 +505,6 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
 
   const activeTableHighlight = hoveredTableId || selectedTableId;
 
-  const isInstanceDimmed = (groupName: string | null) => {
-    if (!focusedGroup) return false;
-    return groupName !== focusedGroup;
-  };
-
   const handleAddNoteAtCenter = () => {
     const el = containerRef.current;
     if (!el) return;
@@ -448,7 +519,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
-    for (const inst of instances) {
+    for (const inst of visibleInstances) {
       const p = positions[inst.posKey] || positions[inst.table.id] || { x: 0, y: 0 };
       const h = getTableHeight(
         inst.table,
@@ -468,7 +539,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
       width: Math.max(400, maxX - minX + 160),
       height: Math.max(300, maxY - minY + 160),
     };
-  }, [instances, positions, detailLevel, fkColsByTable]);
+  }, [visibleInstances, positions, detailLevel, fkColsByTable]);
 
   return (
     <div
@@ -503,11 +574,11 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         className="absolute inset-0 pointer-events-none"
       >
         {/* 1. TableGroup Domain Containers */}
-        {groupBoxes.map((gb) => {
+        {visibleGroupBoxes.map((gb) => {
           const groupObj = schema.tableGroups.find((g) => g.name === gb.name);
           const color = gb.color || '#2563EB';
-          const isIsolated = focusedGroup === gb.name;
-          const isDimmed = focusedGroup !== null && !isIsolated;
+          const isOnlySelected =
+            selectedDomains.length === 1 && selectedDomains[0] === gb.name;
           const isDropTarget = dropTargetGroupName === gb.name;
 
           return (
@@ -522,8 +593,8 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
                 backgroundColor: `${color}${darkMode ? '14' : '0d'}`,
               }}
               className={`absolute rounded-2xl border-2 border-dashed transition-opacity pointer-events-auto ${
-                isDimmed ? 'opacity-25' : 'opacity-100'
-              } ${isDropTarget ? 'ring-4 ring-blue-500/30 border-solid' : ''}`}
+                isDropTarget ? 'ring-4 ring-blue-500/30 border-solid' : ''
+              }`}
             >
               <div
                 onPointerDown={(e) => {
@@ -570,12 +641,16 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
                   <button
                     type="button"
                     onClick={() =>
-                      onToggleFocusGroup(isIsolated ? null : gb.name)
+                      onChangeSelectedDomains(isOnlySelected ? [] : [gb.name])
                     }
-                    title={isIsolated ? 'Show all domains' : 'Isolate domain'}
+                    title={
+                      isOnlySelected
+                        ? 'Show all domains'
+                        : 'Show only this domain'
+                    }
                     className="p-1 rounded-md text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-white/70 dark:hover:bg-slate-800/70"
                   >
-                    {isIsolated ? (
+                    {isOnlySelected ? (
                       <Eye className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
                     ) : (
                       <EyeOff className="w-3.5 h-3.5" />
@@ -615,7 +690,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
           className="overflow-visible pointer-events-none"
           style={{ position: 'absolute', left: 0, top: 0, width: 1, height: 1 }}
         >
-          {resolvedEdges.map((edge) => {
+          {visibleEdges.map((edge) => {
             const { ref: r, fromInst, toInst } = edge;
             const pA =
               positions[fromInst.posKey] ||
@@ -671,11 +746,6 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
               activeTableHighlight === r.fromTable ||
               activeTableHighlight === r.toTable;
 
-            const dimmedByGroup =
-              focusedGroup !== null &&
-              fromInst.groupName !== focusedGroup &&
-              toInst.groupName !== focusedGroup;
-
             const dimmedBySelection =
               activeTableHighlight !== null && !isHighlighted;
 
@@ -689,11 +759,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
               <g
                 key={edge.id}
                 style={{
-                  opacity: dimmedByGroup
-                    ? 0.12
-                    : dimmedBySelection
-                    ? 0.25
-                    : 1,
+                  opacity: dimmedBySelection ? 0.25 : 1,
                 }}
               >
                 <path
@@ -761,7 +827,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         </svg>
 
         {/* 3. Table Cards (including shared domain instances) */}
-        {instances.map((inst) => {
+        {visibleInstances.map((inst) => {
           const table = inst.table;
           const pos =
             positions[inst.posKey] || positions[table.id] || { x: 0, y: 0 };
@@ -771,7 +837,6 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
           const headerBg =
             table.headerColor || (darkMode ? '#1e293b' : '#0f172a');
           const headerText = getContrastTextColor(headerBg);
-          const dimmed = isInstanceDimmed(inst.groupName);
           const isShared = inst.sharedGroups.length > 1;
 
           const visibleCols =
@@ -816,7 +881,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
                   : isHovered
                   ? 'border-slate-400 dark:border-slate-500 z-10'
                   : 'border-slate-300 dark:border-slate-700'
-              } ${dimmed ? 'opacity-25' : 'opacity-100'}`}
+              }`}
             >
               {/* Table Header */}
               <div
@@ -987,7 +1052,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         })}
 
         {/* 4. Sticky Notes */}
-        {stickyNotes.map((note) => {
+        {visibleStickyNotes.map((note) => {
           const style = NOTE_STYLES[note.color] || NOTE_STYLES.amber;
           return (
             <div
@@ -1102,14 +1167,159 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         })}
       </div>
 
+      {/* Floating Domain Group Filter Bar */}
+      {schema.tableGroups.length > 0 && (
+        <div
+          ref={filterMenuRef}
+          onPointerDown={(e) => e.stopPropagation()}
+          className="absolute top-3 left-3 z-20 flex items-center gap-1 p-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xs shadow-sm"
+        >
+          <button
+            type="button"
+            onClick={() => {
+              onChangeSelectedDomains([]);
+              setDomainMenuOpen(false);
+            }}
+            className={`px-2.5 py-1 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
+              !isFilteringDomains
+                ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900'
+                : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            All Domains
+          </button>
+
+          <div className="relative">
+            <button
+              type="button"
+              onClick={() => setDomainMenuOpen((o) => !o)}
+              className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
+                isFilteringDomains
+                  ? 'bg-blue-600 text-white'
+                  : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+              }`}
+            >
+              <Filter className="w-3 h-3 shrink-0" />
+              <span className="max-w-[160px] truncate">
+                {selectedDomains.length === 0
+                  ? 'Only Selected'
+                  : selectedDomains.length === 1
+                  ? selectedDomains[0]
+                  : `${selectedDomains.length} Domains`}
+              </span>
+              <ChevronDown className="w-3 h-3 shrink-0 opacity-80" />
+            </button>
+
+            {domainMenuOpen && (
+              <div className="absolute left-0 top-full mt-1.5 w-64 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-xl overflow-hidden z-30">
+                <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-800 flex items-center justify-between text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                  <span>Domain Visibility</span>
+                  {isFilteringDomains && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onChangeSelectedDomains([]);
+                        setDomainMenuOpen(false);
+                      }}
+                      className="text-blue-600 dark:text-blue-400 hover:underline"
+                    >
+                      Show All
+                    </button>
+                  )}
+                </div>
+
+                <div className="max-h-64 overflow-y-auto p-1.5 space-y-0.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onChangeSelectedDomains([]);
+                      setDomainMenuOpen(false);
+                    }}
+                    className={`w-full px-2.5 py-1.5 rounded-lg text-left text-xs flex items-center justify-between transition-colors ${
+                      !isFilteringDomains
+                        ? 'bg-slate-100 dark:bg-slate-800 font-semibold text-slate-900 dark:text-slate-50'
+                        : 'text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                    }`}
+                  >
+                    <span>Show All Domains</span>
+                    {!isFilteringDomains && (
+                      <Check className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+                    )}
+                  </button>
+
+                  <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
+
+                  {schema.tableGroups.map((g) => {
+                    const checked = selectedDomainSet.has(g.name);
+                    return (
+                      <div
+                        key={g.name}
+                        className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs transition-colors ${
+                          checked
+                            ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-900 dark:text-blue-100 font-medium'
+                            : 'text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                        }`}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (checked) {
+                              onChangeSelectedDomains(
+                                selectedDomains.filter((d) => d !== g.name)
+                              );
+                            } else {
+                              onChangeSelectedDomains([
+                                ...selectedDomains,
+                                g.name,
+                              ]);
+                            }
+                          }}
+                          className="flex items-center gap-2 flex-1 min-w-0 text-left"
+                        >
+                          <span
+                            className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 ${
+                              checked
+                                ? 'bg-blue-600 border-blue-600 text-white'
+                                : 'border-slate-300 dark:border-slate-600'
+                            }`}
+                          >
+                            {checked && <Check className="w-2.5 h-2.5" />}
+                          </span>
+                          <span
+                            className="w-2.5 h-2.5 rounded-xs shrink-0"
+                            style={{ backgroundColor: g.color || '#2563EB' }}
+                          />
+                          <span className="truncate flex-1">{g.name}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            onChangeSelectedDomains([g.name]);
+                            setDomainMenuOpen(false);
+                          }}
+                          title={`Show only ${g.name}`}
+                          className="text-[10px] font-medium text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 px-1 py-0.5 rounded shrink-0"
+                        >
+                          Only
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Minimap Overlay */}
-      {showMinimap && instances.length > 0 && (
+      {showMinimap && visibleInstances.length > 0 && (
         <div className="absolute bottom-4 left-4 w-44 h-28 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/90 dark:bg-slate-900/90 backdrop-blur-xs p-1.5 shadow-sm pointer-events-none hidden sm:block">
           <svg
             viewBox={`${minimapBounds.minX} ${minimapBounds.minY} ${minimapBounds.width} ${minimapBounds.height}`}
             className="w-full h-full"
           >
-            {groupBoxes.map((gb) => (
+            {visibleGroupBoxes.map((gb) => (
               <rect
                 key={gb.name}
                 x={gb.x}
@@ -1124,7 +1334,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
                 strokeWidth={8}
               />
             ))}
-            {instances.map((inst) => {
+            {visibleInstances.map((inst) => {
               const p =
                 positions[inst.posKey] || positions[inst.table.id] || { x: 0, y: 0 };
               const h = getTableHeight(
@@ -1226,7 +1436,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         <button
           type="button"
           onClick={() => {
-            const boxes = instances.map((inst) => {
+            const boxes = visibleInstances.map((inst) => {
               const p =
                 positions[inst.posKey] || positions[inst.table.id] || { x: 0, y: 0 };
               return {

@@ -34,8 +34,8 @@ interface SidebarProps {
   schema: ParsedSchema;
   currentDbml: string;
   versions: SchemaVersion[];
-  focusedGroup: string | null;
-  onToggleFocusGroup: (groupName: string | null) => void;
+  selectedDomains: string[];
+  onChangeSelectedDomains: (domains: string[]) => void;
   selectedTableId: string | null;
   onSelectTable: (tableId: string) => void;
   onFocusGroupOnCanvas: (groupName: string) => void;
@@ -63,8 +63,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   schema,
   currentDbml,
   versions,
-  focusedGroup,
-  onToggleFocusGroup,
+  selectedDomains,
+  onChangeSelectedDomains,
   selectedTableId,
   onSelectTable,
   onFocusGroupOnCanvas,
@@ -223,18 +223,54 @@ export const Sidebar: React.FC<SidebarProps> = ({
               Drag tables to move · Hold Alt + drop to share in multiple domains
             </p>
 
-            {focusedGroup && (
-              <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 text-xs">
-                <span className="text-blue-800 dark:text-blue-200 truncate font-medium">
-                  Isolated: {focusedGroup}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => onToggleFocusGroup(null)}
-                  className="text-blue-600 dark:text-blue-300 hover:underline shrink-0 ml-2 font-medium"
-                >
-                  Show All
-                </button>
+            {schema.tableGroups.length > 0 && (
+              <div className="space-y-1.5">
+                <div className="grid grid-cols-2 gap-1 p-0.5 rounded-lg bg-slate-100 dark:bg-slate-800/80">
+                  <button
+                    type="button"
+                    onClick={() => onChangeSelectedDomains([])}
+                    className={`py-1 px-2 rounded-md text-[11px] font-medium transition-colors whitespace-nowrap ${
+                      selectedDomains.length === 0
+                        ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-50 shadow-xs'
+                        : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    Show All
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (selectedDomains.length === 0 && schema.tableGroups[0]) {
+                        onChangeSelectedDomains([schema.tableGroups[0].name]);
+                        onFocusGroupOnCanvas(schema.tableGroups[0].name);
+                      }
+                    }}
+                    className={`py-1 px-2 rounded-md text-[11px] font-medium transition-colors whitespace-nowrap ${
+                      selectedDomains.length > 0
+                        ? 'bg-blue-600 text-white shadow-xs'
+                        : 'text-slate-500 dark:text-slate-400 hover:text-slate-800 dark:hover:text-slate-200'
+                    }`}
+                  >
+                    {selectedDomains.length > 0
+                      ? `Selected (${selectedDomains.length})`
+                      : 'Selected Only'}
+                  </button>
+                </div>
+
+                {selectedDomains.length > 0 && (
+                  <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 text-xs">
+                    <span className="text-blue-800 dark:text-blue-200 truncate font-medium">
+                      {selectedDomains.join(', ')}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => onChangeSelectedDomains([])}
+                      className="text-blue-600 dark:text-blue-300 hover:underline shrink-0 ml-2 font-medium"
+                    >
+                      Show All
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -257,7 +293,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
               }
 
               const expanded = isGroupExpanded(group.name);
-              const isIsolated = focusedGroup === group.name;
+              const isFiltering = selectedDomains.length > 0;
+              const isDomainSelected = selectedDomains.includes(group.name);
+              const isDomainVisible = !isFiltering || isDomainSelected;
               const isDropTarget = dropHoverGroup === group.name;
 
               return (
@@ -305,11 +343,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                       setDraggedGroup(null);
                     }
                   }}
-                  className={`rounded-lg border transition-colors ${
+                  className={`rounded-lg border transition-all ${
                     isDropTarget
                       ? 'border-blue-500 bg-blue-50/50 dark:bg-blue-950/30'
+                      : isDomainSelected
+                      ? 'border-blue-400 dark:border-blue-600 bg-blue-50/30 dark:bg-blue-950/20'
                       : 'border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/30'
-                  }`}
+                  } ${!isDomainVisible ? 'opacity-55' : ''}`}
                 >
                   {/* Group Header */}
                   <div className="flex items-center gap-1.5 px-2 py-2">
@@ -344,21 +384,36 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     <div className="flex items-center gap-0.5 shrink-0">
                       <button
                         type="button"
-                        onClick={() =>
-                          onToggleFocusGroup(isIsolated ? null : group.name)
-                        }
+                        onClick={() => {
+                          if (!isFiltering) {
+                            onChangeSelectedDomains([group.name]);
+                            onFocusGroupOnCanvas(group.name);
+                          } else if (isDomainSelected) {
+                            onChangeSelectedDomains(
+                              selectedDomains.filter((d) => d !== group.name)
+                            );
+                          } else {
+                            onChangeSelectedDomains([
+                              ...selectedDomains,
+                              group.name,
+                            ]);
+                            onFocusGroupOnCanvas(group.name);
+                          }
+                        }}
                         title={
-                          isIsolated
-                            ? 'Show all domains'
-                            : 'Isolate this business domain'
+                          !isFiltering
+                            ? 'Show only this domain'
+                            : isDomainSelected
+                            ? 'Hide from selected domains'
+                            : 'Include in selected domains'
                         }
                         className={`p-1 rounded hover:bg-slate-200/70 dark:hover:bg-slate-700/70 ${
-                          isIsolated
+                          isDomainSelected
                             ? 'text-blue-600 dark:text-blue-400'
                             : 'text-slate-400'
                         }`}
                       >
-                        {isIsolated ? (
+                        {isDomainVisible ? (
                           <Eye className="w-3 h-3" />
                         ) : (
                           <EyeOff className="w-3 h-3" />

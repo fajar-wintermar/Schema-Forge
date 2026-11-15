@@ -1,5 +1,13 @@
 import React, { useEffect, useMemo, useRef } from 'react';
-import { AlertCircle, CheckCircle2, Code2, Plus } from 'lucide-react';
+import {
+  AlertCircle,
+  CheckCircle2,
+  Code2,
+  Maximize2,
+  Minimize2,
+  PanelLeftClose,
+  Plus,
+} from 'lucide-react';
 import { ParseError } from '../types/schema';
 
 interface DbmlEditorProps {
@@ -8,6 +16,9 @@ interface DbmlEditorProps {
   errors: ParseError[];
   scrollToLine?: number | null;
   enumNames?: string[];
+  isMaximized?: boolean;
+  onToggleMaximize?: () => void;
+  onMinimize?: () => void;
 }
 
 const SNIPPETS = [
@@ -345,6 +356,9 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
   errors,
   scrollToLine,
   enumNames = [],
+  isMaximized = false,
+  onToggleMaximize,
+  onMinimize,
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const highlightRef = useRef<HTMLPreElement>(null);
@@ -423,6 +437,38 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
               <span>{s.label.replace('+ ', '')}</span>
             </button>
           ))}
+
+          {(onToggleMaximize || onMinimize) && (
+            <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-1" />
+          )}
+
+          {onToggleMaximize && (
+            <button
+              type="button"
+              onClick={onToggleMaximize}
+              title={isMaximized ? 'Restore split view' : 'Maximize editor'}
+              aria-label={isMaximized ? 'Restore split view' : 'Maximize editor'}
+              className="p-1.5 rounded text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/70 dark:hover:bg-slate-800 transition-colors"
+            >
+              {isMaximized ? (
+                <Minimize2 className="w-3.5 h-3.5" />
+              ) : (
+                <Maximize2 className="w-3.5 h-3.5" />
+              )}
+            </button>
+          )}
+
+          {onMinimize && (
+            <button
+              type="button"
+              onClick={onMinimize}
+              title="Minimize editor"
+              aria-label="Minimize editor"
+              className="p-1.5 rounded text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/70 dark:hover:bg-slate-800 transition-colors"
+            >
+              <PanelLeftClose className="w-3.5 h-3.5" />
+            </button>
+          )}
         </div>
       </div>
 

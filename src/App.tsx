@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Maximize2, PanelLeftOpen } from 'lucide-react';
 import { DbmlEditor } from './components/DbmlEditor';
 import { DiagramCanvas } from './components/DiagramCanvas';
 import { DocsView } from './components/DocsView';
@@ -59,7 +60,10 @@ export default function App() {
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('domains');
   const [viewMode, setViewMode] = useState<ViewMode>('split');
   const [editorWidth, setEditorWidth] = useState(410);
-  const [focusedGroup, setFocusedGroup] = useState<string | null>(null);
+  const [editorState, setEditorState] = useState<
+    'normal' | 'maximized' | 'minimized'
+  >('normal');
+  const [selectedDomains, setSelectedDomains] = useState<string[]>([]);
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [highlightedColumn, setHighlightedColumn] = useState<{
     tableId: string;
@@ -161,6 +165,12 @@ export default function App() {
     () => parseDbml(activeWorkspace?.dbml || ''),
     [activeWorkspace?.dbml]
   );
+
+  const effectiveSelectedDomains = useMemo(() => {
+    if (selectedDomains.length === 0) return [];
+    const existing = new Set(parsedSchema.tableGroups.map((g) => g.name));
+    return selectedDomains.filter((d) => existing.has(d));
+  }, [selectedDomains, parsedSchema.tableGroups]);
 
   // Ensure any newly typed tables or shared multi-domain instances get non-overlapping coordinates
   useEffect(() => {
@@ -397,7 +407,7 @@ export default function App() {
 
   const handleDeleteGroup = (groupName: string) => {
     const nextDbml = deleteTableGroupInDbml(activeWorkspace.dbml, groupName);
-    if (focusedGroup === groupName) setFocusedGroup(null);
+    setSelectedDomains((prev) => prev.filter((d) => d !== groupName));
     updateActiveWorkspace((ws) => ({ ...ws, dbml: nextDbml }));
     showToast(`Removed domain grouping "${groupName}"`);
   };
@@ -520,7 +530,7 @@ export default function App() {
   const handleSelectWorkspace = (id: string) => {
     setActiveId(id);
     setSelectedTableId(null);
-    setFocusedGroup(null);
+    setSelectedDomains([]);
     setMetaValue('activeWorkspaceId', id);
     setFocusRequest({ type: 'fit', nonce: Date.now() });
   };
@@ -591,25 +601,43 @@ export default function App() {
     return `v${m[1]}.${Number(m[2]) + 1}.0`;
   })();
 
+  const handleChangeViewMode = (mode: ViewMode) => {
+    setViewMode(mode);
+    if (mode === 'split' && editorState !== 'normal') {
+      setEditorState('normal');
+    }
+  };
+
+  const handleChangeSelectedDomains = (domains: string[]) => {
+    setSelectedDomains(domains);
+    setFocusRequest({
+      type: domains.length === 1 ? 'group' : 'fit',
+      id: domains.length === 1 ? domains[0] : undefined,
+      nonce: Date.now(),
+    });
+  };
+
   const handleSelectSearchResult = (res: GlobalSearchResult) => {
     if (res.kind === 'group' && res.groupName) {
       setHighlightedColumn(null);
       setSelectedTableId(null);
       if (viewMode === 'docs') setViewMode('split');
-      setFocusedGroup(res.groupName);
+      if (editorState === 'maximized') setEditorState('normal');
+      setSelectedDomains([res.groupName]);
       if (res.line) setScrollToLine(res.line);
       setFocusRequest({ type: 'group', id: res.groupName, nonce: Date.now() });
-      showToast(`Focused domain "${res.groupName}"`);
+      showToast(`Showing domain "${res.groupName}"`);
       return;
     }
 
     if (res.tableId) {
       if (viewMode === 'docs') setViewMode('split');
+      if (editorState === 'maximized') setEditorState('normal');
       if (
-        focusedGroup &&
-        !res.domains.includes(focusedGroup)
+        effectiveSelectedDomains.length > 0 &&
+        !res.domains.some((d) => effectiveSelectedDomains.includes(d))
       ) {
-        setFocusedGroup(null);
+        setSelectedDomains([]);
       }
       setSelectedTableId(res.tableId);
 
@@ -644,7 +672,7 @@ export default function App() {
         sidebarOpen={sidebarOpen}
         onToggleSidebar={() => setSidebarOpen((o) => !o)}
         viewMode={viewMode}
-        onChangeViewMode={setViewMode}
+        onChangeViewMode={handleChangeViewMode}
         detailLevel={activeWorkspace.detailLevel}
         onChangeDetailLevel={handleDetailLevelChange}
         onAutoLayout={handleAutoLayout}
@@ -664,7 +692,7 @@ export default function App() {
             <button
               key={m}
               type="button"
-              onClick={() => setViewMode(m)}
+              onClick={() => handleChangeViewMode(m)}
               className={`px-2.5 py-1 rounded capitalize font-medium ${
                 viewMode === m
                   ? 'bg-blue-600 text-white'
@@ -709,13 +737,8 @@ export default function App() {
             schema={parsedSchema}
             currentDbml={activeWorkspace.dbml}
             versions={activeWorkspace.versions}
-            focusedGroup={focusedGroup}
-            onToggleFocusGroup={(g) => {
-              setFocusedGroup(g);
-              if (g) {
-                setFocusRequest({ type: 'group', id: g, nonce: Date.now() });
-              }
-            }}
+            selectedDomains={effectiveSelectedDomains}
+            onChangeSelectedDomains={handleChangeSelectedDomains}
             selectedTableId={selectedTableId}
             onSelectTable={(id) => {
               setSelectedTableId(id);
@@ -750,16 +773,70 @@ export default function App() {
             <DocsView
               schema={parsedSchema}
               detailLevel={activeWorkspace.detailLevel}
-              focusedGroup={focusedGroup}
+              selectedDomains={effectiveSelectedDomains}
+              onClearDomainFilter={() => setSelectedDomains([])}
               onSelectTable={(id) => {
                 setSelectedTableId(id);
                 setViewMode('split');
                 setFocusRequest({ type: 'table', id, nonce: Date.now() });
               }}
             />
+          ) : viewMode === 'split' && editorState === 'maximized' ? (
+            <div className="flex-1 h-full min-w-0">
+              <DbmlEditor
+                value={activeWorkspace.dbml}
+                onChange={handleDbmlChange}
+                errors={parsedSchema.errors}
+                scrollToLine={scrollToLine}
+                enumNames={parsedSchema.enums.map((e) => e.name)}
+                isMaximized={true}
+                onToggleMaximize={() => setEditorState('normal')}
+                onMinimize={() => setEditorState('minimized')}
+              />
+            </div>
           ) : (
             <>
-              {viewMode === 'split' && (
+              {viewMode === 'split' && editorState === 'minimized' && (
+                <div className="w-10 shrink-0 h-full border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hidden md:flex flex-col items-center py-2.5 gap-2 select-none">
+                  <button
+                    type="button"
+                    onClick={() => setEditorState('normal')}
+                    title="Restore DBML editor"
+                    aria-label="Restore DBML editor"
+                    className="p-1.5 rounded-md text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                  >
+                    <PanelLeftOpen className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setEditorState('maximized')}
+                    title="Maximize DBML editor"
+                    aria-label="Maximize DBML editor"
+                    className="p-1.5 rounded-md text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                  >
+                    <Maximize2 className="w-3.5 h-3.5" />
+                  </button>
+                  <div className="w-4 h-px bg-slate-200 dark:bg-slate-800 my-0.5" />
+                  <button
+                    type="button"
+                    onClick={() => setEditorState('normal')}
+                    title="Click to expand DBML editor"
+                    className="flex-1 flex items-center justify-center text-[11px] font-mono font-medium tracking-widest text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 [writing-mode:vertical-rl] rotate-180"
+                  >
+                    schema.dbml
+                  </button>
+                  {parsedSchema.errors.length > 0 && (
+                    <span
+                      title={`${parsedSchema.errors.length} syntax issue(s)`}
+                      className="text-[10px] font-mono font-semibold text-rose-600 dark:text-rose-400 tabular-nums"
+                    >
+                      {parsedSchema.errors.length}
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {viewMode === 'split' && editorState === 'normal' && (
                 <>
                   <div
                     style={{ width: editorWidth }}
@@ -771,6 +848,9 @@ export default function App() {
                       errors={parsedSchema.errors}
                       scrollToLine={scrollToLine}
                       enumNames={parsedSchema.enums.map((e) => e.name)}
+                      isMaximized={false}
+                      onToggleMaximize={() => setEditorState('maximized')}
+                      onMinimize={() => setEditorState('minimized')}
                     />
                   </div>
                   <div
@@ -791,8 +871,8 @@ export default function App() {
                   }))
                 }
                 detailLevel={activeWorkspace.detailLevel}
-                focusedGroup={focusedGroup}
-                onToggleFocusGroup={setFocusedGroup}
+                selectedDomains={effectiveSelectedDomains}
+                onChangeSelectedDomains={handleChangeSelectedDomains}
                 selectedTableId={selectedTableId}
                 highlightedColumn={highlightedColumn}
                 onSelectTable={(id) => {
@@ -825,31 +905,34 @@ export default function App() {
         </main>
 
         {/* Contextual Table Inspector */}
-        {selectedTable && viewMode !== 'docs' && (
-          <InspectorDrawer
-            table={selectedTable}
-            schema={parsedSchema}
-            onClose={() => setSelectedTableId(null)}
-            onSelectTable={(id) => {
-              setSelectedTableId(id);
-              setFocusRequest({ type: 'table', id, nonce: Date.now() });
-            }}
-            onSetTableGroups={handleSetTableGroups}
-            onChangeTableHeaderColor={handleChangeTableHeaderColor}
-            onJumpToCode={(line) => {
-              if (viewMode === 'diagram') setViewMode('split');
-              if (line) setScrollToLine(line);
-            }}
-            onAddLinkedStickyNote={(tId) => {
-              const pos = activeWorkspace.tablePositions[tId] || {
-                x: 200,
-                y: 200,
-              };
-              handleAddStickyNote(pos.x + 296, pos.y, `table:${tId}`);
-              showToast(`Attached sticky note to ${tId}`);
-            }}
-          />
-        )}
+        {selectedTable &&
+          viewMode !== 'docs' &&
+          !(viewMode === 'split' && editorState === 'maximized') && (
+            <InspectorDrawer
+              table={selectedTable}
+              schema={parsedSchema}
+              onClose={() => setSelectedTableId(null)}
+              onSelectTable={(id) => {
+                setSelectedTableId(id);
+                setFocusRequest({ type: 'table', id, nonce: Date.now() });
+              }}
+              onSetTableGroups={handleSetTableGroups}
+              onChangeTableHeaderColor={handleChangeTableHeaderColor}
+              onJumpToCode={(line) => {
+                if (viewMode !== 'split') setViewMode('split');
+                if (editorState === 'minimized') setEditorState('normal');
+                if (line) setScrollToLine(line);
+              }}
+              onAddLinkedStickyNote={(tId) => {
+                const pos = activeWorkspace.tablePositions[tId] || {
+                  x: 200,
+                  y: 200,
+                };
+                handleAddStickyNote(pos.x + 296, pos.y, `table:${tId}`);
+                showToast(`Attached sticky note to ${tId}`);
+              }}
+            />
+          )}
       </div>
 
       {/* Toast Notification */}
