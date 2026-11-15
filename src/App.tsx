@@ -1,0 +1,794 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { DbmlEditor } from './components/DbmlEditor';
+import { DiagramCanvas } from './components/DiagramCanvas';
+import { DocsView } from './components/DocsView';
+import { InspectorDrawer } from './components/InspectorDrawer';
+import {
+  ImportExportModal,
+  SaveVersionModal,
+  TableGroupModal,
+  WorkspacesModal,
+} from './components/Modals';
+import { Sidebar, SidebarTab } from './components/Sidebar';
+import { TopBar } from './components/TopBar';
+import {
+  deleteWorkspace,
+  getMetaValue,
+  loadAllWorkspaces,
+  saveWorkspace,
+  setMetaValue,
+} from './db/localDb';
+import {
+  DetailLevel,
+  SchemaVersion,
+  StickyNote,
+  TableGroupDef,
+  TablePosition,
+  ViewMode,
+  WorkspaceProject,
+} from './types/schema';
+import { autoLayoutSingleGroup, computeAutoLayout } from './utils/autoLayout';
+import {
+  deleteTableGroupInDbml,
+  moveTableToGroupInDbml,
+  parseDbml,
+  reorderTableGroupsInDbml,
+  setTableHeaderColorInDbml,
+  upsertTableGroupInDbml,
+} from './utils/dbmlParser';
+import {
+  createInitialWorkspace,
+  createSaaSTelemetryWorkspace,
+} from './utils/sampleSchemas';
+
+export default function App() {
+  const [workspaces, setWorkspaces] = useState<WorkspaceProject[]>([]);
+  const [activeId, setActiveId] = useState<string>('');
+  const [loading, setLoading] = useState(true);
+  const [darkMode, setDarkMode] = useState(false);
+
+  // UI state
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarTab, setSidebarTab] = useState<SidebarTab>('domains');
+  const [viewMode, setViewMode] = useState<ViewMode>('split');
+  const [editorWidth, setEditorWidth] = useState(410);
+  const [focusedGroup, setFocusedGroup] = useState<string | null>(null);
+  const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
+  const [scrollToLine, setScrollToLine] = useState<number | null>(null);
+  const [focusRequest, setFocusRequest] = useState<{
+    type: 'table' | 'group' | 'fit';
+    id?: string;
+    nonce: number;
+  } | null>(null);
+
+  // Modals
+  const [groupModalState, setGroupModalState] = useState<{
+    open: boolean;
+    group: TableGroupDef | null;
+  }>({ open: false, group: null });
+  const [saveVersionOpen, setSaveVersionOpen] = useState(false);
+  const [importExportOpen, setImportExportOpen] = useState(false);
+  const [workspacesModalOpen, setWorkspacesModalOpen] = useState(false);
+
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimerRef = useRef<number | null>(null);
+
+  const showToast = useCallback((msg: string) => {
+    setToast(msg);
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => setToast(null), 2600);
+  }, []);
+
+  // Load initial workspaces & theme from IndexedDB
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const savedTheme = await getMetaValue<boolean>('darkMode');
+      if (mounted && typeof savedTheme === 'boolean') {
+        setDarkMode(savedTheme);
+      }
+
+      let list = await loadAllWorkspaces();
+      if (list.length === 0) {
+        const seed = createInitialWorkspace();
+        await saveWorkspace(seed);
+        list = [seed];
+      }
+
+      const lastActive = await getMetaValue<string>('activeWorkspaceId');
+      const target =
+        list.find((w) => w.id === lastActive)?.id || list[0].id;
+
+      if (mounted) {
+        setWorkspaces(list);
+        setActiveId(target);
+        setLoading(false);
+        setFocusRequest({ type: 'fit', nonce: Date.now() });
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  // Apply dark mode class on <html>
+  useEffect(() => {
+    const root = document.documentElement;
+    if (darkMode) root.classList.add('dark');
+    else root.classList.remove('dark');
+    setMetaValue('darkMode', darkMode);
+  }, [darkMode]);
+
+  const activeWorkspace = useMemo(
+    () => workspaces.find((w) => w.id === activeId) || workspaces[0] || null,
+    [workspaces, activeId]
+  );
+
+  // Debounced persist to IndexedDB
+  const saveTimerRef = useRef<number | null>(null);
+  const updateActiveWorkspace = useCallback(
+    (updater: (prev: WorkspaceProject) => WorkspaceProject) => {
+      setWorkspaces((prevList) =>
+        prevList.map((ws) => {
+          if (ws.id !== activeId) return ws;
+          const next = {
+            ...updater(ws),
+            updatedAt: new Date().toISOString(),
+          };
+          if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+          saveTimerRef.current = window.setTimeout(() => {
+            saveWorkspace(next);
+          }, 250);
+          return next;
+        })
+      );
+    },
+    [activeId]
+  );
+
+  const parsedSchema = useMemo(
+    () => parseDbml(activeWorkspace?.dbml || ''),
+    [activeWorkspace?.dbml]
+  );
+
+  // Ensure any newly typed tables in DBML get non-overlapping default coordinates
+  useEffect(() => {
+    if (!activeWorkspace) return;
+    const missing = parsedSchema.tables.filter(
+      (t) => !activeWorkspace.tablePositions[t.id]
+    );
+    if (missing.length === 0) return;
+
+    const existingCoords = Object.values(activeWorkspace.tablePositions);
+    let maxY = 80;
+    let baseX = 80;
+    for (const p of existingCoords) {
+      maxY = Math.max(maxY, p.y + 220);
+      baseX = Math.min(baseX, p.x);
+    }
+
+    const patch: Record<string, TablePosition> = {};
+    missing.forEach((t, idx) => {
+      patch[t.id] = {
+        x: baseX + (idx % 3) * 320,
+        y: maxY + Math.floor(idx / 3) * 260,
+      };
+    });
+
+    updateActiveWorkspace((ws) => ({
+      ...ws,
+      tablePositions: { ...ws.tablePositions, ...patch },
+    }));
+  }, [parsedSchema.tables, activeWorkspace, updateActiveWorkspace]);
+
+  // Resizable split divider handler
+  const startSplitResize = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const origWidth = editorWidth;
+    const onMove = (ev: MouseEvent) => {
+      const next = Math.min(720, Math.max(260, origWidth + (ev.clientX - startX)));
+      setEditorWidth(next);
+    };
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove);
+      window.removeEventListener('mouseup', onUp);
+    };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+  };
+
+  if (loading || !activeWorkspace) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 text-sm text-slate-500">
+        Loading SchemaForge workspace...
+      </div>
+    );
+  }
+
+  // Handlers
+  const handleDbmlChange = (nextDbml: string) => {
+    updateActiveWorkspace((ws) => ({ ...ws, dbml: nextDbml }));
+  };
+
+  const handleDetailLevelChange = (level: DetailLevel) => {
+    updateActiveWorkspace((ws) => ({ ...ws, detailLevel: level }));
+  };
+
+  const handleAutoLayout = () => {
+    const nextPositions = computeAutoLayout(
+      parsedSchema,
+      activeWorkspace.detailLevel
+    );
+    updateActiveWorkspace((ws) => ({
+      ...ws,
+      tablePositions: nextPositions,
+    }));
+    setFocusRequest({ type: 'fit', nonce: Date.now() });
+    showToast('Auto-arranged business domains to minimize edge crossings');
+  };
+
+  const handleAutoLayoutGroup = (groupName: string) => {
+    const nextPositions = autoLayoutSingleGroup(
+      groupName,
+      parsedSchema,
+      activeWorkspace.tablePositions,
+      activeWorkspace.detailLevel
+    );
+    updateActiveWorkspace((ws) => ({
+      ...ws,
+      tablePositions: nextPositions,
+    }));
+    showToast(`Re-arranged tables in "${groupName}"`);
+  };
+
+  const handleChangeTableHeaderColor = (
+    tableId: string,
+    color: string | null
+  ) => {
+    const nextDbml = setTableHeaderColorInDbml(
+      activeWorkspace.dbml,
+      tableId,
+      color
+    );
+    updateActiveWorkspace((ws) => ({ ...ws, dbml: nextDbml }));
+  };
+
+  const handleMoveTableToGroup = (
+    tableId: string,
+    targetGroup: string | null
+  ) => {
+    const nextDbml = moveTableToGroupInDbml(
+      activeWorkspace.dbml,
+      tableId,
+      targetGroup,
+      parsedSchema
+    );
+    updateActiveWorkspace((ws) => ({ ...ws, dbml: nextDbml }));
+    showToast(
+      targetGroup
+        ? `Assigned ${tableId} to "${targetGroup}"`
+        : `Moved ${tableId} to Ungrouped`
+    );
+  };
+
+  const handleReorderGroups = (orderedNames: string[]) => {
+    const nextDbml = reorderTableGroupsInDbml(
+      activeWorkspace.dbml,
+      orderedNames,
+      parsedSchema
+    );
+    updateActiveWorkspace((ws) => ({ ...ws, dbml: nextDbml }));
+  };
+
+  const handleReorderTableInGroup = (
+    groupName: string,
+    orderedTables: string[]
+  ) => {
+    const g = parsedSchema.tableGroups.find((gr) => gr.name === groupName);
+    if (!g) return;
+    const nextDbml = upsertTableGroupInDbml(
+      activeWorkspace.dbml,
+      g.name,
+      orderedTables,
+      g.color,
+      g.note
+    );
+    updateActiveWorkspace((ws) => ({ ...ws, dbml: nextDbml }));
+  };
+
+  const handleSaveGroupModal = (data: {
+    name: string;
+    color: string;
+    note: string;
+    tables: string[];
+    oldName?: string;
+  }) => {
+    let nextDbml = activeWorkspace.dbml;
+    // Remove selected tables from any other group first so membership stays clean
+    const selectedSet = new Set(data.tables);
+    for (const existing of parsedSchema.tableGroups) {
+      if (existing.name === (data.oldName || data.name)) continue;
+      const filtered = existing.tables.filter((t) => !selectedSet.has(t));
+      if (filtered.length !== existing.tables.length) {
+        nextDbml = upsertTableGroupInDbml(
+          nextDbml,
+          existing.name,
+          filtered,
+          existing.color,
+          existing.note
+        );
+      }
+    }
+    nextDbml = upsertTableGroupInDbml(
+      nextDbml,
+      data.name,
+      data.tables,
+      data.color,
+      data.note,
+      data.oldName
+    );
+    updateActiveWorkspace((ws) => ({ ...ws, dbml: nextDbml }));
+    setGroupModalState({ open: false, group: null });
+    showToast(
+      data.oldName
+        ? `Updated domain "${data.name}"`
+        : `Created domain "${data.name}"`
+    );
+  };
+
+  const handleDeleteGroup = (groupName: string) => {
+    const nextDbml = deleteTableGroupInDbml(activeWorkspace.dbml, groupName);
+    if (focusedGroup === groupName) setFocusedGroup(null);
+    updateActiveWorkspace((ws) => ({ ...ws, dbml: nextDbml }));
+    showToast(`Removed domain grouping "${groupName}"`);
+  };
+
+  const handleAddStickyNote = (x: number, y: number, linkedTarget?: string) => {
+    const note: StickyNote = {
+      id: `note_${Date.now()}`,
+      x,
+      y,
+      width: 240,
+      color: 'amber',
+      title: linkedTarget ? `Note: ${linkedTarget.replace('table:', '')}` : 'Architecture Note',
+      content: '',
+      author: 'Team',
+      updatedAt: new Date().toISOString(),
+      linkedTarget,
+    };
+    updateActiveWorkspace((ws) => ({
+      ...ws,
+      stickyNotes: [...ws.stickyNotes, note],
+    }));
+  };
+
+  const handleUpdateStickyNote = (id: string, patch: Partial<StickyNote>) => {
+    updateActiveWorkspace((ws) => ({
+      ...ws,
+      stickyNotes: ws.stickyNotes.map((n) =>
+        n.id === id ? { ...n, ...patch } : n
+      ),
+    }));
+  };
+
+  const handleDeleteStickyNote = (id: string) => {
+    updateActiveWorkspace((ws) => ({
+      ...ws,
+      stickyNotes: ws.stickyNotes.filter((n) => n.id !== id),
+    }));
+  };
+
+  const handleSaveVersion = (data: {
+    tag: string;
+    title: string;
+    description: string;
+    isPublished: boolean;
+  }) => {
+    const newVer: SchemaVersion = {
+      id: `ver_${Date.now()}`,
+      tag: data.tag,
+      title: data.title,
+      description: data.description,
+      dbml: activeWorkspace.dbml,
+      tablePositions: activeWorkspace.tablePositions,
+      stickyNotes: activeWorkspace.stickyNotes,
+      createdAt: new Date().toISOString(),
+      isPublished: data.isPublished,
+    };
+    updateActiveWorkspace((ws) => ({
+      ...ws,
+      versions: [newVer, ...ws.versions],
+    }));
+    setSaveVersionOpen(false);
+    setSidebarTab('versions');
+    setSidebarOpen(true);
+    showToast(`Saved snapshot ${data.tag}`);
+  };
+
+  const handleRestoreVersion = (ver: SchemaVersion) => {
+    // Save automatic backup checkpoint before reverting
+    const backup: SchemaVersion = {
+      id: `ver_backup_${Date.now()}`,
+      tag: `backup-${new Date().toLocaleTimeString([], {
+        hour: '2-digit',
+        minute: '2-digit',
+      })}`,
+      title: `Pre-revert checkpoint (before ${ver.tag})`,
+      description: 'Automatic snapshot created before reverting schema.',
+      dbml: activeWorkspace.dbml,
+      tablePositions: activeWorkspace.tablePositions,
+      stickyNotes: activeWorkspace.stickyNotes,
+      createdAt: new Date().toISOString(),
+      isPublished: false,
+    };
+    updateActiveWorkspace((ws) => ({
+      ...ws,
+      dbml: ver.dbml,
+      tablePositions:
+        Object.keys(ver.tablePositions).length > 0
+          ? ver.tablePositions
+          : computeAutoLayout(parseDbml(ver.dbml), ws.detailLevel),
+      stickyNotes: ver.stickyNotes || ws.stickyNotes,
+      versions: [backup, ...ws.versions],
+    }));
+    setFocusRequest({ type: 'fit', nonce: Date.now() });
+    showToast(`Reverted schema to ${ver.tag}`);
+  };
+
+  const handleTogglePublishVersion = (versionId: string) => {
+    updateActiveWorkspace((ws) => ({
+      ...ws,
+      versions: ws.versions.map((v) =>
+        v.id === versionId ? { ...v, isPublished: !v.isPublished } : v
+      ),
+    }));
+  };
+
+  const handleImportDbml = (nextDbml: string) => {
+    const nextParsed = parseDbml(nextDbml);
+    const nextPos = computeAutoLayout(nextParsed, activeWorkspace.detailLevel);
+    updateActiveWorkspace((ws) => ({
+      ...ws,
+      dbml: nextDbml,
+      tablePositions: nextPos,
+    }));
+    setFocusRequest({ type: 'fit', nonce: Date.now() });
+    showToast(
+      `Imported ${nextParsed.tables.length} tables and ${nextParsed.refs.length} relationships`
+    );
+  };
+
+  const handleSelectWorkspace = (id: string) => {
+    setActiveId(id);
+    setSelectedTableId(null);
+    setFocusedGroup(null);
+    setMetaValue('activeWorkspaceId', id);
+    setFocusRequest({ type: 'fit', nonce: Date.now() });
+  };
+
+  const handleCreateBlankWorkspace = async (name: string) => {
+    const starterDbml = `Project ${name.replace(/[^a-zA-Z0-9_]/g, '') || 'Schema'} {\n  database_type: 'PostgreSQL'\n}\n\nTable users [headercolor: #1e3a8a] {\n  id uuid [pk, not null]\n  email varchar(255) [unique, not null]\n  created_at timestamptz [default: \`now()\`]\n}\n\nTableGroup "Core Domain" [color: #2563EB] {\n  Note: 'Primary application entities'\n  users\n}\n`;
+    const parsed = parseDbml(starterDbml);
+    const ws: WorkspaceProject = {
+      id: `ws_${Date.now()}`,
+      name,
+      description: 'Custom database schema workspace',
+      dbml: starterDbml,
+      tablePositions: computeAutoLayout(parsed, 'full'),
+      groupMeta: {},
+      stickyNotes: [],
+      detailLevel: 'full',
+      versions: [
+        {
+          id: `ver_${Date.now()}`,
+          tag: 'v1.0.0',
+          title: 'Initial Schema',
+          description: 'Workspace initialized',
+          dbml: starterDbml,
+          tablePositions: computeAutoLayout(parsed, 'full'),
+          stickyNotes: [],
+          createdAt: new Date().toISOString(),
+          isPublished: true,
+        },
+      ],
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    await saveWorkspace(ws);
+    setWorkspaces((prev) => [ws, ...prev]);
+    handleSelectWorkspace(ws.id);
+    setWorkspacesModalOpen(false);
+    showToast(`Created workspace "${name}"`);
+  };
+
+  const handleLoadSampleTelemetry = async () => {
+    const ws = createSaaSTelemetryWorkspace();
+    await saveWorkspace(ws);
+    setWorkspaces((prev) => [ws, ...prev]);
+    handleSelectWorkspace(ws.id);
+    setWorkspacesModalOpen(false);
+    showToast('Loaded Multi-Tenant SaaS Telemetry template');
+  };
+
+  const handleDeleteWorkspace = async (id: string) => {
+    await deleteWorkspace(id);
+    setWorkspaces((prev) => {
+      const next = prev.filter((w) => w.id !== id);
+      if (id === activeId && next.length > 0) {
+        setActiveId(next[0].id);
+        setMetaValue('activeWorkspaceId', next[0].id);
+      }
+      return next;
+    });
+  };
+
+  const selectedTable =
+    parsedSchema.tables.find((t) => t.id === selectedTableId) || null;
+
+  const suggestedVersionTag = (() => {
+    const latest = activeWorkspace.versions[0]?.tag;
+    const m = latest?.match(/^v(\d+)\.(\d+)\.(\d+)$/);
+    if (!m) return 'v1.2.0';
+    return `v${m[1]}.${Number(m[2]) + 1}.0`;
+  })();
+
+  return (
+    <div className="h-screen w-screen flex flex-col overflow-hidden bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
+      <TopBar
+        projectName={activeWorkspace.name}
+        sidebarOpen={sidebarOpen}
+        onToggleSidebar={() => setSidebarOpen((o) => !o)}
+        viewMode={viewMode}
+        onChangeViewMode={setViewMode}
+        detailLevel={activeWorkspace.detailLevel}
+        onChangeDetailLevel={handleDetailLevelChange}
+        onAutoLayout={handleAutoLayout}
+        onOpenWorkspaces={() => setWorkspacesModalOpen(true)}
+        onOpenImportExport={() => setImportExportOpen(true)}
+        onOpenSaveVersion={() => setSaveVersionOpen(true)}
+        darkMode={darkMode}
+        onToggleDarkMode={() => setDarkMode((d) => !d)}
+        errorCount={parsedSchema.errors.length}
+      />
+
+      {/* Compact responsive toolbar for narrow viewports */}
+      <div className="flex lg:hidden items-center justify-between gap-2 px-3 py-1.5 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs overflow-x-auto">
+        <div className="flex items-center gap-1">
+          {(['split', 'diagram', 'docs'] as ViewMode[]).map((m) => (
+            <button
+              key={m}
+              type="button"
+              onClick={() => setViewMode(m)}
+              className={`px-2.5 py-1 rounded capitalize font-medium ${
+                viewMode === m
+                  ? 'bg-blue-600 text-white'
+                  : 'text-slate-600 dark:text-slate-300'
+              }`}
+            >
+              {m}
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-1">
+          {(['full', 'columns', 'keys', 'names'] as DetailLevel[]).map((l) => (
+            <button
+              key={l}
+              type="button"
+              onClick={() => handleDetailLevelChange(l)}
+              className={`px-2 py-1 rounded capitalize font-medium ${
+                activeWorkspace.detailLevel === l
+                  ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900'
+                  : 'text-slate-500 dark:text-slate-400'
+              }`}
+            >
+              {l}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={handleAutoLayout}
+            className="px-2 py-1 rounded border border-slate-200 dark:border-slate-700 font-medium"
+          >
+            Layout
+          </button>
+        </div>
+      </div>
+
+      {/* Main Workspace Area */}
+      <div className="flex-1 flex min-h-0 overflow-hidden">
+        {sidebarOpen && (
+          <Sidebar
+            activeTab={sidebarTab}
+            onChangeTab={setSidebarTab}
+            schema={parsedSchema}
+            currentDbml={activeWorkspace.dbml}
+            versions={activeWorkspace.versions}
+            focusedGroup={focusedGroup}
+            onToggleFocusGroup={(g) => {
+              setFocusedGroup(g);
+              if (g) {
+                setFocusRequest({ type: 'group', id: g, nonce: Date.now() });
+              }
+            }}
+            selectedTableId={selectedTableId}
+            onSelectTable={(id) => {
+              setSelectedTableId(id);
+              const t = parsedSchema.tables.find((tb) => tb.id === id);
+              if (t?.line) setScrollToLine(t.line);
+              setFocusRequest({ type: 'table', id, nonce: Date.now() });
+            }}
+            onFocusGroupOnCanvas={(g) => {
+              setFocusRequest({ type: 'group', id: g, nonce: Date.now() });
+            }}
+            onCreateGroup={() =>
+              setGroupModalState({ open: true, group: null })
+            }
+            onEditGroup={(group) =>
+              setGroupModalState({ open: true, group })
+            }
+            onDeleteGroup={handleDeleteGroup}
+            onAutoLayoutGroup={handleAutoLayoutGroup}
+            onMoveTableToGroup={handleMoveTableToGroup}
+            onReorderGroups={handleReorderGroups}
+            onReorderTableInGroup={handleReorderTableInGroup}
+            onSaveVersion={() => setSaveVersionOpen(true)}
+            onRestoreVersion={handleRestoreVersion}
+            onTogglePublishVersion={handleTogglePublishVersion}
+          />
+        )}
+
+        {/* Center Viewport */}
+        <main className="flex-1 flex min-w-0 min-h-0 overflow-hidden relative">
+          {viewMode === 'docs' ? (
+            <DocsView
+              schema={parsedSchema}
+              detailLevel={activeWorkspace.detailLevel}
+              focusedGroup={focusedGroup}
+              onSelectTable={(id) => {
+                setSelectedTableId(id);
+                setViewMode('split');
+                setFocusRequest({ type: 'table', id, nonce: Date.now() });
+              }}
+            />
+          ) : (
+            <>
+              {viewMode === 'split' && (
+                <>
+                  <div
+                    style={{ width: editorWidth }}
+                    className="shrink-0 h-full hidden md:block"
+                  >
+                    <DbmlEditor
+                      value={activeWorkspace.dbml}
+                      onChange={handleDbmlChange}
+                      errors={parsedSchema.errors}
+                      scrollToLine={scrollToLine}
+                    />
+                  </div>
+                  <div
+                    onMouseDown={startSplitResize}
+                    title="Drag to resize editor"
+                    className="w-1.5 shrink-0 hidden md:block cursor-col-resize bg-transparent hover:bg-blue-500/40 transition-colors"
+                  />
+                </>
+              )}
+
+              <DiagramCanvas
+                schema={parsedSchema}
+                positions={activeWorkspace.tablePositions}
+                onUpdatePositions={(next) =>
+                  updateActiveWorkspace((ws) => ({
+                    ...ws,
+                    tablePositions: next,
+                  }))
+                }
+                detailLevel={activeWorkspace.detailLevel}
+                focusedGroup={focusedGroup}
+                onToggleFocusGroup={setFocusedGroup}
+                selectedTableId={selectedTableId}
+                onSelectTable={(id) => {
+                  setSelectedTableId(id);
+                  if (id) {
+                    const t = parsedSchema.tables.find((tb) => tb.id === id);
+                    if (t?.line) setScrollToLine(t.line);
+                  }
+                }}
+                onChangeTableHeaderColor={handleChangeTableHeaderColor}
+                onMoveTableToGroup={handleMoveTableToGroup}
+                onEditGroup={(group) =>
+                  setGroupModalState({ open: true, group })
+                }
+                onAutoLayoutGroup={handleAutoLayoutGroup}
+                stickyNotes={activeWorkspace.stickyNotes}
+                onAddStickyNote={(x, y) => handleAddStickyNote(x, y)}
+                onUpdateStickyNote={handleUpdateStickyNote}
+                onDeleteStickyNote={handleDeleteStickyNote}
+                focusRequest={focusRequest}
+                darkMode={darkMode}
+              />
+            </>
+          )}
+        </main>
+
+        {/* Contextual Table Inspector */}
+        {selectedTable && viewMode !== 'docs' && (
+          <InspectorDrawer
+            table={selectedTable}
+            schema={parsedSchema}
+            onClose={() => setSelectedTableId(null)}
+            onSelectTable={(id) => {
+              setSelectedTableId(id);
+              setFocusRequest({ type: 'table', id, nonce: Date.now() });
+            }}
+            onMoveTableToGroup={handleMoveTableToGroup}
+            onChangeTableHeaderColor={handleChangeTableHeaderColor}
+            onJumpToCode={(line) => {
+              if (viewMode === 'diagram') setViewMode('split');
+              if (line) setScrollToLine(line);
+            }}
+            onAddLinkedStickyNote={(tId) => {
+              const pos = activeWorkspace.tablePositions[tId] || {
+                x: 200,
+                y: 200,
+              };
+              handleAddStickyNote(pos.x + 296, pos.y, `table:${tId}`);
+              showToast(`Attached sticky note to ${tId}`);
+            }}
+          />
+        )}
+      </div>
+
+      {/* Toast Notification */}
+      {toast && (
+        <div className="fixed bottom-5 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-lg bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 text-xs font-medium shadow-lg pointer-events-none">
+          {toast}
+        </div>
+      )}
+
+      {/* Modals */}
+      {groupModalState.open && (
+        <TableGroupModal
+          initialGroup={groupModalState.group}
+          allTableIds={parsedSchema.tables.map((t) => t.id)}
+          onClose={() => setGroupModalState({ open: false, group: null })}
+          onSave={handleSaveGroupModal}
+        />
+      )}
+
+      {saveVersionOpen && (
+        <SaveVersionModal
+          suggestedTag={suggestedVersionTag}
+          onClose={() => setSaveVersionOpen(false)}
+          onSave={handleSaveVersion}
+        />
+      )}
+
+      {importExportOpen && (
+        <ImportExportModal
+          projectName={activeWorkspace.name}
+          dbml={activeWorkspace.dbml}
+          schema={parsedSchema}
+          positions={activeWorkspace.tablePositions}
+          detailLevel={activeWorkspace.detailLevel}
+          stickyNotes={activeWorkspace.stickyNotes}
+          darkMode={darkMode}
+          onImportDbml={handleImportDbml}
+          onClose={() => setImportExportOpen(false)}
+        />
+      )}
+
+      {workspacesModalOpen && (
+        <WorkspacesModal
+          workspaces={workspaces}
+          activeId={activeWorkspace.id}
+          onSelectWorkspace={handleSelectWorkspace}
+          onCreateBlank={handleCreateBlankWorkspace}
+          onLoadSampleTelemetry={handleLoadSampleTelemetry}
+          onDeleteWorkspace={handleDeleteWorkspace}
+          onClose={() => setWorkspacesModalOpen(false)}
+        />
+      )}
+    </div>
+  );
+}

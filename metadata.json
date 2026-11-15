@@ -1,0 +1,6 @@
+{
+  "name": "SchemaForge — DBML Studio",
+  "description": "Interactive DBML viewer and database documentation studio with business-domain table groups, group-aware auto-layout, schema changelog, version history, sticky notes, and high-resolution PNG/SVG/SQL/CSV export.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
