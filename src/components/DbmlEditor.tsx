@@ -173,7 +173,7 @@ function tokenizeForHighlight(
         comment += code[i];
         i++;
       }
-      pushSeg(comment, 'text-slate-400 dark:text-slate-500 italic');
+      pushSeg(comment, 'text-slate-400 dark:text-slate-500');
       continue;
     }
 
@@ -189,7 +189,7 @@ function tokenizeForHighlight(
         comment += '*/';
         i += 2;
       }
-      pushSeg(comment, 'text-slate-400 dark:text-slate-500 italic');
+      pushSeg(comment, 'text-slate-400 dark:text-slate-500');
       continue;
     }
 
@@ -241,7 +241,7 @@ function tokenizeForHighlight(
     // Hex color
     if (ch === '#' && /^#[0-9a-fA-F]{3,8}\b/.test(code.slice(i))) {
       const match = code.slice(i).match(/^#[0-9a-fA-F]{3,8}/)!;
-      pushSeg(match[0], 'text-pink-600 dark:text-pink-400 font-medium');
+      pushSeg(match[0], 'text-pink-600 dark:text-pink-400');
       i += match[0].length;
       lineWordIndex++;
       continue;
@@ -249,7 +249,7 @@ function tokenizeForHighlight(
 
     // Symbols
     if (ch === '<' && code[i + 1] === '>') {
-      pushSeg('<>', 'text-blue-600 dark:text-blue-400 font-semibold');
+      pushSeg('<>', 'text-blue-600 dark:text-blue-400');
       i += 2;
       continue;
     }
@@ -267,7 +267,7 @@ function tokenizeForHighlight(
       pushSeg(
         ch,
         isRelOp
-          ? 'text-blue-600 dark:text-blue-400 font-semibold'
+          ? 'text-blue-600 dark:text-blue-400'
           : 'text-slate-400 dark:text-slate-500'
       );
       i++;
@@ -301,7 +301,7 @@ function tokenizeForHighlight(
     let cls = 'text-slate-900 dark:text-slate-100';
 
     if (TOP_KEYWORDS.has(lower) && bracketDepth === 0 && lineWordIndex === 0) {
-      cls = 'text-violet-600 dark:text-violet-400 font-semibold';
+      cls = 'text-violet-600 dark:text-violet-400';
       if (
         lower === 'table' ||
         lower === 'enum' ||
@@ -312,9 +312,9 @@ function tokenizeForHighlight(
         blockKind = lower;
       }
     } else if (lower === 'as' && braceDepth === 0) {
-      cls = 'text-violet-600 dark:text-violet-400 font-semibold';
+      cls = 'text-violet-600 dark:text-violet-400';
     } else if (bracketDepth > 0 && SETTING_KEYWORDS.has(lower)) {
-      cls = 'text-sky-600 dark:text-sky-400 font-medium';
+      cls = 'text-sky-600 dark:text-sky-400';
     } else if (
       blockKind === 'table' &&
       braceDepth === 1 &&
@@ -322,7 +322,7 @@ function tokenizeForHighlight(
       lineWordIndex === 1 &&
       (BUILTIN_TYPES.has(lower) || enumNameSet.has(lower) || enumNameSet.has(word))
     ) {
-      cls = 'text-emerald-600 dark:text-emerald-400 font-medium';
+      cls = 'text-emerald-600 dark:text-emerald-400';
     } else if (
       blockKind === 'table' &&
       braceDepth === 1 &&
@@ -330,13 +330,13 @@ function tokenizeForHighlight(
       lineWordIndex === 1
     ) {
       // Custom enum/domain type in second position on column line
-      cls = 'text-emerald-600 dark:text-emerald-400 font-medium';
+      cls = 'text-emerald-600 dark:text-emerald-400';
     } else if (
       braceDepth === 0 &&
       lineWordIndex === 1 &&
       (blockKind === 'table' || blockKind === 'enum' || blockKind === 'project')
     ) {
-      cls = 'text-blue-700 dark:text-blue-300 font-semibold';
+      cls = 'text-blue-700 dark:text-blue-300';
     } else if (
       (lower === 'true' || lower === 'false' || lower === 'null') &&
       bracketDepth > 0
@@ -363,8 +363,7 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
   modKey = '⌘',
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const highlightRef = useRef<HTMLPreElement>(null);
-  const lineNumbersRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   const lines = value.split('\n');
   const errorLineSet = useMemo(
@@ -383,23 +382,11 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
   );
 
   useEffect(() => {
-    if (!scrollToLine || !textareaRef.current) return;
+    if (!scrollToLine || !scrollContainerRef.current) return;
     const lineHeight = 20;
     const targetTop = Math.max(0, (scrollToLine - 4) * lineHeight);
-    textareaRef.current.scrollTo({ top: targetTop, behavior: 'smooth' });
+    scrollContainerRef.current.scrollTo({ top: targetTop, behavior: 'smooth' });
   }, [scrollToLine]);
-
-  const handleScroll = () => {
-    if (!textareaRef.current) return;
-    const { scrollTop, scrollLeft } = textareaRef.current;
-    if (lineNumbersRef.current) {
-      lineNumbersRef.current.scrollTop = scrollTop;
-    }
-    if (highlightRef.current) {
-      highlightRef.current.scrollTop = scrollTop;
-      highlightRef.current.scrollLeft = scrollLeft;
-    }
-  };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Tab') {
@@ -478,12 +465,12 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
         </div>
       </div>
 
-      {/* Editor Body with Synchronized Syntax Highlighting */}
-      <div className="relative flex-1 flex min-h-0 overflow-hidden">
-        <div
-          ref={lineNumbersRef}
-          className="w-11 shrink-0 py-3 pr-2 text-right font-mono text-[12px] leading-[20px] text-slate-400 dark:text-slate-600 bg-slate-50/60 dark:bg-slate-900/40 border-r border-slate-200/70 dark:border-slate-800/80 select-none overflow-hidden tabular-nums"
-        >
+      {/* Editor Body with Shared-Scroll Synchronized Syntax Highlighting */}
+      <div
+        ref={scrollContainerRef}
+        className="flex-1 flex min-h-0 overflow-auto relative"
+      >
+        <div className="sticky left-0 z-20 w-11 shrink-0 py-3 pb-8 pr-2 text-right font-mono text-[12px] leading-[20px] text-slate-400 dark:text-slate-600 bg-slate-50 dark:bg-slate-900 border-r border-slate-200/70 dark:border-slate-800/80 select-none tabular-nums h-fit min-h-full">
           {lines.map((_, idx) => {
             const lineNum = idx + 1;
             const hasErr = errorLineSet.has(lineNum);
@@ -491,13 +478,13 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
             return (
               <div
                 key={lineNum}
-                className={
+                className={`h-[20px] leading-[20px] ${
                   hasErr
                     ? 'text-rose-600 dark:text-rose-400 font-semibold bg-rose-50 dark:bg-rose-950/40'
                     : isActiveLine
                     ? 'text-blue-600 dark:text-blue-400 font-semibold bg-blue-50 dark:bg-blue-950/30'
                     : ''
-                }
+                }`}
               >
                 {lineNum}
               </div>
@@ -505,12 +492,11 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
           })}
         </div>
 
-        <div className="relative flex-1 min-w-0 h-full overflow-hidden">
+        <div className="relative flex-1 min-w-max h-fit min-h-full">
           <pre
-            ref={highlightRef}
             aria-hidden="true"
             style={{ tabSize: 2, fontVariantLigatures: 'none' }}
-            className="absolute inset-0 m-0 py-3 px-3 font-mono text-[12.5px] leading-[20px] whitespace-pre overflow-hidden pointer-events-none select-none"
+            className="m-0 py-3 pb-8 px-3 pr-8 font-mono font-normal text-[12.5px] leading-[20px] whitespace-pre pointer-events-none select-none"
           >
             {highlightedLines.map((segs, lineIdx) => {
               const lineNum = lineIdx + 1;
@@ -519,13 +505,13 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
               return (
                 <div
                   key={lineIdx}
-                  className={
+                  className={`h-[20px] leading-[20px] ${
                     hasErr
                       ? 'bg-rose-50/80 dark:bg-rose-950/30 -mx-3 px-3'
                       : isHighlighted
                       ? 'bg-blue-50/80 dark:bg-blue-950/30 -mx-3 px-3'
                       : ''
-                  }
+                  }`}
                 >
                   {segs.length === 0 ? (
                     <span>{'\u200b'}</span>
@@ -545,7 +531,11 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
             ref={textareaRef}
             value={value}
             onChange={(e) => onChange(e.target.value)}
-            onScroll={handleScroll}
+            onScroll={(e) => {
+              const el = e.currentTarget;
+              if (el.scrollTop !== 0) el.scrollTop = 0;
+              if (el.scrollLeft !== 0) el.scrollLeft = 0;
+            }}
             onKeyDown={handleKeyDown}
             spellCheck={false}
             wrap="off"
@@ -554,7 +544,7 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
             autoCorrect="off"
             aria-label="DBML Source Code Editor"
             style={{ tabSize: 2, fontVariantLigatures: 'none' }}
-            className="relative z-10 w-full h-full py-3 px-3 font-mono text-[12.5px] leading-[20px] bg-transparent text-transparent caret-slate-900 dark:caret-slate-100 resize-none focus:outline-none overflow-auto selection:bg-blue-500/25"
+            className="dbml-editor-textarea absolute inset-0 z-10 w-full h-full m-0 py-3 pb-8 px-3 pr-8 border-0 font-mono font-normal text-[12.5px] leading-[20px] whitespace-pre bg-transparent text-transparent caret-slate-900 dark:caret-slate-100 resize-none focus:outline-none overflow-hidden selection:bg-blue-500/30 selection:text-transparent"
           />
         </div>
       </div>
