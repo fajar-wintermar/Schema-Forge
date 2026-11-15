@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Check,
   ChevronDown,
+  ChevronUp,
   Edit3,
   Eye,
   EyeOff,
@@ -15,6 +16,7 @@ import {
   Minus,
   Palette,
   Plus,
+  Rows3,
   Share2,
   Sparkles,
   StickyNote as StickyNoteIcon,
@@ -43,6 +45,7 @@ interface DiagramCanvasProps {
   positions: Record<string, TablePosition>;
   onUpdatePositions: (next: Record<string, TablePosition>) => void;
   detailLevel: DetailLevel;
+  onChangeDetailLevel: (level: DetailLevel) => void;
   selectedDomains: string[];
   onChangeSelectedDomains: (domains: string[]) => void;
   selectedTableId: string | null;
@@ -121,6 +124,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
   positions,
   onUpdatePositions,
   detailLevel,
+  onChangeDetailLevel,
   selectedDomains,
   onChangeSelectedDomains,
   selectedTableId,
@@ -139,10 +143,12 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const filterMenuRef = useRef<HTMLDivElement>(null);
+  const detailMenuRef = useRef<HTMLDivElement>(null);
   const [viewport, setViewport] = useState({ x: 40, y: 40, zoom: 0.85 });
   const [snapGrid, setSnapGrid] = useState(true);
   const [showMinimap, setShowMinimap] = useState(true);
   const [domainMenuOpen, setDomainMenuOpen] = useState(false);
+  const [detailMenuOpen, setDetailMenuOpen] = useState(false);
   const [hoveredTableId, setHoveredTableId] = useState<string | null>(null);
   const [hoveredRefId, setHoveredRefId] = useState<string | null>(null);
   const [colorPickerPosKey, setColorPickerPosKey] = useState<string | null>(
@@ -188,6 +194,8 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     for (const r of schema.refs) {
       if (!map.has(r.fromTable)) map.set(r.fromTable, new Set());
       for (const c of r.fromColumns) map.get(r.fromTable)!.add(c);
+      if (!map.has(r.toTable)) map.set(r.toTable, new Set());
+      for (const c of r.toColumns) map.get(r.toTable)!.add(c);
     }
     return map;
   }, [schema.refs]);
@@ -273,6 +281,12 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         !filterMenuRef.current.contains(e.target as Node)
       ) {
         setDomainMenuOpen(false);
+      }
+      if (
+        detailMenuRef.current &&
+        !detailMenuRef.current.contains(e.target as Node)
+      ) {
+        setDetailMenuOpen(false);
       }
     };
     window.addEventListener('pointerdown', onPointerDownOutside);
@@ -1370,6 +1384,108 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         onPointerDown={(e) => e.stopPropagation()}
         className="absolute bottom-4 right-4 flex items-center gap-1.5 p-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xs shadow-sm"
       >
+        {/* dbdiagram-style Table Fields Visibility Selector */}
+        <div ref={detailMenuRef} className="relative">
+          <button
+            type="button"
+            onClick={() => setDetailMenuOpen((o) => !o)}
+            title="Show or hide table fields (All fields, Keys only, Table names only)"
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors whitespace-nowrap"
+          >
+            <Rows3 className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+            <span>
+              {detailLevel === 'keys'
+                ? 'Keys Only'
+                : detailLevel === 'names'
+                ? 'Names Only'
+                : 'All Fields'}
+            </span>
+            <ChevronUp className="w-3 h-3 text-slate-400 shrink-0" />
+          </button>
+
+          {detailMenuOpen && (
+            <div className="absolute right-0 bottom-full mb-2 w-60 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-xl overflow-hidden z-30">
+              <div className="px-3 py-2 border-b border-slate-100 dark:border-slate-800 text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                Table Detail Visibility
+              </div>
+              <div className="p-1.5 space-y-0.5">
+                {[
+                  {
+                    id: 'all' as const,
+                    label: 'All table fields',
+                    desc: 'Show every column and data type',
+                    active: detailLevel === 'full' || detailLevel === 'columns',
+                    onSelect: () =>
+                      onChangeDetailLevel(
+                        detailLevel === 'columns' ? 'columns' : 'full'
+                      ),
+                  },
+                  {
+                    id: 'keys' as const,
+                    label: 'Keys only',
+                    desc: 'Show PK, FK, and unique columns',
+                    active: detailLevel === 'keys',
+                    onSelect: () => onChangeDetailLevel('keys'),
+                  },
+                  {
+                    id: 'names' as const,
+                    label: 'Table names only',
+                    desc: 'Show only table headers',
+                    active: detailLevel === 'names',
+                    onSelect: () => onChangeDetailLevel('names'),
+                  },
+                ].map((opt) => (
+                  <button
+                    key={opt.id}
+                    type="button"
+                    onClick={() => {
+                      opt.onSelect();
+                      setDetailMenuOpen(false);
+                    }}
+                    className={`w-full px-2.5 py-2 rounded-lg text-left flex items-start justify-between gap-2 transition-colors ${
+                      opt.active
+                        ? 'bg-blue-50 dark:bg-blue-950/50 text-blue-900 dark:text-blue-100'
+                        : 'text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800/60'
+                    }`}
+                  >
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold leading-tight">
+                        {opt.label}
+                      </div>
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+                        {opt.desc}
+                      </div>
+                    </div>
+                    {opt.active && (
+                      <Check className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0 mt-0.5" />
+                    )}
+                  </button>
+                ))}
+              </div>
+
+              {(detailLevel === 'full' || detailLevel === 'columns') && (
+                <div className="px-3 py-2 border-t border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/30">
+                  <label className="flex items-center justify-between gap-2 text-xs text-slate-600 dark:text-slate-300 cursor-pointer">
+                    <span>Include notes &amp; indexes</span>
+                    <input
+                      type="checkbox"
+                      checked={detailLevel === 'full'}
+                      onChange={(e) =>
+                        onChangeDetailLevel(
+                          e.target.checked ? 'full' : 'columns'
+                        )
+                      }
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                  </label>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        <div className="w-px h-5 bg-slate-200 dark:bg-slate-700" />
+
         <button
           type="button"
           onClick={handleAddNoteAtCenter}

@@ -19,6 +19,7 @@ interface DbmlEditorProps {
   isMaximized?: boolean;
   onToggleMaximize?: () => void;
   onMinimize?: () => void;
+  modKey?: string;
 }
 
 const SNIPPETS = [
@@ -359,6 +360,7 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
   isMaximized = false,
   onToggleMaximize,
   onMinimize,
+  modKey = '⌘',
 }) => {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const highlightRef = useRef<HTMLPreElement>(null);
@@ -446,7 +448,11 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
             <button
               type="button"
               onClick={onToggleMaximize}
-              title={isMaximized ? 'Restore split view' : 'Maximize editor'}
+              title={
+                isMaximized
+                  ? `Restore split view (${modKey}⇧E)`
+                  : `Maximize editor (${modKey}⇧E)`
+              }
               aria-label={isMaximized ? 'Restore split view' : 'Maximize editor'}
               className="p-1.5 rounded text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/70 dark:hover:bg-slate-800 transition-colors"
             >
@@ -462,7 +468,7 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
             <button
               type="button"
               onClick={onMinimize}
-              title="Minimize editor"
+              title={`Minimize editor (${modKey}\\)`}
               aria-label="Minimize editor"
               className="p-1.5 rounded text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/70 dark:hover:bg-slate-800 transition-colors"
             >

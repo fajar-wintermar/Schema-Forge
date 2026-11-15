@@ -467,6 +467,8 @@ export function computeAutoLayout(
   for (const r of schema.refs) {
     if (!fkColsByTable.has(r.fromTable)) fkColsByTable.set(r.fromTable, new Set());
     for (const c of r.fromColumns) fkColsByTable.get(r.fromTable)!.add(c);
+    if (!fkColsByTable.has(r.toTable)) fkColsByTable.set(r.toTable, new Set());
+    for (const c of r.toColumns) fkColsByTable.get(r.toTable)!.add(c);
   }
 
   const { instances, groupsByTable } = buildTableInstances(schema);
@@ -641,6 +643,8 @@ export function autoLayoutSingleGroup(
   for (const r of schema.refs) {
     if (!fkColsByTable.has(r.fromTable)) fkColsByTable.set(r.fromTable, new Set());
     for (const c of r.fromColumns) fkColsByTable.get(r.fromTable)!.add(c);
+    if (!fkColsByTable.has(r.toTable)) fkColsByTable.set(r.toTable, new Set());
+    for (const c of r.toColumns) fkColsByTable.get(r.toTable)!.add(c);
   }
 
   let anchorX = Infinity;

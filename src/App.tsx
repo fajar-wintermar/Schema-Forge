@@ -7,6 +7,7 @@ import { InspectorDrawer } from './components/InspectorDrawer';
 import {
   ImportExportModal,
   SaveVersionModal,
+  ShortcutsModal,
   TableGroupModal,
   WorkspacesModal,
 } from './components/Modals';
@@ -84,6 +85,13 @@ export default function App() {
   const [saveVersionOpen, setSaveVersionOpen] = useState(false);
   const [importExportOpen, setImportExportOpen] = useState(false);
   const [workspacesModalOpen, setWorkspacesModalOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+
+  const modKey = useMemo(() => {
+    if (typeof navigator === 'undefined') return '⌘';
+    const platform = navigator.platform || navigator.userAgent || '';
+    return /Mac|iPod|iPhone|iPad/i.test(platform) ? '⌘' : 'Ctrl+';
+  }, []);
 
   const [toast, setToast] = useState<string | null>(null);
   const toastTimerRef = useRef<number | null>(null);
@@ -133,6 +141,96 @@ export default function App() {
     else root.classList.remove('dark');
     setMetaValue('darkMode', darkMode);
   }, [darkMode]);
+
+  // Global keyboard shortcuts for sidebar, editor, maximize/restore, import/export, and save
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (shortcutsOpen) setShortcutsOpen(false);
+        else if (groupModalState.open)
+          setGroupModalState({ open: false, group: null });
+        else if (saveVersionOpen) setSaveVersionOpen(false);
+        else if (importExportOpen) setImportExportOpen(false);
+        else if (workspacesModalOpen) setWorkspacesModalOpen(false);
+        return;
+      }
+
+      if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+
+      const anyModalOpen =
+        shortcutsOpen ||
+        groupModalState.open ||
+        saveVersionOpen ||
+        importExportOpen ||
+        workspacesModalOpen;
+
+      const key = e.key.toLowerCase();
+
+      // Mod + I: Toggle Import / Export
+      if (!e.shiftKey && key === 'i') {
+        e.preventDefault();
+        if (!anyModalOpen || importExportOpen) {
+          setImportExportOpen((o) => !o);
+        }
+        return;
+      }
+
+      // Mod + S: Open Save Version modal
+      if (!e.shiftKey && key === 's') {
+        e.preventDefault();
+        if (!anyModalOpen) {
+          setSaveVersionOpen(true);
+        }
+        return;
+      }
+
+      if (anyModalOpen) return;
+
+      // Mod + B: Toggle Left Sidebar
+      if (!e.shiftKey && key === 'b') {
+        e.preventDefault();
+        setSidebarOpen((o) => !o);
+        return;
+      }
+
+      // Mod + \: Toggle Code Editor (minimize / restore split)
+      if (!e.shiftKey && (e.key === '\\' || e.code === 'Backslash')) {
+        e.preventDefault();
+        if (viewMode !== 'split') {
+          setViewMode('split');
+          setEditorState('normal');
+        } else {
+          setEditorState((prev) =>
+            prev === 'minimized' ? 'normal' : 'minimized'
+          );
+        }
+        return;
+      }
+
+      // Mod + Shift + E: Toggle Maximize / Restore Code Editor
+      if (e.shiftKey && key === 'e') {
+        e.preventDefault();
+        if (viewMode !== 'split') {
+          setViewMode('split');
+          setEditorState('maximized');
+        } else {
+          setEditorState((prev) =>
+            prev === 'maximized' ? 'normal' : 'maximized'
+          );
+        }
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [
+    viewMode,
+    shortcutsOpen,
+    groupModalState.open,
+    saveVersionOpen,
+    importExportOpen,
+    workspacesModalOpen,
+  ]);
 
   const activeWorkspace = useMemo(
     () => workspaces.find((w) => w.id === activeId) || workspaces[0] || null,
@@ -680,6 +778,8 @@ export default function App() {
         onOpenWorkspaces={() => setWorkspacesModalOpen(true)}
         onOpenImportExport={() => setImportExportOpen(true)}
         onOpenSaveVersion={() => setSaveVersionOpen(true)}
+        onOpenShortcuts={() => setShortcutsOpen(true)}
+        modKey={modKey}
         darkMode={darkMode}
         onToggleDarkMode={() => setDarkMode((d) => !d)}
         errorCount={parsedSchema.errors.length}
@@ -792,6 +892,7 @@ export default function App() {
                 isMaximized={true}
                 onToggleMaximize={() => setEditorState('normal')}
                 onMinimize={() => setEditorState('minimized')}
+                modKey={modKey}
               />
             </div>
           ) : (
@@ -801,7 +902,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => setEditorState('normal')}
-                    title="Restore DBML editor"
+                    title={`Restore DBML editor (${modKey}\\)`}
                     aria-label="Restore DBML editor"
                     className="p-1.5 rounded-md text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                   >
@@ -810,7 +911,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => setEditorState('maximized')}
-                    title="Maximize DBML editor"
+                    title={`Maximize DBML editor (${modKey}⇧E)`}
                     aria-label="Maximize DBML editor"
                     className="p-1.5 rounded-md text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
                   >
@@ -820,7 +921,7 @@ export default function App() {
                   <button
                     type="button"
                     onClick={() => setEditorState('normal')}
-                    title="Click to expand DBML editor"
+                    title={`Click to expand DBML editor (${modKey}\\)`}
                     className="flex-1 flex items-center justify-center text-[11px] font-mono font-medium tracking-widest text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 [writing-mode:vertical-rl] rotate-180"
                   >
                     schema.dbml
@@ -851,6 +952,7 @@ export default function App() {
                       isMaximized={false}
                       onToggleMaximize={() => setEditorState('maximized')}
                       onMinimize={() => setEditorState('minimized')}
+                      modKey={modKey}
                     />
                   </div>
                   <div
@@ -871,6 +973,7 @@ export default function App() {
                   }))
                 }
                 detailLevel={activeWorkspace.detailLevel}
+                onChangeDetailLevel={handleDetailLevelChange}
                 selectedDomains={effectiveSelectedDomains}
                 onChangeSelectedDomains={handleChangeSelectedDomains}
                 selectedTableId={selectedTableId}
@@ -983,6 +1086,13 @@ export default function App() {
           onLoadSampleTelemetry={handleLoadSampleTelemetry}
           onDeleteWorkspace={handleDeleteWorkspace}
           onClose={() => setWorkspacesModalOpen(false)}
+        />
+      )}
+
+      {shortcutsOpen && (
+        <ShortcutsModal
+          modKey={modKey}
+          onClose={() => setShortcutsOpen(false)}
         />
       )}
     </div>

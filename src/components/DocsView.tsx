@@ -38,6 +38,15 @@ export const DocsView: React.FC<DocsViewProps> = ({
     return map;
   }, [schema.refs]);
 
+  const refColumnSet = useMemo(() => {
+    const set = new Set<string>();
+    for (const r of schema.refs) {
+      for (const col of r.fromColumns) set.add(`${r.fromTable}.${col}`);
+      for (const col of r.toColumns) set.add(`${r.toTable}.${col}`);
+    }
+    return set;
+  }, [schema.refs]);
+
   const tableMap = useMemo(
     () => new Map(schema.tables.map((t) => [t.id, t])),
     [schema.tables]
@@ -85,7 +94,10 @@ export const DocsView: React.FC<DocsViewProps> = ({
     const cols =
       detailLevel === 'keys'
         ? table.columns.filter(
-            (c) => c.pk || c.unique || fkLookup.has(`${table.id}.${c.name}`)
+            (c) =>
+              c.pk ||
+              c.unique ||
+              refColumnSet.has(`${table.id}.${c.name}`)
           )
         : detailLevel === 'names'
         ? []

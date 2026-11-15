@@ -6,6 +6,7 @@ import {
   Download,
   GitCommitHorizontal,
   KeyRound,
+  Keyboard,
   Layers,
   LayoutGrid,
   Moon,
@@ -45,6 +46,8 @@ interface TopBarProps {
   onOpenWorkspaces: () => void;
   onOpenImportExport: () => void;
   onOpenSaveVersion: () => void;
+  onOpenShortcuts: () => void;
+  modKey: string;
   darkMode: boolean;
   onToggleDarkMode: () => void;
   errorCount: number;
@@ -52,9 +55,9 @@ interface TopBarProps {
 
 const DETAIL_OPTIONS: Array<{ id: DetailLevel; label: string }> = [
   { id: 'full', label: 'Full' },
-  { id: 'columns', label: 'Columns' },
-  { id: 'keys', label: 'Keys' },
-  { id: 'names', label: 'Names' },
+  { id: 'columns', label: 'All Fields' },
+  { id: 'keys', label: 'Keys Only' },
+  { id: 'names', label: 'Names Only' },
 ];
 
 const VIEW_OPTIONS: Array<{
@@ -81,6 +84,8 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenWorkspaces,
   onOpenImportExport,
   onOpenSaveVersion,
+  onOpenShortcuts,
+  modKey,
   darkMode,
   onToggleDarkMode,
   errorCount,
@@ -258,7 +263,11 @@ export const TopBar: React.FC<TopBarProps> = ({
         <button
           type="button"
           onClick={onToggleSidebar}
-          title={sidebarOpen ? 'Hide Sidebar' : 'Show Sidebar'}
+          title={
+            sidebarOpen
+              ? `Hide Left Sidebar (${modKey}B)`
+              : `Show Left Sidebar (${modKey}B)`
+          }
           className="p-2 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 shrink-0"
         >
           <PanelLeft className="w-4 h-4" />
@@ -478,8 +487,18 @@ export const TopBar: React.FC<TopBarProps> = ({
         </button>
       </div>
 
-      {/* Right: Theme, Import/Export, Primary Save Version CTA */}
+      {/* Right: Shortcuts, Theme, Import/Export, Primary Save Version CTA */}
       <div className="flex items-center gap-2 shrink-0">
+        <button
+          type="button"
+          onClick={onOpenShortcuts}
+          title="Keyboard shortcuts"
+          aria-label="Keyboard shortcuts"
+          className="p-2 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+        >
+          <Keyboard className="w-4 h-4" />
+        </button>
+
         <button
           type="button"
           onClick={onToggleDarkMode}
@@ -492,6 +511,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         <button
           type="button"
           onClick={onOpenImportExport}
+          title={`Import / Export (${modKey}I)`}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0"
         >
           <Download className="w-3.5 h-3.5" />
@@ -502,6 +522,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         <button
           type="button"
           onClick={onOpenSaveVersion}
+          title={`Save Version (${modKey}S)`}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white transition-colors whitespace-nowrap shrink-0"
         >
           <GitCommitHorizontal className="w-3.5 h-3.5" />
