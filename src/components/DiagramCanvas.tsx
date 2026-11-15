@@ -12,6 +12,7 @@ import {
   Minus,
   Palette,
   Plus,
+  Share2,
   Sparkles,
   StickyNote as StickyNoteIcon,
   Trash2,
@@ -26,8 +27,10 @@ import {
   TablePosition,
 } from '../types/schema';
 import {
+  buildTableInstances,
   computeGroupBoundingBoxes,
   getTableHeight,
+  resolveSchemaEdges,
   TABLE_WIDTH,
 } from '../utils/autoLayout';
 import { getContrastTextColor } from '../utils/importExport';
@@ -42,7 +45,12 @@ interface DiagramCanvasProps {
   selectedTableId: string | null;
   onSelectTable: (tableId: string | null) => void;
   onChangeTableHeaderColor: (tableId: string, color: string | null) => void;
-  onMoveTableToGroup: (tableId: string, targetGroup: string | null) => void;
+  onAssignTableToGroup: (
+    tableId: string,
+    targetGroup: string,
+    sourceGroup?: string | null,
+    keepInSource?: boolean
+  ) => void;
   onEditGroup: (group: TableGroupDef) => void;
   onAutoLayoutGroup: (groupName: string) => void;
   stickyNotes: StickyNote[];
@@ -114,7 +122,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
   selectedTableId,
   onSelectTable,
   onChangeTableHeaderColor,
-  onMoveTableToGroup,
+  onAssignTableToGroup,
   onEditGroup,
   onAutoLayoutGroup,
   stickyNotes,
@@ -130,18 +138,19 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
   const [showMinimap, setShowMinimap] = useState(true);
   const [hoveredTableId, setHoveredTableId] = useState<string | null>(null);
   const [hoveredRefId, setHoveredRefId] = useState<string | null>(null);
-  const [colorPickerTableId, setColorPickerTableId] = useState<string | null>(
+  const [colorPickerPosKey, setColorPickerPosKey] = useState<string | null>(
     null
   );
   const [dropTargetGroupName, setDropTargetGroupName] = useState<string | null>(
     null
   );
+  const [altPressedDuringDrag, setAltPressedDuringDrag] = useState(false);
 
-  // Dragging state
   const dragRef = useRef<
     | { type: 'pan'; startX: number; startY: number; origX: number; origY: number }
     | {
         type: 'table';
+        posKey: string;
         tableId: string;
         startX: number;
         startY: number;
@@ -151,7 +160,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     | {
         type: 'group';
         groupName: string;
-        tableIds: string[];
+        posKeys: string[];
         startX: number;
         startY: number;
         origPositions: Record<string, TablePosition>;
@@ -176,17 +185,11 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     return map;
   }, [schema.refs]);
 
-  const tableToGroup = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const g of schema.tableGroups) {
-      for (const t of g.tables) map.set(t, g.name);
-    }
-    return map;
-  }, [schema.tableGroups]);
+  const { instances } = useMemo(() => buildTableInstances(schema), [schema]);
 
-  const tableMap = useMemo(
-    () => new Map(schema.tables.map((t) => [t.id, t])),
-    [schema.tables]
+  const resolvedEdges = useMemo(
+    () => resolveSchemaEdges(schema, instances, positions),
+    [schema, instances, positions]
   );
 
   const groupBoxes = useMemo(
@@ -239,22 +242,32 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
   useEffect(() => {
     if (!focusRequest) return;
     if (focusRequest.type === 'fit') {
-      const boxes = schema.tables.map((t) => {
-        const p = positions[t.id] || { x: 0, y: 0 };
+      const boxes = instances.map((inst) => {
+        const p = positions[inst.posKey] || positions[inst.table.id] || { x: 0, y: 0 };
         return {
           x: p.x,
           y: p.y,
           width: TABLE_WIDTH,
-          height: getTableHeight(t, detailLevel, fkColsByTable.get(t.id)),
+          height: getTableHeight(
+            inst.table,
+            detailLevel,
+            fkColsByTable.get(inst.table.id),
+            inst.sharedGroups.length > 1
+          ),
         };
       });
       fitBounds(boxes);
     } else if (focusRequest.type === 'table' && focusRequest.id) {
-      const t = tableMap.get(focusRequest.id);
+      const inst = instances.find((i) => i.table.id === focusRequest.id);
       const el = containerRef.current;
-      if (!t || !el) return;
-      const p = positions[t.id] || { x: 0, y: 0 };
-      const h = getTableHeight(t, detailLevel, fkColsByTable.get(t.id));
+      if (!inst || !el) return;
+      const p = positions[inst.posKey] || positions[inst.table.id] || { x: 0, y: 0 };
+      const h = getTableHeight(
+        inst.table,
+        detailLevel,
+        fkColsByTable.get(inst.table.id),
+        inst.sharedGroups.length > 1
+      );
       const rect = el.getBoundingClientRect();
       const zoom = Math.max(viewport.zoom, 0.9);
       setViewport({
@@ -268,7 +281,6 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     }
   }, [focusRequest]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Pointer Move & Up handlers
   useEffect(() => {
     const onPointerMove = (e: PointerEvent) => {
       const drag = dragRef.current;
@@ -293,10 +305,11 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         }
         onUpdatePositions({
           ...positions,
-          [drag.tableId]: { x: nx, y: ny },
+          [drag.posKey]: { x: nx, y: ny },
         });
 
-        // Detect if hovered over a DIFFERENT TableGroup box
+        setAltPressedDuringDrag(e.altKey || e.ctrlKey || e.metaKey);
+
         const centerX = nx + TABLE_WIDTH / 2;
         const centerY = ny + 40;
         let hoveredG: string | null = null;
@@ -317,8 +330,8 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         const dx = (e.clientX - drag.startX) / viewport.zoom;
         const dy = (e.clientY - drag.startY) / viewport.zoom;
         const next = { ...positions };
-        for (const id of drag.tableIds) {
-          const orig = drag.origPositions[id];
+        for (const pk of drag.posKeys) {
+          const orig = drag.origPositions[pk];
           if (!orig) continue;
           let nx = orig.x + dx;
           let ny = orig.y + dy;
@@ -326,7 +339,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
             nx = Math.round(nx / 10) * 10;
             ny = Math.round(ny / 10) * 10;
           }
-          next[id] = { x: nx, y: ny };
+          next[pk] = { x: nx, y: ny };
         }
         onUpdatePositions(next);
       } else if (drag.type === 'note') {
@@ -342,13 +355,20 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
       }
     };
 
-    const onPointerUp = () => {
+    const onPointerUp = (e: PointerEvent) => {
       const drag = dragRef.current;
       if (drag && drag.type === 'table' && dropTargetGroupName) {
-        onMoveTableToGroup(drag.tableId, dropTargetGroupName);
+        const keepInSource = e.altKey || e.ctrlKey || e.metaKey;
+        onAssignTableToGroup(
+          drag.tableId,
+          dropTargetGroupName,
+          drag.origGroup,
+          keepInSource
+        );
       }
       dragRef.current = null;
       setDropTargetGroupName(null);
+      setAltPressedDuringDrag(false);
     };
 
     window.addEventListener('pointermove', onPointerMove);
@@ -365,7 +385,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     dropTargetGroupName,
     onUpdatePositions,
     onUpdateStickyNote,
-    onMoveTableToGroup,
+    onAssignTableToGroup,
   ]);
 
   const handleWheel = (e: React.WheelEvent) => {
@@ -389,8 +409,8 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     }
   };
 
-  const getColAnchorY = (table: TableDef, colName: string) => {
-    const pos = positions[table.id] || { x: 0, y: 0 };
+  const getColAnchorY = (table: TableDef, posKey: string, colName: string) => {
+    const pos = positions[posKey] || positions[table.id] || { x: 0, y: 0 };
     if (detailLevel === 'names') return pos.y + 20;
     const fkSet = fkColsByTable.get(table.id);
     const cols =
@@ -407,9 +427,9 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
 
   const activeTableHighlight = hoveredTableId || selectedTableId;
 
-  const isTableDimmed = (tableId: string) => {
+  const isInstanceDimmed = (groupName: string | null) => {
     if (!focusedGroup) return false;
-    return tableToGroup.get(tableId) !== focusedGroup;
+    return groupName !== focusedGroup;
   };
 
   const handleAddNoteAtCenter = () => {
@@ -421,15 +441,19 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     onAddStickyNote(Math.round(cx), Math.round(cy));
   };
 
-  // Minimap bounds
   const minimapBounds = useMemo(() => {
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
-    for (const t of schema.tables) {
-      const p = positions[t.id] || { x: 0, y: 0 };
-      const h = getTableHeight(t, detailLevel, fkColsByTable.get(t.id));
+    for (const inst of instances) {
+      const p = positions[inst.posKey] || positions[inst.table.id] || { x: 0, y: 0 };
+      const h = getTableHeight(
+        inst.table,
+        detailLevel,
+        fkColsByTable.get(inst.table.id),
+        inst.sharedGroups.length > 1
+      );
       minX = Math.min(minX, p.x);
       minY = Math.min(minY, p.y);
       maxX = Math.max(maxX, p.x + TABLE_WIDTH);
@@ -442,15 +466,18 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
       width: Math.max(400, maxX - minX + 160),
       height: Math.max(300, maxY - minY + 160),
     };
-  }, [schema.tables, positions, detailLevel, fkColsByTable]);
+  }, [instances, positions, detailLevel, fkColsByTable]);
 
   return (
     <div
       ref={containerRef}
       onWheel={handleWheel}
       onPointerDown={(e) => {
-        if (e.target === e.currentTarget || (e.target as HTMLElement).dataset.canvasBg === 'true') {
-          setColorPickerTableId(null);
+        if (
+          e.target === e.currentTarget ||
+          (e.target as HTMLElement).dataset.canvasBg === 'true'
+        ) {
+          setColorPickerPosKey(null);
           onSelectTable(null);
           dragRef.current = {
             type: 'pan',
@@ -465,7 +492,6 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         darkMode ? 'canvas-grid-dark' : 'canvas-grid-light'
       }`}
     >
-      {/* Transformed World Layer */}
       <div
         data-canvas-bg="true"
         style={{
@@ -497,18 +523,17 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
                 isDimmed ? 'opacity-25' : 'opacity-100'
               } ${isDropTarget ? 'ring-4 ring-blue-500/30 border-solid' : ''}`}
             >
-              {/* Draggable Group Header */}
               <div
                 onPointerDown={(e) => {
                   e.stopPropagation();
                   const origPositions: Record<string, TablePosition> = {};
-                  for (const tid of gb.tables) {
-                    origPositions[tid] = positions[tid] || { x: 0, y: 0 };
+                  for (const pk of gb.posKeys) {
+                    origPositions[pk] = positions[pk] || { x: 0, y: 0 };
                   }
                   dragRef.current = {
                     type: 'group',
                     groupName: gb.name,
-                    tableIds: gb.tables,
+                    posKeys: gb.posKeys,
                     startX: e.clientX,
                     startY: e.clientY,
                     origPositions,
@@ -529,7 +554,9 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
                   </span>
                   {isDropTarget && (
                     <span className="text-xs font-semibold text-blue-600 dark:text-blue-400 ml-2">
-                      Drop to assign to {gb.name}
+                      {altPressedDuringDrag
+                        ? `Drop to also assign to ${gb.name}`
+                        : `Drop to move to ${gb.name} (hold Alt to keep in both)`}
                     </span>
                   )}
                 </div>
@@ -581,20 +608,29 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
           );
         })}
 
-        {/* 2. Relationship Edges (SVG Overlay) */}
+        {/* 2. Relationship Edges */}
         <svg
           className="overflow-visible pointer-events-none"
           style={{ position: 'absolute', left: 0, top: 0, width: 1, height: 1 }}
         >
-          {schema.refs.map((r) => {
-            const tA = tableMap.get(r.fromTable);
-            const tB = tableMap.get(r.toTable);
-            if (!tA || !tB) return null;
-
-            const pA = positions[tA.id] || { x: 0, y: 0 };
-            const pB = positions[tB.id] || { x: 0, y: 0 };
-            const y1 = getColAnchorY(tA, r.fromColumns[0]);
-            const y2 = getColAnchorY(tB, r.toColumns[0]);
+          {resolvedEdges.map((edge) => {
+            const { ref: r, fromInst, toInst } = edge;
+            const pA =
+              positions[fromInst.posKey] ||
+              positions[fromInst.table.id] || { x: 0, y: 0 };
+            const pB =
+              positions[toInst.posKey] ||
+              positions[toInst.table.id] || { x: 0, y: 0 };
+            const y1 = getColAnchorY(
+              fromInst.table,
+              fromInst.posKey,
+              r.fromColumns[0]
+            );
+            const y2 = getColAnchorY(
+              toInst.table,
+              toInst.posKey,
+              r.toColumns[0]
+            );
 
             const aCenter = pA.x + TABLE_WIDTH / 2;
             const bCenter = pB.x + TABLE_WIDTH / 2;
@@ -603,7 +639,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
             let dir1 = 1;
             let dir2 = -1;
 
-            if (tA.id === tB.id) {
+            if (fromInst.posKey === toInst.posKey) {
               x1 = pA.x + TABLE_WIDTH;
               x2 = pA.x + TABLE_WIDTH;
               dir1 = 1;
@@ -621,7 +657,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
             }
 
             const dx =
-              tA.id === tB.id
+              fromInst.posKey === toInst.posKey
                 ? 70
                 : Math.max(54, Math.abs(x2 - x1) * 0.45);
             const cx1 = x1 + dir1 * dx;
@@ -629,14 +665,14 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
             const pathD = `M ${x1} ${y1} C ${cx1} ${y1}, ${cx2} ${y2}, ${x2} ${y2}`;
 
             const isHighlighted =
-              hoveredRefId === r.id ||
+              hoveredRefId === edge.id ||
               activeTableHighlight === r.fromTable ||
               activeTableHighlight === r.toTable;
 
             const dimmedByGroup =
               focusedGroup !== null &&
-              tableToGroup.get(r.fromTable) !== focusedGroup &&
-              tableToGroup.get(r.toTable) !== focusedGroup;
+              fromInst.groupName !== focusedGroup &&
+              toInst.groupName !== focusedGroup;
 
             const dimmedBySelection =
               activeTableHighlight !== null && !isHighlighted;
@@ -649,7 +685,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
 
             return (
               <g
-                key={r.id}
+                key={edge.id}
                 style={{
                   opacity: dimmedByGroup
                     ? 0.12
@@ -658,14 +694,13 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
                     : 1,
                 }}
               >
-                {/* Invisible wider hit path for hovering */}
                 <path
                   d={pathD}
                   fill="none"
                   stroke="transparent"
                   strokeWidth={14}
                   className="pointer-events-auto cursor-pointer"
-                  onMouseEnter={() => setHoveredRefId(r.id)}
+                  onMouseEnter={() => setHoveredRefId(edge.id)}
                   onMouseLeave={() => setHoveredRefId(null)}
                 />
                 <path
@@ -684,9 +719,8 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
                   cx={x2}
                   cy={y2}
                   r={isHighlighted ? 4.5 : 3.5}
-                  fill={isHighlighted ? '#2563EB' : darkMode ? '#64748b' : '#64748b'}
+                  fill={isHighlighted ? '#2563EB' : '#64748b'}
                 />
-                {/* Cardinality labels on highlight */}
                 {isHighlighted && (
                   <>
                     <text
@@ -724,16 +758,19 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
           })}
         </svg>
 
-        {/* 3. Table Cards */}
-        {schema.tables.map((table) => {
-          const pos = positions[table.id] || { x: 0, y: 0 };
+        {/* 3. Table Cards (including shared domain instances) */}
+        {instances.map((inst) => {
+          const table = inst.table;
+          const pos =
+            positions[inst.posKey] || positions[table.id] || { x: 0, y: 0 };
           const isSelected = selectedTableId === table.id;
           const isHovered = hoveredTableId === table.id;
           const fkSet = fkColsByTable.get(table.id);
           const headerBg =
             table.headerColor || (darkMode ? '#1e293b' : '#0f172a');
           const headerText = getContrastTextColor(headerBg);
-          const dimmed = isTableDimmed(table.id);
+          const dimmed = isInstanceDimmed(inst.groupName);
+          const isShared = inst.sharedGroups.length > 1;
 
           const visibleCols =
             detailLevel === 'names'
@@ -749,7 +786,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
 
           return (
             <div
-              key={table.id}
+              key={inst.posKey}
               style={{
                 left: pos.x,
                 top: pos.y,
@@ -760,14 +797,15 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
               onPointerDown={(e) => {
                 e.stopPropagation();
                 onSelectTable(table.id);
-                setColorPickerTableId(null);
+                setColorPickerPosKey(null);
                 dragRef.current = {
                   type: 'table',
+                  posKey: inst.posKey,
                   tableId: table.id,
                   startX: e.clientX,
                   startY: e.clientY,
                   origPos: pos,
-                  origGroup: tableToGroup.get(table.id) || null,
+                  origGroup: inst.groupName,
                 };
               }}
               className={`absolute rounded-lg border bg-white dark:bg-slate-900 pointer-events-auto select-none transition-opacity ${
@@ -793,8 +831,8 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
                   <button
                     type="button"
                     onClick={() =>
-                      setColorPickerTableId(
-                        colorPickerTableId === table.id ? null : table.id
+                      setColorPickerPosKey(
+                        colorPickerPosKey === inst.posKey ? null : inst.posKey
                       )
                     }
                     title="Customize table header color"
@@ -806,7 +844,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
               </div>
 
               {/* Header Color Picker Popover */}
-              {colorPickerTableId === table.id && (
+              {colorPickerPosKey === inst.posKey && (
                 <div
                   onPointerDown={(e) => e.stopPropagation()}
                   className="absolute right-2 top-11 z-30 p-2.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-lg w-48 space-y-2"
@@ -821,7 +859,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
                         type="button"
                         onClick={() => {
                           onChangeTableHeaderColor(table.id, sw);
-                          setColorPickerTableId(null);
+                          setColorPickerPosKey(null);
                         }}
                         style={{ backgroundColor: sw }}
                         className="h-6 rounded border border-black/10 hover:scale-105 transition-transform"
@@ -845,7 +883,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
                       type="button"
                       onClick={() => {
                         onChangeTableHeaderColor(table.id, null);
-                        setColorPickerTableId(null);
+                        setColorPickerPosKey(null);
                       }}
                       className="text-[11px] text-slate-500 hover:text-slate-900 dark:hover:text-slate-100"
                     >
@@ -901,6 +939,19 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
                       No key columns
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* Shared Domain Sub-bar */}
+              {isShared && (
+                <div
+                  title={`Assigned domains: ${inst.sharedGroups.join(', ')}`}
+                  className="px-3 py-1 bg-blue-50/70 dark:bg-blue-950/40 border-t border-blue-100 dark:border-blue-900/60 flex items-center gap-1.5 text-[10px] font-medium text-blue-700 dark:text-blue-300"
+                >
+                  <Share2 className="w-3 h-3 shrink-0" />
+                  <span className="truncate">
+                    Shared · {inst.sharedGroups.length} domains
+                  </span>
                 </div>
               )}
 
@@ -1034,8 +1085,8 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         })}
       </div>
 
-      {/* Minimap Overlay (Bottom Left) */}
-      {showMinimap && schema.tables.length > 0 && (
+      {/* Minimap Overlay */}
+      {showMinimap && instances.length > 0 && (
         <div className="absolute bottom-4 left-4 w-44 h-28 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/90 dark:bg-slate-900/90 backdrop-blur-xs p-1.5 shadow-sm pointer-events-none hidden sm:block">
           <svg
             viewBox={`${minimapBounds.minX} ${minimapBounds.minY} ${minimapBounds.width} ${minimapBounds.height}`}
@@ -1056,19 +1107,25 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
                 strokeWidth={8}
               />
             ))}
-            {schema.tables.map((t) => {
-              const p = positions[t.id] || { x: 0, y: 0 };
-              const h = getTableHeight(t, detailLevel, fkColsByTable.get(t.id));
+            {instances.map((inst) => {
+              const p =
+                positions[inst.posKey] || positions[inst.table.id] || { x: 0, y: 0 };
+              const h = getTableHeight(
+                inst.table,
+                detailLevel,
+                fkColsByTable.get(inst.table.id),
+                inst.sharedGroups.length > 1
+              );
               return (
                 <rect
-                  key={t.id}
+                  key={inst.posKey}
                   x={p.x}
                   y={p.y}
                   width={TABLE_WIDTH}
                   height={h}
                   rx={12}
                   fill={
-                    selectedTableId === t.id
+                    selectedTableId === inst.table.id
                       ? '#2563EB'
                       : darkMode
                       ? '#475569'
@@ -1081,7 +1138,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         </div>
       )}
 
-      {/* Floating Canvas Toolbar (Bottom Right) */}
+      {/* Floating Canvas Toolbar */}
       <div
         onPointerDown={(e) => e.stopPropagation()}
         className="absolute bottom-4 right-4 flex items-center gap-1.5 p-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xs shadow-sm"
@@ -1152,13 +1209,19 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         <button
           type="button"
           onClick={() => {
-            const boxes = schema.tables.map((t) => {
-              const p = positions[t.id] || { x: 0, y: 0 };
+            const boxes = instances.map((inst) => {
+              const p =
+                positions[inst.posKey] || positions[inst.table.id] || { x: 0, y: 0 };
               return {
                 x: p.x,
                 y: p.y,
                 width: TABLE_WIDTH,
-                height: getTableHeight(t, detailLevel, fkColsByTable.get(t.id)),
+                height: getTableHeight(
+                  inst.table,
+                  detailLevel,
+                  fkColsByTable.get(inst.table.id),
+                  inst.sharedGroups.length > 1
+                ),
               };
             });
             fitBounds(boxes);

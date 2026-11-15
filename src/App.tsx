@@ -27,12 +27,19 @@ import {
   ViewMode,
   WorkspaceProject,
 } from './types/schema';
-import { autoLayoutSingleGroup, computeAutoLayout } from './utils/autoLayout';
 import {
+  autoLayoutSingleGroup,
+  buildTableInstances,
+  computeAutoLayout,
+} from './utils/autoLayout';
+import {
+  assignTableToGroupInDbml,
   deleteTableGroupInDbml,
   moveTableToGroupInDbml,
   parseDbml,
+  removeTableFromGroupInDbml,
   reorderTableGroupsInDbml,
+  setTableGroupsForTableInDbml,
   setTableHeaderColorInDbml,
   upsertTableGroupInDbml,
 } from './utils/dbmlParser';
@@ -151,27 +158,50 @@ export default function App() {
     [activeWorkspace?.dbml]
   );
 
-  // Ensure any newly typed tables in DBML get non-overlapping default coordinates
+  // Ensure any newly typed tables or shared multi-domain instances get non-overlapping coordinates
   useEffect(() => {
     if (!activeWorkspace) return;
-    const missing = parsedSchema.tables.filter(
-      (t) => !activeWorkspace.tablePositions[t.id]
+    const { instances } = buildTableInstances(parsedSchema);
+    const missing = instances.filter(
+      (inst) => !activeWorkspace.tablePositions[inst.posKey]
     );
     if (missing.length === 0) return;
 
+    const patch: Record<string, TablePosition> = {};
     const existingCoords = Object.values(activeWorkspace.tablePositions);
-    let maxY = 80;
-    let baseX = 80;
+    let fallbackY = 80;
+    let fallbackX = 80;
     for (const p of existingCoords) {
-      maxY = Math.max(maxY, p.y + 220);
-      baseX = Math.min(baseX, p.x);
+      fallbackY = Math.max(fallbackY, p.y + 220);
+      fallbackX = Math.min(fallbackX, p.x);
     }
 
-    const patch: Record<string, TablePosition> = {};
-    missing.forEach((t, idx) => {
-      patch[t.id] = {
-        x: baseX + (idx % 3) * 320,
-        y: maxY + Math.floor(idx / 3) * 260,
+    missing.forEach((inst, idx) => {
+      if (inst.groupName) {
+        const siblings = instances.filter(
+          (other) =>
+            other.groupName === inst.groupName &&
+            other.posKey !== inst.posKey &&
+            activeWorkspace.tablePositions[other.posKey]
+        );
+        if (siblings.length > 0) {
+          let maxRight = -Infinity;
+          let avgY = 0;
+          for (const sib of siblings) {
+            const sp = activeWorkspace.tablePositions[sib.posKey];
+            maxRight = Math.max(maxRight, sp.x + 276);
+            avgY += sp.y;
+          }
+          patch[inst.posKey] = {
+            x: maxRight + 56,
+            y: Math.round(avgY / siblings.length),
+          };
+          return;
+        }
+      }
+      patch[inst.posKey] = {
+        x: fallbackX + (idx % 3) * 320,
+        y: fallbackY + Math.floor(idx / 3) * 260,
       };
     });
 
@@ -179,7 +209,7 @@ export default function App() {
       ...ws,
       tablePositions: { ...ws.tablePositions, ...patch },
     }));
-  }, [parsedSchema.tables, activeWorkspace, updateActiveWorkspace]);
+  }, [parsedSchema, activeWorkspace, updateActiveWorkspace]);
 
   // Resizable split divider handler
   const startSplitResize = (e: React.MouseEvent) => {
@@ -256,20 +286,59 @@ export default function App() {
 
   const handleMoveTableToGroup = (
     tableId: string,
-    targetGroup: string | null
+    targetGroup: string | null,
+    sourceGroup?: string | null,
+    keepInSource?: boolean
   ) => {
-    const nextDbml = moveTableToGroupInDbml(
+    let nextDbml: string;
+    if (targetGroup && keepInSource) {
+      nextDbml = assignTableToGroupInDbml(
+        activeWorkspace.dbml,
+        tableId,
+        targetGroup,
+        parsedSchema
+      );
+      showToast(`Shared ${tableId} into "${targetGroup}"`);
+    } else if (targetGroup) {
+      nextDbml = moveTableToGroupInDbml(
+        activeWorkspace.dbml,
+        tableId,
+        targetGroup,
+        parsedSchema,
+        sourceGroup
+      );
+      showToast(`Moved ${tableId} to "${targetGroup}"`);
+    } else {
+      nextDbml = removeTableFromGroupInDbml(
+        activeWorkspace.dbml,
+        tableId,
+        sourceGroup ?? null,
+        parsedSchema
+      );
+      showToast(`Removed ${tableId} from domain`);
+    }
+    updateActiveWorkspace((ws) => ({ ...ws, dbml: nextDbml }));
+  };
+
+  const handleRemoveTableFromGroup = (tableId: string, groupName: string) => {
+    const nextDbml = removeTableFromGroupInDbml(
       activeWorkspace.dbml,
       tableId,
-      targetGroup,
+      groupName,
       parsedSchema
     );
     updateActiveWorkspace((ws) => ({ ...ws, dbml: nextDbml }));
-    showToast(
-      targetGroup
-        ? `Assigned ${tableId} to "${targetGroup}"`
-        : `Moved ${tableId} to Ungrouped`
+    showToast(`Removed ${tableId} from "${groupName}"`);
+  };
+
+  const handleSetTableGroups = (tableId: string, groupNames: string[]) => {
+    const nextDbml = setTableGroupsForTableInDbml(
+      activeWorkspace.dbml,
+      tableId,
+      groupNames,
+      parsedSchema
     );
+    updateActiveWorkspace((ws) => ({ ...ws, dbml: nextDbml }));
   };
 
   const handleReorderGroups = (orderedNames: string[]) => {
@@ -304,24 +373,9 @@ export default function App() {
     tables: string[];
     oldName?: string;
   }) => {
-    let nextDbml = activeWorkspace.dbml;
-    // Remove selected tables from any other group first so membership stays clean
-    const selectedSet = new Set(data.tables);
-    for (const existing of parsedSchema.tableGroups) {
-      if (existing.name === (data.oldName || data.name)) continue;
-      const filtered = existing.tables.filter((t) => !selectedSet.has(t));
-      if (filtered.length !== existing.tables.length) {
-        nextDbml = upsertTableGroupInDbml(
-          nextDbml,
-          existing.name,
-          filtered,
-          existing.color,
-          existing.note
-        );
-      }
-    }
-    nextDbml = upsertTableGroupInDbml(
-      nextDbml,
+    // Preserve memberships in all other groups so tables can belong to multiple domains
+    const nextDbml = upsertTableGroupInDbml(
+      activeWorkspace.dbml,
       data.name,
       data.tables,
       data.color,
@@ -630,6 +684,7 @@ export default function App() {
             onDeleteGroup={handleDeleteGroup}
             onAutoLayoutGroup={handleAutoLayoutGroup}
             onMoveTableToGroup={handleMoveTableToGroup}
+            onRemoveTableFromGroup={handleRemoveTableFromGroup}
             onReorderGroups={handleReorderGroups}
             onReorderTableInGroup={handleReorderTableInGroup}
             onSaveVersion={() => setSaveVersionOpen(true)}
@@ -695,7 +750,9 @@ export default function App() {
                   }
                 }}
                 onChangeTableHeaderColor={handleChangeTableHeaderColor}
-                onMoveTableToGroup={handleMoveTableToGroup}
+                onAssignTableToGroup={(tId, target, source, keep) =>
+                  handleMoveTableToGroup(tId, target, source, keep)
+                }
                 onEditGroup={(group) =>
                   setGroupModalState({ open: true, group })
                 }
@@ -721,7 +778,7 @@ export default function App() {
               setSelectedTableId(id);
               setFocusRequest({ type: 'table', id, nonce: Date.now() });
             }}
-            onMoveTableToGroup={handleMoveTableToGroup}
+            onSetTableGroups={handleSetTableGroups}
             onChangeTableHeaderColor={handleChangeTableHeaderColor}
             onJumpToCode={(line) => {
               if (viewMode === 'diagram') setViewMode('split');

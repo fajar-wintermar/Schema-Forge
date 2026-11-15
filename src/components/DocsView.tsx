@@ -49,6 +49,17 @@ export const DocsView: React.FC<DocsViewProps> = ({
     return s;
   }, [schema.tableGroups]);
 
+  const domainsByTable = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const g of schema.tableGroups) {
+      for (const t of new Set(g.tables)) {
+        if (!map.has(t)) map.set(t, []);
+        map.get(t)!.push(g.name);
+      }
+    }
+    return map;
+  }, [schema.tableGroups]);
+
   const ungroupedTables = useMemo(
     () => schema.tables.filter((t) => !groupedSet.has(t.id)),
     [schema.tables, groupedSet]
@@ -68,7 +79,7 @@ export const DocsView: React.FC<DocsViewProps> = ({
     );
   };
 
-  const renderTableDoc = (table: TableDef) => {
+  const renderTableDoc = (table: TableDef, currentDomain?: string) => {
     const cols =
       detailLevel === 'keys'
         ? table.columns.filter(
@@ -80,10 +91,13 @@ export const DocsView: React.FC<DocsViewProps> = ({
 
     const outgoing = schema.refs.filter((r) => r.fromTable === table.id);
     const incoming = schema.refs.filter((r) => r.toTable === table.id);
+    const otherDomains = (domainsByTable.get(table.id) || []).filter(
+      (d) => d !== currentDomain
+    );
 
     return (
       <section
-        key={table.id}
+        key={`${currentDomain || 'ungrouped'}::${table.id}`}
         id={`doc-table-${table.id}`}
         className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden"
       >
@@ -109,8 +123,18 @@ export const DocsView: React.FC<DocsViewProps> = ({
               </span>
             )}
           </div>
-          <div className="text-xs text-slate-500 dark:text-slate-400 tabular-nums shrink-0">
-            {table.columns.length} columns · {outgoing.length + incoming.length} refs
+          <div className="text-xs text-slate-500 dark:text-slate-400 tabular-nums shrink-0 flex items-center gap-2">
+            {otherDomains.length > 0 && (
+              <>
+                <span className="text-blue-600 dark:text-blue-400">
+                  Also in: {otherDomains.join(', ')}
+                </span>
+                <span aria-hidden="true">·</span>
+              </>
+            )}
+            <span>
+              {table.columns.length} columns · {outgoing.length + incoming.length} refs
+            </span>
           </div>
         </div>
 
@@ -299,7 +323,9 @@ export const DocsView: React.FC<DocsViewProps> = ({
                 </div>
               </div>
 
-              <div className="space-y-5">{members.map(renderTableDoc)}</div>
+              <div className="space-y-5">
+                {members.map((t) => renderTableDoc(t, group.name))}
+              </div>
             </div>
           );
         })}
@@ -315,7 +341,9 @@ export const DocsView: React.FC<DocsViewProps> = ({
                 </h2>
               </div>
               <div className="space-y-5">
-                {ungroupedTables.filter(matchesSearch).map(renderTableDoc)}
+                {ungroupedTables
+                  .filter(matchesSearch)
+                  .map((t) => renderTableDoc(t))}
               </div>
             </div>
           )}

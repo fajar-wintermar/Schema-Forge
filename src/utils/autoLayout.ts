@@ -1,45 +1,23 @@
 import {
   DetailLevel,
   ParsedSchema,
+  RefDef,
   TableDef,
   TablePosition,
 } from '../types/schema';
 
 export const TABLE_WIDTH = 276;
 
-export function estimateTableHeight(
-  table: TableDef,
-  detailLevel: DetailLevel
-): number {
-  const headerHeight = 40;
-  if (detailLevel === 'names') {
-    return headerHeight + (table.note ? 24 : 8);
-  }
-  const visibleCols =
-    detailLevel === 'keys'
-      ? table.columns.filter((c) => c.pk || c.unique || isFkCol(table, c))
-      : table.columns;
-  const rowHeight = detailLevel === 'full' ? 30 : 26;
-  const colsCount = Math.max(visibleCols.length, 1);
-  const noteExtra =
-    detailLevel === 'full' && table.note ? 28 : 0;
-  const idxExtra =
-    detailLevel === 'full' && table.indexes.length > 0 ? 22 : 0;
-  return headerHeight + colsCount * rowHeight + noteExtra + idxExtra + 10;
-}
-
-function isFkCol(table: TableDef, col: { name: string }): boolean {
-  return col.name.endsWith('_id');
-}
-
 export function getTableHeight(
   table: TableDef,
   detailLevel: DetailLevel,
-  refsFromTable?: Set<string>
+  refsFromTable?: Set<string>,
+  isShared?: boolean
 ): number {
   const headerHeight = 40;
+  const sharedFooter = isShared ? 22 : 0;
   if (detailLevel === 'names') {
-    return headerHeight + 8;
+    return headerHeight + sharedFooter + 8;
   }
   let cols = table.columns;
   if (detailLevel === 'keys') {
@@ -51,14 +29,172 @@ export function getTableHeight(
   const rows = Math.max(cols.length, detailLevel === 'keys' ? 1 : 0);
   const noteExtra = detailLevel === 'full' && table.note ? 30 : 0;
   const idxExtra = detailLevel === 'full' && table.indexes.length > 0 ? 24 : 0;
-  return headerHeight + rows * rowHeight + noteExtra + idxExtra + 10;
+  return headerHeight + rows * rowHeight + noteExtra + idxExtra + sharedFooter + 10;
 }
 
-interface BoxRect {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
+export interface TableInstance {
+  posKey: string;
+  table: TableDef;
+  groupName: string | null;
+  isPrimary: boolean;
+  sharedGroups: string[];
+}
+
+export interface ResolvedEdge {
+  id: string;
+  ref: RefDef;
+  fromInst: TableInstance;
+  toInst: TableInstance;
+}
+
+export function buildTableInstances(schema: ParsedSchema): {
+  instances: TableInstance[];
+  groupsByTable: Map<string, string[]>;
+  primaryGroupByTable: Map<string, string>;
+  instanceByGroupAndTable: Map<string, TableInstance>;
+} {
+  const tableMap = new Map(schema.tables.map((t) => [t.id, t]));
+  const groupsByTable = new Map<string, string[]>();
+  const primaryGroupByTable = new Map<string, string>();
+
+  for (const g of schema.tableGroups) {
+    const seenInGroup = new Set<string>();
+    for (const tId of g.tables) {
+      if (!tableMap.has(tId) || seenInGroup.has(tId)) continue;
+      seenInGroup.add(tId);
+      if (!groupsByTable.has(tId)) groupsByTable.set(tId, []);
+      groupsByTable.get(tId)!.push(g.name);
+      if (!primaryGroupByTable.has(tId)) {
+        primaryGroupByTable.set(tId, g.name);
+      }
+    }
+  }
+
+  const instances: TableInstance[] = [];
+  const instanceByGroupAndTable = new Map<string, TableInstance>();
+
+  for (const g of schema.tableGroups) {
+    const seenInGroup = new Set<string>();
+    for (const tId of g.tables) {
+      const table = tableMap.get(tId);
+      if (!table || seenInGroup.has(tId)) continue;
+      seenInGroup.add(tId);
+      const isPrimary = primaryGroupByTable.get(tId) === g.name;
+      const posKey = isPrimary ? tId : `${g.name}::${tId}`;
+      const inst: TableInstance = {
+        posKey,
+        table,
+        groupName: g.name,
+        isPrimary,
+        sharedGroups: groupsByTable.get(tId) || [g.name],
+      };
+      instances.push(inst);
+      instanceByGroupAndTable.set(`${g.name}::${tId}`, inst);
+    }
+  }
+
+  // Ungrouped tables
+  for (const t of schema.tables) {
+    if (!groupsByTable.has(t.id)) {
+      const inst: TableInstance = {
+        posKey: t.id,
+        table: t,
+        groupName: null,
+        isPrimary: true,
+        sharedGroups: [],
+      };
+      instances.push(inst);
+      instanceByGroupAndTable.set(`__ungrouped__::${t.id}`, inst);
+    }
+  }
+
+  return {
+    instances,
+    groupsByTable,
+    primaryGroupByTable,
+    instanceByGroupAndTable,
+  };
+}
+
+export function resolveSchemaEdges(
+  schema: ParsedSchema,
+  instances: TableInstance[],
+  positions: Record<string, TablePosition>
+): ResolvedEdge[] {
+  const byTable = new Map<string, TableInstance[]>();
+  for (const inst of instances) {
+    if (!byTable.has(inst.table.id)) byTable.set(inst.table.id, []);
+    byTable.get(inst.table.id)!.push(inst);
+  }
+
+  const edges: ResolvedEdge[] = [];
+
+  for (const r of schema.refs) {
+    const fromList = byTable.get(r.fromTable) || [];
+    const toList = byTable.get(r.toTable) || [];
+    if (fromList.length === 0 || toList.length === 0) continue;
+
+    // Self-reference: connect each instance to itself
+    if (r.fromTable === r.toTable) {
+      fromList.forEach((inst, idx) => {
+        edges.push({
+          id: `${r.id}__self_${idx}`,
+          ref: r,
+          fromInst: inst,
+          toInst: inst,
+        });
+      });
+      continue;
+    }
+
+    // 1. Prefer same-group connections so shared tables connect locally inside each domain
+    const sameGroupPairs: Array<{ f: TableInstance; t: TableInstance }> = [];
+    for (const f of fromList) {
+      for (const t of toList) {
+        if (f.groupName && f.groupName === t.groupName) {
+          sameGroupPairs.push({ f, t });
+        }
+      }
+    }
+
+    if (sameGroupPairs.length > 0) {
+      sameGroupPairs.forEach((pair, idx) => {
+        edges.push({
+          id: `${r.id}__g_${idx}`,
+          ref: r,
+          fromInst: pair.f,
+          toInst: pair.t,
+        });
+      });
+      continue;
+    }
+
+    // 2. Otherwise connect the closest pair of instances geometrically
+    let bestF = fromList[0];
+    let bestT = toList[0];
+    let bestDist = Infinity;
+    for (const f of fromList) {
+      const pf = positions[f.posKey] || { x: 0, y: 0 };
+      for (const t of toList) {
+        const pt = positions[t.posKey] || { x: 0, y: 0 };
+        const dist = Math.hypot(pf.x - pt.x, pf.y - pt.y);
+        if (dist < bestDist) {
+          bestDist = dist;
+          bestF = f;
+          bestT = t;
+        }
+      }
+    }
+
+    edges.push({
+      id: r.id,
+      ref: r,
+      fromInst: bestF,
+      toInst: bestT,
+    });
+  }
+
+  return edges;
 }
 
 export interface GroupBoundingBox {
@@ -67,6 +203,7 @@ export interface GroupBoundingBox {
   color?: string;
   note?: string;
   tables: string[];
+  posKeys: string[];
   x: number;
   y: number;
   width: number;
@@ -79,29 +216,36 @@ export function computeGroupBoundingBoxes(
   detailLevel: DetailLevel,
   fkColsByTable: Map<string, Set<string>>
 ): GroupBoundingBox[] {
-  const tableMap = new Map(schema.tables.map((t) => [t.id, t]));
+  const { instances } = buildTableInstances(schema);
+  const byGroup = new Map<string, TableInstance[]>();
+  for (const inst of instances) {
+    if (!inst.groupName) continue;
+    if (!byGroup.has(inst.groupName)) byGroup.set(inst.groupName, []);
+    byGroup.get(inst.groupName)!.push(inst);
+  }
+
   const boxes: GroupBoundingBox[] = [];
   const padX = 24;
   const padTop = 58;
   const padBottom = 24;
 
   for (const group of schema.tableGroups) {
-    const validTables = group.tables
-      .map((id) => tableMap.get(id))
-      .filter((t): t is TableDef => Boolean(t));
-
-    if (validTables.length === 0) {
-      continue;
-    }
+    const groupInstances = byGroup.get(group.name) || [];
+    if (groupInstances.length === 0) continue;
 
     let minX = Infinity;
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
 
-    for (const t of validTables) {
-      const pos = positions[t.id] || { x: 0, y: 0 };
-      const h = getTableHeight(t, detailLevel, fkColsByTable.get(t.id));
+    for (const inst of groupInstances) {
+      const pos = positions[inst.posKey] || positions[inst.table.id] || { x: 0, y: 0 };
+      const h = getTableHeight(
+        inst.table,
+        detailLevel,
+        fkColsByTable.get(inst.table.id),
+        inst.sharedGroups.length > 1
+      );
       minX = Math.min(minX, pos.x);
       minY = Math.min(minY, pos.y);
       maxX = Math.max(maxX, pos.x + TABLE_WIDTH);
@@ -113,7 +257,8 @@ export function computeGroupBoundingBoxes(
       name: group.name,
       color: group.color,
       note: group.note,
-      tables: validTables.map((t) => t.id),
+      tables: groupInstances.map((i) => i.table.id),
+      posKeys: groupInstances.map((i) => i.posKey),
       x: minX - padX,
       y: minY - padTop,
       width: maxX - minX + padX * 2,
@@ -124,43 +269,41 @@ export function computeGroupBoundingBoxes(
   return boxes;
 }
 
-/**
- * Sugiyama-inspired layered ordering + barycenter crossing minimization
- * for a subset of tables, returning relative coordinates inside a container.
- */
-function layoutTableSubset(
-  subsetTables: TableDef[],
+function layoutInstanceSubset(
+  subsetInstances: TableInstance[],
   schema: ParsedSchema,
   detailLevel: DetailLevel,
   fkColsByTable: Map<string, Set<string>>
 ): { relPositions: Record<string, TablePosition>; width: number; height: number } {
-  if (subsetTables.length === 0) {
+  if (subsetInstances.length === 0) {
     return { relPositions: {}, width: TABLE_WIDTH, height: 120 };
   }
 
-  const subsetIds = new Set(subsetTables.map((t) => t.id));
-  const tableMap = new Map(subsetTables.map((t) => [t.id, t]));
+  const tableToInst = new Map<string, TableInstance>();
+  for (const inst of subsetInstances) {
+    tableToInst.set(inst.table.id, inst);
+  }
 
-  // Build directed adjacency (referenced parent -> dependent child) & undirected neighbors
   const outgoing = new Map<string, Set<string>>();
   const incoming = new Map<string, Set<string>>();
   const neighbors = new Map<string, Set<string>>();
 
-  for (const t of subsetTables) {
-    outgoing.set(t.id, new Set());
-    incoming.set(t.id, new Set());
-    neighbors.set(t.id, new Set());
+  for (const inst of subsetInstances) {
+    outgoing.set(inst.posKey, new Set());
+    incoming.set(inst.posKey, new Set());
+    neighbors.set(inst.posKey, new Set());
   }
 
   for (const r of schema.refs) {
-    if (!subsetIds.has(r.fromTable) || !subsetIds.has(r.toTable)) continue;
-    if (r.fromTable === r.toTable) continue;
+    const fInst = tableToInst.get(r.fromTable);
+    const tInst = tableToInst.get(r.toTable);
+    if (!fInst || !tInst || fInst.posKey === tInst.posKey) continue;
 
-    let parent = r.toTable;
-    let child = r.fromTable;
+    let parent = tInst.posKey;
+    let child = fInst.posKey;
     if (r.relation === '<') {
-      parent = r.fromTable;
-      child = r.toTable;
+      parent = fInst.posKey;
+      child = tInst.posKey;
     }
 
     outgoing.get(parent)?.add(child);
@@ -169,52 +312,48 @@ function layoutTableSubset(
     neighbors.get(child)?.add(parent);
   }
 
-  // Assign layers using longest path from sources (cycle-safe)
   const layer = new Map<string, number>();
   const visiting = new Set<string>();
 
-  function getLayer(id: string): number {
-    if (layer.has(id)) return layer.get(id)!;
-    if (visiting.has(id)) return 0;
-    visiting.add(id);
+  function getLayer(posKey: string): number {
+    if (layer.has(posKey)) return layer.get(posKey)!;
+    if (visiting.has(posKey)) return 0;
+    visiting.add(posKey);
     let maxParent = -1;
-    for (const p of incoming.get(id) || []) {
+    for (const p of incoming.get(posKey) || []) {
       maxParent = Math.max(maxParent, getLayer(p));
     }
-    visiting.delete(id);
+    visiting.delete(posKey);
     const l = maxParent + 1;
-    layer.set(id, l);
+    layer.set(posKey, l);
     return l;
   }
 
-  for (const t of subsetTables) {
-    getLayer(t.id);
+  for (const inst of subsetInstances) {
+    getLayer(inst.posKey);
   }
 
-  // Group by layer; if too flat (all in 1 layer with >3 tables), wrap into neat columns
   const layersMap = new Map<number, string[]>();
-  for (const t of subsetTables) {
-    const l = layer.get(t.id) || 0;
+  for (const inst of subsetInstances) {
+    const l = layer.get(inst.posKey) || 0;
     if (!layersMap.has(l)) layersMap.set(l, []);
-    layersMap.get(l)!.push(t.id);
+    layersMap.get(l)!.push(inst.posKey);
   }
 
   let layerKeys = Array.from(layersMap.keys()).sort((a, b) => a - b);
 
-  // If a single layer has more than 3 tables, fold into 2 columns to keep group compact
-  if (layerKeys.length === 1 && subsetTables.length > 3) {
+  if (layerKeys.length === 1 && subsetInstances.length > 3) {
     const all = layersMap.get(layerKeys[0])!;
     layersMap.clear();
     const cols = Math.min(3, Math.ceil(Math.sqrt(all.length)));
-    all.forEach((id, idx) => {
+    all.forEach((pk, idx) => {
       const col = idx % cols;
       if (!layersMap.has(col)) layersMap.set(col, []);
-      layersMap.get(col)!.push(id);
+      layersMap.get(col)!.push(pk);
     });
     layerKeys = Array.from(layersMap.keys()).sort((a, b) => a - b);
   }
 
-  // Barycenter heuristic sweeps to minimize edge crossings between layers
   const posInLayer = new Map<string, number>();
   const refreshPos = () => {
     for (const lk of layerKeys) {
@@ -224,7 +363,6 @@ function layoutTableSubset(
   refreshPos();
 
   for (let sweep = 0; sweep < 4; sweep++) {
-    // Forward sweep
     for (let li = 1; li < layerKeys.length; li++) {
       const lk = layerKeys[li];
       const nodes = layersMap.get(lk)!;
@@ -236,7 +374,6 @@ function layoutTableSubset(
       });
       refreshPos();
     }
-    // Backward sweep
     for (let li = layerKeys.length - 2; li >= 0; li--) {
       const lk = layerKeys[li];
       const nodes = layersMap.get(lk)!;
@@ -250,7 +387,7 @@ function layoutTableSubset(
     }
   }
 
-  // Assign coordinates within group
+  const instMap = new Map(subsetInstances.map((i) => [i.posKey, i]));
   const gapX = 64;
   const gapY = 34;
   const relPositions: Record<string, TablePosition> = {};
@@ -261,29 +398,38 @@ function layoutTableSubset(
   for (const lk of layerKeys) {
     const ids = layersMap.get(lk) || [];
     let curY = 0;
-    for (const id of ids) {
-      const t = tableMap.get(id)!;
-      const h = getTableHeight(t, detailLevel, fkColsByTable.get(id));
-      relPositions[id] = { x: curX, y: curY };
+    for (const pk of ids) {
+      const inst = instMap.get(pk)!;
+      const h = getTableHeight(
+        inst.table,
+        detailLevel,
+        fkColsByTable.get(inst.table.id),
+        inst.sharedGroups.length > 1
+      );
+      relPositions[pk] = { x: curX, y: curY };
       curY += h + gapY;
     }
     maxLayerHeight = Math.max(maxLayerHeight, curY - gapY);
     curX += TABLE_WIDTH + gapX;
   }
 
-  // Vertically center shorter columns relative to tallest column in the group
   for (const lk of layerKeys) {
     const ids = layersMap.get(lk) || [];
     if (ids.length === 0) continue;
-    const lastId = ids[ids.length - 1];
-    const lastT = tableMap.get(lastId)!;
+    const lastPk = ids[ids.length - 1];
+    const lastInst = instMap.get(lastPk)!;
     const colH =
-      relPositions[lastId].y +
-      getTableHeight(lastT, detailLevel, fkColsByTable.get(lastId));
+      relPositions[lastPk].y +
+      getTableHeight(
+        lastInst.table,
+        detailLevel,
+        fkColsByTable.get(lastInst.table.id),
+        lastInst.sharedGroups.length > 1
+      );
     const offset = Math.max(0, (maxLayerHeight - colH) / 2);
     if (offset > 12) {
-      for (const id of ids) {
-        relPositions[id].y += Math.round(offset);
+      for (const pk of ids) {
+        relPositions[pk].y += Math.round(offset);
       }
     }
   }
@@ -313,14 +459,6 @@ function computeBarycenter(
   return count > 0 ? sum / count : posMap.get(nodeId) ?? 0;
 }
 
-/**
- * Group-aware intelligent auto-layout:
- * 1. Arranges tables inside each TableGroup using crossing minimization.
- * 2. Builds an inter-group dependency graph and orders TableGroups via
- *    topological layering + barycenter sweeps to minimize cross-domain edge overlaps.
- * 3. Packs TableGroups cleanly in 2D space with zero box overlaps, and places
- *    ungrouped tables neatly in an adjacent region.
- */
 export function computeAutoLayout(
   schema: ParsedSchema,
   detailLevel: DetailLevel
@@ -331,73 +469,54 @@ export function computeAutoLayout(
     for (const c of r.fromColumns) fkColsByTable.get(r.fromTable)!.add(c);
   }
 
-  const tableMap = new Map(schema.tables.map((t) => [t.id, t]));
-  const tableToGroup = new Map<string, string>();
+  const { instances, groupsByTable } = buildTableInstances(schema);
+  const byGroup = new Map<string, TableInstance[]>();
+  const UNGROUPED_ID = '__ungrouped__';
 
-  // Layout each group internally first
+  for (const inst of instances) {
+    const key = inst.groupName || UNGROUPED_ID;
+    if (!byGroup.has(key)) byGroup.set(key, []);
+    byGroup.get(key)!.push(inst);
+  }
+
   interface GroupLayout {
     id: string;
     relPositions: Record<string, TablePosition>;
     boxWidth: number;
     boxHeight: number;
-    tableIds: string[];
+    posKeys: string[];
   }
 
   const padX = 24;
   const padTop = 58;
   const padBottom = 24;
-
   const groupLayouts: GroupLayout[] = [];
 
   for (const group of schema.tableGroups) {
-    const memberTables = group.tables
-      .map((id) => tableMap.get(id))
-      .filter((t): t is TableDef => Boolean(t));
-    if (memberTables.length === 0) continue;
-
-    for (const t of memberTables) {
-      tableToGroup.set(t.id, group.id);
-    }
-
-    const inner = layoutTableSubset(
-      memberTables,
-      schema,
-      detailLevel,
-      fkColsByTable
-    );
-
+    const subset = byGroup.get(group.name) || [];
+    if (subset.length === 0) continue;
+    const inner = layoutInstanceSubset(subset, schema, detailLevel, fkColsByTable);
     groupLayouts.push({
       id: group.id,
       relPositions: inner.relPositions,
       boxWidth: inner.width + padX * 2,
       boxHeight: inner.height + padTop + padBottom,
-      tableIds: memberTables.map((t) => t.id),
+      posKeys: subset.map((i) => i.posKey),
     });
   }
 
-  // Ungrouped tables
-  const ungroupedTables = schema.tables.filter((t) => !tableToGroup.has(t.id));
-  const UNGROUPED_ID = '__ungrouped__';
-  if (ungroupedTables.length > 0) {
-    const inner = layoutTableSubset(
-      ungroupedTables,
-      schema,
-      detailLevel,
-      fkColsByTable
-    );
+  const ungrouped = byGroup.get(UNGROUPED_ID) || [];
+  if (ungrouped.length > 0) {
+    const inner = layoutInstanceSubset(ungrouped, schema, detailLevel, fkColsByTable);
     groupLayouts.push({
       id: UNGROUPED_ID,
       relPositions: inner.relPositions,
       boxWidth: inner.width + padX * 2,
       boxHeight: inner.height + padTop + padBottom,
-      tableIds: ungroupedTables.map((t) => t.id),
+      posKeys: ungrouped.map((i) => i.posKey),
     });
-    for (const t of ungroupedTables) {
-      tableToGroup.set(t.id, UNGROUPED_ID);
-    }
   }
 
-  // Build inter-group dependency graph to order groups cleanly
   const groupOut = new Map<string, Set<string>>();
   const groupIn = new Map<string, Set<string>>();
   const groupEdgeWeight = new Map<string, number>();
@@ -408,29 +527,25 @@ export function computeAutoLayout(
   }
 
   for (const r of schema.refs) {
-    const gFrom = tableToGroup.get(r.fromTable);
-    const gTo = tableToGroup.get(r.toTable);
-    if (!gFrom || !gTo || gFrom === gTo) continue;
-
-    let parentG = gTo;
-    let childG = gFrom;
-    if (r.relation === '<') {
-      parentG = gFrom;
-      childG = gTo;
+    const gFromList = groupsByTable.get(r.fromTable) || [UNGROUPED_ID];
+    const gToList = groupsByTable.get(r.toTable) || [UNGROUPED_ID];
+    for (const gFrom of gFromList) {
+      for (const gTo of gToList) {
+        if (gFrom === gTo) continue;
+        const parentG = r.relation === '<' ? gFrom : gTo;
+        const childG = r.relation === '<' ? gTo : gFrom;
+        groupOut.get(parentG)?.add(childG);
+        groupIn.get(childG)?.add(parentG);
+        const key = `${parentG}->${childG}`;
+        groupEdgeWeight.set(key, (groupEdgeWeight.get(key) || 0) + 1);
+      }
     }
-
-    groupOut.get(parentG)?.add(childG);
-    groupIn.get(childG)?.add(parentG);
-    const key = `${parentG}->${childG}`;
-    groupEdgeWeight.set(key, (groupEdgeWeight.get(key) || 0) + 1);
   }
 
-  // Order groups so heavily connected groups sit adjacent in a 2-column or layered grid
   const orderedGroups: GroupLayout[] = [];
   const remaining = new Set(groupLayouts.map((g) => g.id));
   const layoutById = new Map(groupLayouts.map((g) => [g.id, g]));
 
-  // Start with the group that has highest out-degree (foundational domain like Identity/Catalog)
   while (remaining.size > 0) {
     let bestId: string | null = null;
     if (orderedGroups.length === 0) {
@@ -445,7 +560,6 @@ export function computeAutoLayout(
         }
       }
     } else {
-      // Pick remaining group with strongest edge weight to already placed groups
       let bestScore = -Infinity;
       for (const id of remaining) {
         if (id === UNGROUPED_ID && remaining.size > 1) continue;
@@ -466,7 +580,6 @@ export function computeAutoLayout(
     orderedGroups.push(layoutById.get(bestId)!);
   }
 
-  // Arrange ordered groups into a balanced 2D grid (2 columns for 2-6 groups, 3 columns for 7+)
   const cols = orderedGroups.length <= 1 ? 1 : orderedGroups.length <= 6 ? 2 : 3;
   const groupGapX = 96;
   const groupGapY = 84;
@@ -502,9 +615,9 @@ export function computeAutoLayout(
     const originX = colX[c] + padX;
     const originY = rowY[r] + padTop;
 
-    for (const tableId of g.tableIds) {
-      const rel = g.relPositions[tableId] || { x: 0, y: 0 };
-      finalPositions[tableId] = {
+    for (const pk of g.posKeys) {
+      const rel = g.relPositions[pk] || { x: 0, y: 0 };
+      finalPositions[pk] = {
         x: Math.round(originX + rel.x),
         y: Math.round(originY + rel.y),
       };
@@ -520,8 +633,9 @@ export function autoLayoutSingleGroup(
   currentPositions: Record<string, TablePosition>,
   detailLevel: DetailLevel
 ): Record<string, TablePosition> {
-  const group = schema.tableGroups.find((g) => g.name === groupName);
-  if (!group) return currentPositions;
+  const { instances } = buildTableInstances(schema);
+  const subset = instances.filter((i) => i.groupName === groupName);
+  if (subset.length === 0) return currentPositions;
 
   const fkColsByTable = new Map<string, Set<string>>();
   for (const r of schema.refs) {
@@ -529,18 +643,10 @@ export function autoLayoutSingleGroup(
     for (const c of r.fromColumns) fkColsByTable.get(r.fromTable)!.add(c);
   }
 
-  const tableMap = new Map(schema.tables.map((t) => [t.id, t]));
-  const memberTables = group.tables
-    .map((id) => tableMap.get(id))
-    .filter((t): t is TableDef => Boolean(t));
-
-  if (memberTables.length === 0) return currentPositions;
-
-  // Anchor at current group's top-left
   let anchorX = Infinity;
   let anchorY = Infinity;
-  for (const t of memberTables) {
-    const p = currentPositions[t.id];
+  for (const inst of subset) {
+    const p = currentPositions[inst.posKey] || currentPositions[inst.table.id];
     if (p) {
       anchorX = Math.min(anchorX, p.x);
       anchorY = Math.min(anchorY, p.y);
@@ -549,17 +655,12 @@ export function autoLayoutSingleGroup(
   if (!isFinite(anchorX)) anchorX = 100;
   if (!isFinite(anchorY)) anchorY = 120;
 
-  const inner = layoutTableSubset(
-    memberTables,
-    schema,
-    detailLevel,
-    fkColsByTable
-  );
+  const inner = layoutInstanceSubset(subset, schema, detailLevel, fkColsByTable);
 
   const next = { ...currentPositions };
-  for (const t of memberTables) {
-    const rel = inner.relPositions[t.id] || { x: 0, y: 0 };
-    next[t.id] = {
+  for (const inst of subset) {
+    const rel = inner.relPositions[inst.posKey] || { x: 0, y: 0 };
+    next[inst.posKey] = {
       x: Math.round(anchorX + rel.x),
       y: Math.round(anchorY + rel.y),
     };

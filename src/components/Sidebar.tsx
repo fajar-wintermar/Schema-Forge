@@ -2,7 +2,6 @@ import React, { useMemo, useState } from 'react';
 import {
   ChevronDown,
   ChevronRight,
-  Crosshair,
   Edit3,
   Eye,
   EyeOff,
@@ -18,6 +17,7 @@ import {
   Sparkles,
   Table2,
   Trash2,
+  X,
 } from 'lucide-react';
 import {
   ParsedSchema,
@@ -43,7 +43,13 @@ interface SidebarProps {
   onEditGroup: (group: TableGroupDef) => void;
   onDeleteGroup: (groupName: string) => void;
   onAutoLayoutGroup: (groupName: string) => void;
-  onMoveTableToGroup: (tableId: string, targetGroup: string | null) => void;
+  onMoveTableToGroup: (
+    tableId: string,
+    targetGroup: string | null,
+    sourceGroup?: string | null,
+    keepInSource?: boolean
+  ) => void;
+  onRemoveTableFromGroup: (tableId: string, groupName: string) => void;
   onReorderGroups: (orderedGroupNames: string[]) => void;
   onReorderTableInGroup: (groupName: string, orderedTables: string[]) => void;
   onSaveVersion: () => void;
@@ -67,6 +73,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onDeleteGroup,
   onAutoLayoutGroup,
   onMoveTableToGroup,
+  onRemoveTableFromGroup,
   onReorderGroups,
   onReorderTableInGroup,
   onSaveVersion,
@@ -91,17 +98,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [diffDomainFilter, setDiffDomainFilter] = useState<string>('all');
   const [showLineDiff, setShowLineDiff] = useState(false);
 
-  const groupedTableSet = useMemo(() => {
-    const set = new Set<string>();
+  const tableDomainCount = useMemo(() => {
+    const counts = new Map<string, number>();
     for (const g of schema.tableGroups) {
-      for (const t of g.tables) set.add(t);
+      for (const t of new Set(g.tables)) {
+        counts.set(t, (counts.get(t) || 0) + 1);
+      }
     }
-    return set;
+    return counts;
   }, [schema.tableGroups]);
 
   const ungroupedTables = useMemo(() => {
-    return schema.tables.filter((t) => !groupedTableSet.has(t.id));
-  }, [schema.tables, groupedTableSet]);
+    return schema.tables.filter((t) => !tableDomainCount.has(t.id));
+  }, [schema.tables, tableDomainCount]);
 
   const query = search.trim().toLowerCase();
 
@@ -126,8 +135,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const filteredTableDiffs = useMemo(() => {
     return diffResult.tables.filter((td) => {
       if (diffFilter !== 'all' && td.status !== diffFilter) return false;
-      if (diffDomainFilter !== 'all' && (td.groupName || 'Ungrouped') !== diffDomainFilter) {
-        return false;
+      if (diffDomainFilter !== 'all') {
+        const groups = td.groupNames || [];
+        if (diffDomainFilter === 'Ungrouped') {
+          if (groups.length > 0) return false;
+        } else if (!groups.includes(diffDomainFilter)) {
+          return false;
+        }
       }
       return true;
     });
@@ -205,6 +219,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <span>New Domain</span>
               </button>
             </div>
+            <p className="text-[11px] text-slate-400">
+              Drag tables to move · Hold Alt + drop to share in multiple domains
+            </p>
 
             {focusedGroup && (
               <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 text-xs">
@@ -267,7 +284,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     e.preventDefault();
                     setDropHoverGroup(null);
                     if (draggedTable) {
-                      onMoveTableToGroup(draggedTable.tableId, group.name);
+                      const keepInSource = e.altKey || e.ctrlKey || e.metaKey;
+                      onMoveTableToGroup(
+                        draggedTable.tableId,
+                        group.name,
+                        draggedTable.sourceGroup,
+                        keepInSource
+                      );
                       setDraggedTable(null);
                     } else if (draggedGroup && draggedGroup !== group.name) {
                       const names = schema.tableGroups.map((g) => g.name);
@@ -385,6 +408,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                         matchingTables.map((tableId) => {
                           const tableObj = schema.tables.find((t) => t.id === tableId);
                           const isSelected = selectedTableId === tableId;
+                          const domCount = tableDomainCount.get(tableId) || 1;
                           return (
                             <div
                               key={tableId}
@@ -392,7 +416,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                               onDragStart={(e) => {
                                 e.stopPropagation();
                                 setDraggedTable({ tableId, sourceGroup: group.name });
-                                e.dataTransfer.effectAllowed = 'move';
+                                e.dataTransfer.effectAllowed = 'copyMove';
                               }}
                               onDragEnd={() => {
                                 setDraggedTable(null);
@@ -423,7 +447,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                                 }
                               }}
                               onClick={() => onSelectTable(tableId)}
-                              className={`group/item flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer text-xs transition-colors ${
+                              className={`group/item flex items-center gap-1.5 px-2 py-1.5 rounded-md cursor-pointer text-xs transition-colors ${
                                 isSelected
                                   ? 'bg-blue-600 text-white'
                                   : 'text-slate-700 dark:text-slate-200 hover:bg-slate-200/60 dark:hover:bg-slate-700/50'
@@ -437,6 +461,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
                               <span className="flex-1 truncate font-medium">
                                 {tableId}
                               </span>
+                              {domCount > 1 && (
+                                <span
+                                  title={`Shared across ${domCount} domains`}
+                                  className={`text-[10px] font-mono tabular-nums shrink-0 ${
+                                    isSelected
+                                      ? 'text-blue-100'
+                                      : 'text-blue-600 dark:text-blue-400'
+                                  }`}
+                                >
+                                  {domCount}×
+                                </span>
+                              )}
                               <span
                                 className={`text-[10px] tabular-nums ${
                                   isSelected
@@ -446,11 +482,21 @@ export const Sidebar: React.FC<SidebarProps> = ({
                               >
                                 {tableObj?.columns.length ?? 0}
                               </span>
-                              <Crosshair
-                                className={`w-3 h-3 opacity-0 group-hover/item:opacity-100 transition-opacity ${
-                                  isSelected ? 'text-white' : 'text-slate-400'
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  onRemoveTableFromGroup(tableId, group.name);
+                                }}
+                                title={`Remove ${tableId} from ${group.name}`}
+                                className={`p-0.5 rounded opacity-0 group-hover/item:opacity-100 transition-opacity ${
+                                  isSelected
+                                    ? 'text-blue-100 hover:text-white'
+                                    : 'text-slate-400 hover:text-rose-600 dark:hover:text-rose-400'
                                 }`}
-                              />
+                              >
+                                <X className="w-3 h-3" />
+                              </button>
                             </div>
                           );
                         })
@@ -474,7 +520,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 e.preventDefault();
                 setDropHoverGroup(null);
                 if (draggedTable) {
-                  onMoveTableToGroup(draggedTable.tableId, null);
+                  onMoveTableToGroup(
+                    draggedTable.tableId,
+                    null,
+                    draggedTable.sourceGroup
+                  );
                   setDraggedTable(null);
                 }
               }}
@@ -823,9 +873,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
                             {td.status}
                           </span>
                         </div>
-                        {td.groupName && (
+                        {td.groupNames && td.groupNames.length > 0 && (
                           <div className="text-[11px] text-slate-400">
-                            Domain: {td.groupName}
+                            Domains: {td.groupNames.join(', ')}
                           </div>
                         )}
                         <div className="space-y-1 pt-1 border-t border-slate-200/70 dark:border-slate-700/60">

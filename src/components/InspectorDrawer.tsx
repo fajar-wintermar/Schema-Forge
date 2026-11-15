@@ -15,7 +15,7 @@ interface InspectorDrawerProps {
   schema: ParsedSchema;
   onClose: () => void;
   onSelectTable: (tableId: string) => void;
-  onMoveTableToGroup: (tableId: string, groupName: string | null) => void;
+  onSetTableGroups: (tableId: string, groupNames: string[]) => void;
   onChangeTableHeaderColor: (tableId: string, color: string | null) => void;
   onJumpToCode: (line?: number) => void;
   onAddLinkedStickyNote: (tableId: string) => void;
@@ -37,15 +37,23 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
   schema,
   onClose,
   onSelectTable,
-  onMoveTableToGroup,
+  onSetTableGroups,
   onChangeTableHeaderColor,
   onJumpToCode,
   onAddLinkedStickyNote,
 }) => {
   if (!table) return null;
 
-  const currentGroup =
-    schema.tableGroups.find((g) => g.tables.includes(table.id))?.name || '';
+  const assignedGroups = schema.tableGroups
+    .filter((g) => g.tables.includes(table.id))
+    .map((g) => g.name);
+
+  const toggleGroupAssignment = (groupName: string) => {
+    const next = assignedGroups.includes(groupName)
+      ? assignedGroups.filter((g) => g !== groupName)
+      : [...assignedGroups, groupName];
+    onSetTableGroups(table.id, next);
+  };
 
   const outgoing = schema.refs.filter((r) => r.fromTable === table.id);
   const incoming = schema.refs.filter((r) => r.toTable === table.id);
@@ -91,26 +99,55 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
           </button>
         </div>
 
-        {/* Business Domain Assignment */}
-        <div className="space-y-1.5">
-          <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-700 dark:text-slate-300">
-            <Layers className="w-3.5 h-3.5 text-slate-400" />
-            <span>Business Domain (TableGroup)</span>
-          </label>
-          <select
-            value={currentGroup}
-            onChange={(e) =>
-              onMoveTableToGroup(table.id, e.target.value || null)
-            }
-            className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-900 dark:text-slate-100"
-          >
-            <option value="">Ungrouped</option>
-            {schema.tableGroups.map((g) => (
-              <option key={g.name} value={g.name}>
-                {g.name}
-              </option>
-            ))}
-          </select>
+        {/* Business Domain Multi-Assignment */}
+        <div className="space-y-2">
+          <div className="flex items-center justify-between text-xs">
+            <span className="flex items-center gap-1.5 font-semibold text-slate-700 dark:text-slate-300">
+              <Layers className="w-3.5 h-3.5 text-slate-400" />
+              <span>Business Domains</span>
+            </span>
+            <span className="text-[11px] text-slate-400 tabular-nums">
+              {assignedGroups.length === 0
+                ? 'Ungrouped'
+                : `${assignedGroups.length} assigned`}
+            </span>
+          </div>
+          {schema.tableGroups.length === 0 ? (
+            <p className="text-xs text-slate-400">
+              No business domains defined yet.
+            </p>
+          ) : (
+            <div className="space-y-1 max-h-40 overflow-y-auto p-1.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/30">
+              {schema.tableGroups.map((g) => {
+                const checked = assignedGroups.includes(g.name);
+                return (
+                  <label
+                    key={g.name}
+                    className={`flex items-center gap-2 px-2 py-1.5 rounded-md cursor-pointer text-xs transition-colors ${
+                      checked
+                        ? 'bg-blue-50 dark:bg-blue-950/50 text-blue-800 dark:text-blue-200 font-medium'
+                        : 'text-slate-700 dark:text-slate-300 hover:bg-slate-200/50 dark:hover:bg-slate-700/40'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={() => toggleGroupAssignment(g.name)}
+                      className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span
+                      className="w-2 h-2 rounded-xs shrink-0"
+                      style={{ backgroundColor: g.color || '#2563EB' }}
+                    />
+                    <span className="truncate flex-1">{g.name}</span>
+                  </label>
+                );
+              })}
+            </div>
+          )}
+          <p className="text-[11px] text-slate-400">
+            Tables can belong to multiple domains when shared across business flows.
+          </p>
         </div>
 
         {/* Header Color */}

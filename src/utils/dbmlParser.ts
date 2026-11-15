@@ -824,34 +824,90 @@ export function deleteTableGroupInDbml(dbml: string, groupName: string): string 
   return (before + after).trim() + '\n';
 }
 
-export function moveTableToGroupInDbml(
+export function assignTableToGroupInDbml(
   dbml: string,
   tableId: string,
-  targetGroupName: string | null,
+  targetGroupName: string,
+  parsed: ParsedSchema
+): string {
+  const target = parsed.tableGroups.find((g) => g.name === targetGroupName);
+  if (!target) return dbml;
+  if (target.tables.includes(tableId)) return dbml;
+  const nextTables = [...target.tables, tableId];
+  return upsertTableGroupInDbml(
+    dbml,
+    target.name,
+    nextTables,
+    target.color,
+    target.note
+  );
+}
+
+export function removeTableFromGroupInDbml(
+  dbml: string,
+  tableId: string,
+  groupName: string | null,
   parsed: ParsedSchema
 ): string {
   let updated = dbml;
-  // Remove table from any existing group
   for (const g of parsed.tableGroups) {
-    if (g.tables.includes(tableId) && g.name !== targetGroupName) {
+    if (groupName !== null && g.name !== groupName) continue;
+    if (g.tables.includes(tableId)) {
       const nextTables = g.tables.filter((t) => t !== tableId);
       updated = upsertTableGroupInDbml(updated, g.name, nextTables, g.color, g.note);
     }
   }
-  if (targetGroupName) {
-    const target = parsed.tableGroups.find((g) => g.name === targetGroupName);
-    if (target) {
-      const nextTables = target.tables.includes(tableId)
-        ? target.tables
-        : [...target.tables, tableId];
-      updated = upsertTableGroupInDbml(
-        updated,
-        target.name,
-        nextTables,
-        target.color,
-        target.note
-      );
+  return updated;
+}
+
+export function setTableGroupsForTableInDbml(
+  dbml: string,
+  tableId: string,
+  targetGroupNames: string[],
+  parsed: ParsedSchema
+): string {
+  const targetSet = new Set(targetGroupNames);
+  let updated = dbml;
+  for (const g of parsed.tableGroups) {
+    const hasTable = g.tables.includes(tableId);
+    const shouldHave = targetSet.has(g.name);
+    if (hasTable && !shouldHave) {
+      const nextTables = g.tables.filter((t) => t !== tableId);
+      updated = upsertTableGroupInDbml(updated, g.name, nextTables, g.color, g.note);
+    } else if (!hasTable && shouldHave) {
+      const nextTables = [...g.tables, tableId];
+      updated = upsertTableGroupInDbml(updated, g.name, nextTables, g.color, g.note);
     }
+  }
+  return updated;
+}
+
+export function moveTableToGroupInDbml(
+  dbml: string,
+  tableId: string,
+  targetGroupName: string | null,
+  parsed: ParsedSchema,
+  sourceGroupName?: string | null
+): string {
+  let updated = dbml;
+  if (sourceGroupName !== undefined) {
+    // Only remove from the specific source group when moving from a known group
+    if (sourceGroupName && sourceGroupName !== targetGroupName) {
+      updated = removeTableFromGroupInDbml(updated, tableId, sourceGroupName, parsed);
+    }
+  } else {
+    // Remove from all other groups
+    for (const g of parsed.tableGroups) {
+      if (g.tables.includes(tableId) && g.name !== targetGroupName) {
+        const nextTables = g.tables.filter((t) => t !== tableId);
+        updated = upsertTableGroupInDbml(updated, g.name, nextTables, g.color, g.note);
+      }
+    }
+  }
+
+  if (targetGroupName) {
+    const reParsed = parseDbml(updated);
+    updated = assignTableToGroupInDbml(updated, tableId, targetGroupName, reParsed);
   }
   return updated;
 }

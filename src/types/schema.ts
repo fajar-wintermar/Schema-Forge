@@ -155,7 +155,7 @@ export interface ColumnDiff {
 export interface TableDiff {
   tableId: string;
   status: 'added' | 'removed' | 'modified';
-  groupName?: string;
+  groupNames?: string[];
   headerColorChanged?: { from?: string; to?: string };
   noteChanged?: { from?: string; to?: string };
   columnDiffs: ColumnDiff[];

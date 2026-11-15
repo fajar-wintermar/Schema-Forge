@@ -97,14 +97,17 @@ export function computeSchemaDiff(dbmlA: string, dbmlB: string): SchemaDiffResul
   const schemaA: ParsedSchema = parseDbml(dbmlA);
   const schemaB: ParsedSchema = parseDbml(dbmlB);
 
-  const tableGroupMap = new Map<string, string>();
+  const tableGroupMap = new Map<string, string[]>();
+  const addGroupRef = (tableId: string, groupName: string) => {
+    if (!tableGroupMap.has(tableId)) tableGroupMap.set(tableId, []);
+    const arr = tableGroupMap.get(tableId)!;
+    if (!arr.includes(groupName)) arr.push(groupName);
+  };
   for (const g of schemaB.tableGroups) {
-    for (const t of g.tables) tableGroupMap.set(t, g.name);
+    for (const t of g.tables) addGroupRef(t, g.name);
   }
   for (const g of schemaA.tableGroups) {
-    for (const t of g.tables) {
-      if (!tableGroupMap.has(t)) tableGroupMap.set(t, g.name);
-    }
+    for (const t of g.tables) addGroupRef(t, g.name);
   }
 
   const mapA = new Map(schemaA.tables.map((t) => [t.id, t]));
@@ -127,7 +130,7 @@ export function computeSchemaDiff(dbmlA: string, dbmlB: string): SchemaDiffResul
       tableDiffs.push({
         tableId: id,
         status: 'added',
-        groupName: tableGroupMap.get(id),
+        groupNames: tableGroupMap.get(id) || [],
         columnDiffs: tB.columns.map((c) => ({
           name: c.name,
           status: 'added',
@@ -141,7 +144,7 @@ export function computeSchemaDiff(dbmlA: string, dbmlB: string): SchemaDiffResul
       tableDiffs.push({
         tableId: id,
         status: 'removed',
-        groupName: tableGroupMap.get(id),
+        groupNames: tableGroupMap.get(id) || [],
         columnDiffs: tA.columns.map((c) => ({
           name: c.name,
           status: 'removed',
@@ -202,7 +205,7 @@ export function computeSchemaDiff(dbmlA: string, dbmlB: string): SchemaDiffResul
         tableDiffs.push({
           tableId: id,
           status: 'modified',
-          groupName: tableGroupMap.get(id),
+          groupNames: tableGroupMap.get(id) || [],
           headerColorChanged,
           noteChanged,
           columnDiffs: colDiffs,

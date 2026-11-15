@@ -6,8 +6,10 @@ import {
   TablePosition,
 } from '../types/schema';
 import {
+  buildTableInstances,
   computeGroupBoundingBoxes,
   getTableHeight,
+  resolveSchemaEdges,
   TABLE_WIDTH,
 } from './autoLayout';
 
@@ -60,9 +62,13 @@ function parseCsvRows(text: string): string[][] {
 }
 
 export function exportSchemaToCsv(schema: ParsedSchema): string {
-  const tableToGroup = new Map<string, string>();
+  const tableToGroups = new Map<string, string[]>();
   for (const g of schema.tableGroups) {
-    for (const t of g.tables) tableToGroup.set(t, g.name);
+    for (const t of g.tables) {
+      if (!tableToGroups.has(t)) tableToGroups.set(t, []);
+      const arr = tableToGroups.get(t)!;
+      if (!arr.includes(g.name)) arr.push(g.name);
+    }
   }
 
   const refLookup = new Map<string, string>();
@@ -94,7 +100,7 @@ export function exportSchemaToCsv(schema: ParsedSchema): string {
   const lines = [headers.join(',')];
 
   for (const table of schema.tables) {
-    const groupName = tableToGroup.get(table.id) || '';
+    const groupName = (tableToGroups.get(table.id) || []).join('; ');
     for (const col of table.columns) {
       const refStr = refLookup.get(`${table.id}.${col.name}`) || '';
       const row = [
@@ -175,8 +181,14 @@ export function importCsvToDbml(csvText: string): string {
     const groupVal = iGroup !== -1 ? row[iGroup] : '';
 
     if (groupVal) {
-      if (!groupsMap.has(groupVal)) groupsMap.set(groupVal, new Set());
-      groupsMap.get(groupVal)!.add(tableName);
+      const groupNames = groupVal
+        .split(/[;|]/)
+        .map((g) => g.trim())
+        .filter(Boolean);
+      for (const gName of groupNames) {
+        if (!groupsMap.has(gName)) groupsMap.set(gName, new Set());
+        groupsMap.get(gName)!.add(tableName);
+      }
     }
 
     if (!tablesMap.has(tableName)) {
@@ -568,15 +580,23 @@ export function buildDiagramSvg(params: {
     fkColsByTable
   );
 
+  const { instances } = buildTableInstances(schema);
+  const resolvedEdges = resolveSchemaEdges(schema, instances, positions);
+
   // Compute overall bounding box
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
   let maxY = -Infinity;
 
-  for (const t of schema.tables) {
-    const pos = positions[t.id] || { x: 0, y: 0 };
-    const h = getTableHeight(t, detailLevel, fkColsByTable.get(t.id));
+  for (const inst of instances) {
+    const pos = positions[inst.posKey] || positions[inst.table.id] || { x: 0, y: 0 };
+    const h = getTableHeight(
+      inst.table,
+      detailLevel,
+      fkColsByTable.get(inst.table.id),
+      inst.sharedGroups.length > 1
+    );
     minX = Math.min(minX, pos.x);
     minY = Math.min(minY, pos.y);
     maxX = Math.max(maxX, pos.x + TABLE_WIDTH);
@@ -675,9 +695,8 @@ export function buildDiagramSvg(params: {
   }
 
   // 2. Relationship edges
-  const tableMap = new Map(schema.tables.map((t) => [t.id, t]));
-  const getAnchorY = (table: TableDef, colName: string) => {
-    const pos = positions[table.id] || { x: 0, y: 0 };
+  const getAnchorY = (table: TableDef, posKey: string, colName: string) => {
+    const pos = positions[posKey] || positions[table.id] || { x: 0, y: 0 };
     if (detailLevel === 'names') return pos.y + 20;
     const fkSet = fkColsByTable.get(table.id);
     const cols =
@@ -692,14 +711,12 @@ export function buildDiagramSvg(params: {
     return pos.y + 40 + idx * rowH + rowH / 2;
   };
 
-  for (const r of schema.refs) {
-    const tA = tableMap.get(r.fromTable);
-    const tB = tableMap.get(r.toTable);
-    if (!tA || !tB) continue;
-    const pA = positions[tA.id] || { x: 0, y: 0 };
-    const pB = positions[tB.id] || { x: 0, y: 0 };
-    const y1 = getAnchorY(tA, r.fromColumns[0]);
-    const y2 = getAnchorY(tB, r.toColumns[0]);
+  for (const edge of resolvedEdges) {
+    const { ref: r, fromInst, toInst } = edge;
+    const pA = positions[fromInst.posKey] || positions[fromInst.table.id] || { x: 0, y: 0 };
+    const pB = positions[toInst.posKey] || positions[toInst.table.id] || { x: 0, y: 0 };
+    const y1 = getAnchorY(fromInst.table, fromInst.posKey, r.fromColumns[0]);
+    const y2 = getAnchorY(toInst.table, toInst.posKey, r.toColumns[0]);
 
     const aCenter = pA.x + TABLE_WIDTH / 2;
     const bCenter = pB.x + TABLE_WIDTH / 2;
@@ -708,7 +725,12 @@ export function buildDiagramSvg(params: {
     let dir1 = 1;
     let dir2 = -1;
 
-    if (aCenter > bCenter + 40) {
+    if (fromInst.posKey === toInst.posKey) {
+      x1 = pA.x + TABLE_WIDTH;
+      x2 = pA.x + TABLE_WIDTH;
+      dir1 = 1;
+      dir2 = 1;
+    } else if (aCenter > bCenter + 40) {
       x1 = pA.x;
       x2 = pB.x + TABLE_WIDTH;
       dir1 = -1;
@@ -720,7 +742,10 @@ export function buildDiagramSvg(params: {
       dir2 = 1;
     }
 
-    const dx = Math.max(54, Math.abs(x2 - x1) * 0.45);
+    const dx =
+      fromInst.posKey === toInst.posKey
+        ? 70
+        : Math.max(54, Math.abs(x2 - x1) * 0.45);
     const cx1 = x1 + dir1 * dx;
     const cx2 = x2 + dir2 * dx;
 
@@ -732,9 +757,11 @@ export function buildDiagramSvg(params: {
   }
 
   // 3. Table cards
-  for (const table of schema.tables) {
-    const pos = positions[table.id] || { x: 0, y: 0 };
-    const h = getTableHeight(table, detailLevel, fkColsByTable.get(table.id));
+  for (const inst of instances) {
+    const table = inst.table;
+    const pos = positions[inst.posKey] || positions[table.id] || { x: 0, y: 0 };
+    const isShared = inst.sharedGroups.length > 1;
+    const h = getTableHeight(table, detailLevel, fkColsByTable.get(table.id), isShared);
     const headerBg = table.headerColor || (darkMode ? '#1e293b' : '#0f172a');
     const headerText = getContrastTextColor(headerBg);
     const fkSet = fkColsByTable.get(table.id);
@@ -791,6 +818,12 @@ export function buildDiagramSvg(params: {
           )}</text>`
         );
       });
+    }
+
+    if (isShared) {
+      parts.push(
+        `<text x="${pos.x + 12}" y="${pos.y + h - 8}" class="sans" font-size="10" fill="#2563eb">Shared across ${inst.sharedGroups.length} domains</text>`
+      );
     }
   }
 
