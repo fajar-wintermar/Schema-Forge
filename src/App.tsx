@@ -10,7 +10,7 @@ import {
   WorkspacesModal,
 } from './components/Modals';
 import { Sidebar, SidebarTab } from './components/Sidebar';
-import { TopBar } from './components/TopBar';
+import { GlobalSearchResult, TopBar } from './components/TopBar';
 import {
   deleteWorkspace,
   getMetaValue,
@@ -61,6 +61,10 @@ export default function App() {
   const [editorWidth, setEditorWidth] = useState(410);
   const [focusedGroup, setFocusedGroup] = useState<string | null>(null);
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
+  const [highlightedColumn, setHighlightedColumn] = useState<{
+    tableId: string;
+    columnName: string;
+  } | null>(null);
   const [scrollToLine, setScrollToLine] = useState<number | null>(null);
   const [focusRequest, setFocusRequest] = useState<{
     type: 'table' | 'group' | 'fit';
@@ -587,10 +591,56 @@ export default function App() {
     return `v${m[1]}.${Number(m[2]) + 1}.0`;
   })();
 
+  const handleSelectSearchResult = (res: GlobalSearchResult) => {
+    if (res.kind === 'group' && res.groupName) {
+      setHighlightedColumn(null);
+      setSelectedTableId(null);
+      if (viewMode === 'docs') setViewMode('split');
+      setFocusedGroup(res.groupName);
+      if (res.line) setScrollToLine(res.line);
+      setFocusRequest({ type: 'group', id: res.groupName, nonce: Date.now() });
+      showToast(`Focused domain "${res.groupName}"`);
+      return;
+    }
+
+    if (res.tableId) {
+      if (viewMode === 'docs') setViewMode('split');
+      if (
+        focusedGroup &&
+        !res.domains.includes(focusedGroup)
+      ) {
+        setFocusedGroup(null);
+      }
+      setSelectedTableId(res.tableId);
+
+      if (res.kind === 'column' && res.columnName) {
+        setHighlightedColumn({
+          tableId: res.tableId,
+          columnName: res.columnName,
+        });
+        // Ensure column is visible if currently in names-only or keys-only mode
+        if (
+          activeWorkspace.detailLevel === 'names' ||
+          (activeWorkspace.detailLevel === 'keys' && !res.isPk)
+        ) {
+          handleDetailLevelChange('columns');
+        }
+        showToast(`Highlighted ${res.tableId}.${res.columnName}`);
+      } else {
+        setHighlightedColumn(null);
+        showToast(`Focused table ${res.tableId}`);
+      }
+
+      if (res.line) setScrollToLine(res.line);
+      setFocusRequest({ type: 'table', id: res.tableId, nonce: Date.now() });
+    }
+  };
+
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
       <TopBar
         projectName={activeWorkspace.name}
+        schema={parsedSchema}
         sidebarOpen={sidebarOpen}
         onToggleSidebar={() => setSidebarOpen((o) => !o)}
         viewMode={viewMode}
@@ -598,6 +648,7 @@ export default function App() {
         detailLevel={activeWorkspace.detailLevel}
         onChangeDetailLevel={handleDetailLevelChange}
         onAutoLayout={handleAutoLayout}
+        onSelectSearchResult={handleSelectSearchResult}
         onOpenWorkspaces={() => setWorkspacesModalOpen(true)}
         onOpenImportExport={() => setImportExportOpen(true)}
         onOpenSaveVersion={() => setSaveVersionOpen(true)}
@@ -719,6 +770,7 @@ export default function App() {
                       onChange={handleDbmlChange}
                       errors={parsedSchema.errors}
                       scrollToLine={scrollToLine}
+                      enumNames={parsedSchema.enums.map((e) => e.name)}
                     />
                   </div>
                   <div
@@ -742,8 +794,12 @@ export default function App() {
                 focusedGroup={focusedGroup}
                 onToggleFocusGroup={setFocusedGroup}
                 selectedTableId={selectedTableId}
+                highlightedColumn={highlightedColumn}
                 onSelectTable={(id) => {
                   setSelectedTableId(id);
+                  if (!id || id !== highlightedColumn?.tableId) {
+                    setHighlightedColumn(null);
+                  }
                   if (id) {
                     const t = parsedSchema.tables.find((tb) => tb.id === id);
                     if (t?.line) setScrollToLine(t.line);

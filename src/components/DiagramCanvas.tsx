@@ -43,6 +43,7 @@ interface DiagramCanvasProps {
   focusedGroup: string | null;
   onToggleFocusGroup: (groupName: string | null) => void;
   selectedTableId: string | null;
+  highlightedColumn?: { tableId: string; columnName: string } | null;
   onSelectTable: (tableId: string | null) => void;
   onChangeTableHeaderColor: (tableId: string, color: string | null) => void;
   onAssignTableToGroup: (
@@ -120,6 +121,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
   focusedGroup,
   onToggleFocusGroup,
   selectedTableId,
+  highlightedColumn,
   onSelectTable,
   onChangeTableHeaderColor,
   onAssignTableToGroup,
@@ -898,11 +900,18 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
                 <div className="divide-y divide-slate-100 dark:divide-slate-800/80">
                   {visibleCols.map((col) => {
                     const isFk = fkSet?.has(col.name);
+                    const isColHighlighted =
+                      highlightedColumn?.tableId === table.id &&
+                      highlightedColumn?.columnName === col.name;
                     return (
                       <div
                         key={col.name}
                         style={{ height: rowH }}
-                        className="px-3 flex items-center justify-between gap-2 text-xs hover:bg-slate-50 dark:hover:bg-slate-800/40"
+                        className={`px-3 flex items-center justify-between gap-2 text-xs transition-colors ${
+                          isColHighlighted
+                            ? 'bg-blue-500/15 dark:bg-blue-500/25 ring-1 ring-inset ring-blue-500/70'
+                            : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'
+                        }`}
                         title={col.note || undefined}
                       >
                         <div className="flex items-center gap-1.5 min-w-0">
@@ -915,7 +924,9 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
                           )}
                           <span
                             className={`truncate ${
-                              col.pk
+                              isColHighlighted
+                                ? 'font-semibold text-blue-700 dark:text-blue-200'
+                                : col.pk
                                 ? 'font-semibold text-slate-900 dark:text-slate-50'
                                 : 'text-slate-700 dark:text-slate-200'
                             }`}
@@ -928,7 +939,13 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
                             </span>
                           )}
                         </div>
-                        <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400 shrink-0">
+                        <span
+                          className={`font-mono text-[11px] shrink-0 ${
+                            isColHighlighted
+                              ? 'text-blue-600 dark:text-blue-300 font-medium'
+                              : 'text-slate-500 dark:text-slate-400'
+                          }`}
+                        >
                           {col.type}
                         </span>
                       </div>
