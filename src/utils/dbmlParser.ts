@@ -18,7 +18,7 @@ interface Token {
   line: number;
 }
 
-function tokenizeDbml(input: string): Token[] {
+function tokenizeDbml(input: string, errors: ParseError[]): Token[] {
   const tokens: Token[] = [];
   let i = 0;
   let line = 1;
@@ -54,12 +54,24 @@ function tokenizeDbml(input: string): Token[] {
 
     // Multi-line comment
     if (ch === '/' && input[i + 1] === '*') {
+      const startLine = line;
       i += 2;
-      while (i < len && !(input[i] === '*' && input[i + 1] === '/')) {
+      let closed = false;
+      while (i < len) {
+        if (input[i] === '*' && input[i + 1] === '/') {
+          closed = true;
+          i += 2;
+          break;
+        }
         if (input[i] === '\n') line++;
         i++;
       }
-      i += 2;
+      if (!closed) {
+        errors.push({
+          line: startLine,
+          message: 'Unclosed multi-line comment (missing */)',
+        });
+      }
       continue;
     }
 
@@ -68,12 +80,23 @@ function tokenizeDbml(input: string): Token[] {
       const startLine = line;
       i += 3;
       let val = '';
-      while (i < len && input.slice(i, i + 3) !== "'''") {
+      let closed = false;
+      while (i < len) {
+        if (input.slice(i, i + 3) === "'''") {
+          closed = true;
+          i += 3;
+          break;
+        }
         if (input[i] === '\n') line++;
         val += input[i];
         i++;
       }
-      i += 3;
+      if (!closed) {
+        errors.push({
+          line: startLine,
+          message: "Unclosed multi-line string (missing ''')",
+        });
+      }
       tokens.push({ type: 'string', value: val.trim(), line: startLine });
       continue;
     }
@@ -84,7 +107,13 @@ function tokenizeDbml(input: string): Token[] {
       const startLine = line;
       i++;
       let val = '';
-      while (i < len && input[i] !== quote) {
+      let closed = false;
+      while (i < len) {
+        if (input[i] === quote) {
+          closed = true;
+          i++;
+          break;
+        }
         if (input[i] === '\\' && i + 1 < len) {
           i++;
           val += input[i];
@@ -94,7 +123,12 @@ function tokenizeDbml(input: string): Token[] {
         }
         i++;
       }
-      i++;
+      if (!closed) {
+        errors.push({
+          line: startLine,
+          message: `Unclosed string literal (missing ${quote})`,
+        });
+      }
       tokens.push({ type: 'string', value: val, line: startLine });
       continue;
     }
@@ -137,13 +171,13 @@ function unquote(val: string): string {
 }
 
 export function parseDbml(source: string): ParsedSchema {
-  const tokens = tokenizeDbml(source);
+  const errors: ParseError[] = [];
+  const tokens = tokenizeDbml(source, errors);
   const project: ProjectMeta = {};
   const tables: TableDef[] = [];
   const refs: RefDef[] = [];
   const enums: EnumDef[] = [];
   const tableGroups: TableGroupDef[] = [];
-  const errors: ParseError[] = [];
 
   const aliasToTableId = new Map<string, string>();
   const inlineRefs: Array<{
@@ -165,7 +199,7 @@ export function parseDbml(source: string): ParsedSchema {
   function parseBracketSettings(): Record<string, string> {
     const settings: Record<string, string> = {};
     if (peek()?.value !== '[') return settings;
-    next(); // '['
+    const openTok = next(); // '['
 
     let currentKey = '';
     let currentValParts: string[] = [];
@@ -225,6 +259,13 @@ export function parseDbml(source: string): ParsedSchema {
           currentValParts.push(t.value);
         }
       }
+    }
+
+    if (depth > 0) {
+      errors.push({
+        line: openTok.line,
+        message: "Unclosed '[' in settings block",
+      });
     }
 
     return settings;
@@ -341,6 +382,7 @@ export function parseDbml(source: string): ParsedSchema {
       }
       skipNewlines();
       if (peek()?.value === '{') {
+        const openBraceLine = peek()!.line;
         next(); // '{'
         while (idx < tokens.length && peek()?.value !== '}') {
           skipNewlines();
@@ -370,7 +412,14 @@ export function parseDbml(source: string): ParsedSchema {
             }
           }
         }
-        if (peek()?.value === '}') next();
+        if (peek()?.value === '}') {
+          next();
+        } else {
+          errors.push({
+            line: openBraceLine,
+            message: "Unclosed '{' in Project block",
+          });
+        }
       }
     } else if (keyword === 'table') {
       const startLine = tok.line;
@@ -476,7 +525,14 @@ export function parseDbml(source: string): ParsedSchema {
                 next();
               }
             }
-            if (peek()?.value === '}') next();
+            if (peek()?.value === '}') {
+              next();
+            } else {
+              errors.push({
+                line: colFirst.line,
+                message: `Unclosed '{' in Indexes block of table "${fullId}"`,
+              });
+            }
           }
           continue;
         }
@@ -537,12 +593,31 @@ export function parseDbml(source: string): ParsedSchema {
               targetRaw: opMatch[2].trim(),
               line: nameTok.line,
             });
+          } else {
+            errors.push({
+              line: nameTok.line,
+              message: `Invalid inline ref "${rawRef}" on ${fullId}.${colName} (expected e.g. > table.col)`,
+            });
           }
+        }
+
+        if (!colType) {
+          errors.push({
+            line: nameTok.line,
+            message: `Column "${colName}" in table "${fullId}" is missing a data type`,
+          });
         }
 
         const isPk =
           colSettings['pk'] === 'true' ||
           colSettings['primary key'] === 'true';
+
+        if (columns.some((c) => c.name === colName)) {
+          errors.push({
+            line: nameTok.line,
+            message: `Duplicate column "${colName}" in table "${fullId}"`,
+          });
+        }
 
         columns.push({
           name: colName,
@@ -565,7 +640,21 @@ export function parseDbml(source: string): ParsedSchema {
         }
       }
 
-      if (peek()?.value === '}') next();
+      if (peek()?.value === '}') {
+        next();
+      } else {
+        errors.push({
+          line: startLine,
+          message: `Unclosed '{' in Table "${fullId}"`,
+        });
+      }
+
+      if (tables.some((t) => t.id === fullId)) {
+        errors.push({
+          line: startLine,
+          message: `Duplicate table definition "${fullId}"`,
+        });
+      }
 
       tables.push({
         id: fullId,
@@ -623,11 +712,25 @@ export function parseDbml(source: string): ParsedSchema {
             memberTables.push(fullId);
           }
         }
-        if (peek()?.value === '}') next();
+        if (peek()?.value === '}') {
+          next();
+        } else {
+          errors.push({
+            line: startLine,
+            message: `Unclosed '{' in TableGroup "${groupName}"`,
+          });
+        }
       } else {
         errors.push({
           line: startLine,
           message: `Expected '{' after TableGroup ${groupName}`,
+        });
+      }
+
+      if (tableGroups.some((g) => g.name === groupName)) {
+        errors.push({
+          line: startLine,
+          message: `Duplicate TableGroup "${groupName}"`,
         });
       }
 
@@ -654,7 +757,14 @@ export function parseDbml(source: string): ParsedSchema {
           const r = parseRefExpression(peek()?.line || startLine);
           if (r) refs.push(r);
         }
-        if (peek()?.value === '}') next();
+        if (peek()?.value === '}') {
+          next();
+        } else {
+          errors.push({
+            line: startLine,
+            message: "Unclosed '{' in Ref block",
+          });
+        }
       } else {
         if (peek() && peek()?.value !== ':') {
           refName = unquote(next().value);
@@ -669,7 +779,19 @@ export function parseDbml(source: string): ParsedSchema {
           const r = parseRefExpression(startLine, refName);
           if (r) refs.push(r);
           skipNewlines();
-          if (peek()?.value === '}') next();
+          if (peek()?.value === '}') {
+            next();
+          } else {
+            errors.push({
+              line: startLine,
+              message: "Unclosed '{' in Ref block",
+            });
+          }
+        } else {
+          errors.push({
+            line: startLine,
+            message: "Expected ':' or '{' after Ref",
+          });
         }
       }
     } else if (keyword === 'enum') {
@@ -692,7 +814,25 @@ export function parseDbml(source: string): ParsedSchema {
             note: vSettings['note'],
           });
         }
-        if (peek()?.value === '}') next();
+        if (peek()?.value === '}') {
+          next();
+        } else {
+          errors.push({
+            line: startLine,
+            message: `Unclosed '{' in Enum "${fullId}"`,
+          });
+        }
+      } else {
+        errors.push({
+          line: startLine,
+          message: `Expected '{' after Enum ${fullId}`,
+        });
+      }
+      if (enums.some((e) => e.id === fullId)) {
+        errors.push({
+          line: startLine,
+          message: `Duplicate Enum definition "${fullId}"`,
+        });
       }
       enums.push({
         id: fullId,
@@ -701,10 +841,29 @@ export function parseDbml(source: string): ParsedSchema {
         values,
         line: startLine,
       });
+    } else if (keyword === 'note') {
+      if (peek()?.value === ':') {
+        next();
+        next();
+      } else if (peek()?.value === '{') {
+        skipBlock();
+      }
+    } else if (tok.value === '}') {
+      errors.push({
+        line: tok.line,
+        message: "Unexpected closing '}'",
+      });
     } else {
-      // Unknown top-level block or token
+      errors.push({
+        line: tok.line,
+        message: `Unknown keyword "${tok.value}" (expected Table, TableGroup, Ref, Enum, or Project)`,
+      });
       if (peek()?.value === '{') {
         skipBlock();
+      } else {
+        while (idx < tokens.length && peek()?.type !== 'newline') {
+          next();
+        }
       }
     }
   }
@@ -747,13 +906,74 @@ export function parseDbml(source: string): ParsedSchema {
     g.tables = g.tables.map((t) => resolveTableId(t));
   }
 
+  // Semantic reference validation
+  const tableById = new Map(tables.map((t) => [t.id, t]));
+  for (const r of refs) {
+    const errLine = r.line || 1;
+    const fromT = tableById.get(r.fromTable);
+    const toT = tableById.get(r.toTable);
+    if (!fromT) {
+      errors.push({
+        line: errLine,
+        message: `Ref references unknown table "${r.fromTable}"`,
+      });
+    } else {
+      for (const col of r.fromColumns) {
+        if (!fromT.columns.some((c) => c.name === col)) {
+          errors.push({
+            line: errLine,
+            message: `Column "${col}" does not exist on table "${r.fromTable}"`,
+          });
+        }
+      }
+    }
+    if (!toT) {
+      errors.push({
+        line: errLine,
+        message: `Ref references unknown table "${r.toTable}"`,
+      });
+    } else {
+      for (const col of r.toColumns) {
+        if (!toT.columns.some((c) => c.name === col)) {
+          errors.push({
+            line: errLine,
+            message: `Column "${col}" does not exist on table "${r.toTable}"`,
+          });
+        }
+      }
+    }
+  }
+
+  for (const g of tableGroups) {
+    for (const tId of g.tables) {
+      if (!tableById.has(tId)) {
+        errors.push({
+          line: g.line || 1,
+          message: `TableGroup "${g.name}" references unknown table "${tId}"`,
+        });
+      }
+    }
+  }
+
+  // Deduplicate and sort errors by line
+  const seenErr = new Set<string>();
+  const uniqueErrors: ParseError[] = [];
+  for (const e of errors) {
+    const key = `${e.line}::${e.message}`;
+    if (!seenErr.has(key)) {
+      seenErr.add(key);
+      uniqueErrors.push(e);
+    }
+  }
+  uniqueErrors.sort((a, b) => a.line - b.line);
+
   return {
     project,
     tables,
     refs,
     enums,
     tableGroups,
-    errors,
+    errors: uniqueErrors,
   };
 }
 

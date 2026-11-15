@@ -60,6 +60,7 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('domains');
   const [viewMode, setViewMode] = useState<ViewMode>('split');
+  const [docsDetailLevel, setDocsDetailLevel] = useState<DetailLevel>('full');
   const [editorWidth, setEditorWidth] = useState(410);
   const [editorState, setEditorState] = useState<
     'normal' | 'maximized' | 'minimized'
@@ -186,10 +187,12 @@ export default function App() {
 
       if (anyModalOpen) return;
 
-      // Mod + B: Toggle Left Sidebar
+      // Mod + B: Toggle Left Sidebar (locked hidden in Docs view)
       if (!e.shiftKey && key === 'b') {
         e.preventDefault();
-        setSidebarOpen((o) => !o);
+        if (viewMode !== 'docs') {
+          setSidebarOpen((o) => !o);
+        }
         return;
       }
 
@@ -768,11 +771,13 @@ export default function App() {
         projectName={activeWorkspace.name}
         schema={parsedSchema}
         sidebarOpen={sidebarOpen}
-        onToggleSidebar={() => setSidebarOpen((o) => !o)}
+        onToggleSidebar={() => {
+          if (viewMode !== 'docs') {
+            setSidebarOpen((o) => !o);
+          }
+        }}
         viewMode={viewMode}
         onChangeViewMode={handleChangeViewMode}
-        detailLevel={activeWorkspace.detailLevel}
-        onChangeDetailLevel={handleDetailLevelChange}
         onAutoLayout={handleAutoLayout}
         onSelectSearchResult={handleSelectSearchResult}
         onOpenWorkspaces={() => setWorkspacesModalOpen(true)}
@@ -803,34 +808,18 @@ export default function App() {
             </button>
           ))}
         </div>
-        <div className="flex items-center gap-1">
-          {(['full', 'columns', 'keys', 'names'] as DetailLevel[]).map((l) => (
-            <button
-              key={l}
-              type="button"
-              onClick={() => handleDetailLevelChange(l)}
-              className={`px-2 py-1 rounded capitalize font-medium ${
-                activeWorkspace.detailLevel === l
-                  ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900'
-                  : 'text-slate-500 dark:text-slate-400'
-              }`}
-            >
-              {l}
-            </button>
-          ))}
-          <button
-            type="button"
-            onClick={handleAutoLayout}
-            className="px-2 py-1 rounded border border-slate-200 dark:border-slate-700 font-medium"
-          >
-            Layout
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={handleAutoLayout}
+          className="px-2 py-1 rounded border border-slate-200 dark:border-slate-700 font-medium"
+        >
+          Auto Layout
+        </button>
       </div>
 
       {/* Main Workspace Area */}
       <div className="flex-1 flex min-h-0 overflow-hidden">
-        {sidebarOpen && (
+        {sidebarOpen && viewMode !== 'docs' && (
           <Sidebar
             activeTab={sidebarTab}
             onChangeTab={setSidebarTab}
@@ -872,7 +861,8 @@ export default function App() {
           {viewMode === 'docs' ? (
             <DocsView
               schema={parsedSchema}
-              detailLevel={activeWorkspace.detailLevel}
+              detailLevel={docsDetailLevel}
+              onChangeDetailLevel={setDocsDetailLevel}
               selectedDomains={effectiveSelectedDomains}
               onClearDomainFilter={() => setSelectedDomains([])}
               onSelectTable={(id) => {
@@ -889,6 +879,7 @@ export default function App() {
                 errors={parsedSchema.errors}
                 scrollToLine={scrollToLine}
                 enumNames={parsedSchema.enums.map((e) => e.name)}
+                tables={parsedSchema.tables}
                 isMaximized={true}
                 onToggleMaximize={() => setEditorState('normal')}
                 onMinimize={() => setEditorState('minimized')}
@@ -949,6 +940,7 @@ export default function App() {
                       errors={parsedSchema.errors}
                       scrollToLine={scrollToLine}
                       enumNames={parsedSchema.enums.map((e) => e.name)}
+                      tables={parsedSchema.tables}
                       isMaximized={false}
                       onToggleMaximize={() => setEditorState('maximized')}
                       onMinimize={() => setEditorState('minimized')}

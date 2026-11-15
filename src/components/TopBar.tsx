@@ -17,7 +17,7 @@ import {
   Table2,
   X,
 } from 'lucide-react';
-import { DetailLevel, ParsedSchema, ViewMode } from '../types/schema';
+import { ParsedSchema, ViewMode } from '../types/schema';
 
 export interface GlobalSearchResult {
   kind: 'table' | 'column' | 'group';
@@ -39,8 +39,6 @@ interface TopBarProps {
   onToggleSidebar: () => void;
   viewMode: ViewMode;
   onChangeViewMode: (mode: ViewMode) => void;
-  detailLevel: DetailLevel;
-  onChangeDetailLevel: (level: DetailLevel) => void;
   onAutoLayout: () => void;
   onSelectSearchResult: (result: GlobalSearchResult) => void;
   onOpenWorkspaces: () => void;
@@ -52,13 +50,6 @@ interface TopBarProps {
   onToggleDarkMode: () => void;
   errorCount: number;
 }
-
-const DETAIL_OPTIONS: Array<{ id: DetailLevel; label: string }> = [
-  { id: 'full', label: 'Full' },
-  { id: 'columns', label: 'All Fields' },
-  { id: 'keys', label: 'Keys Only' },
-  { id: 'names', label: 'Names Only' },
-];
 
 const VIEW_OPTIONS: Array<{
   id: ViewMode;
@@ -77,8 +68,6 @@ export const TopBar: React.FC<TopBarProps> = ({
   onToggleSidebar,
   viewMode,
   onChangeViewMode,
-  detailLevel,
-  onChangeDetailLevel,
   onAutoLayout,
   onSelectSearchResult,
   onOpenWorkspaces,
@@ -263,12 +252,19 @@ export const TopBar: React.FC<TopBarProps> = ({
         <button
           type="button"
           onClick={onToggleSidebar}
+          disabled={viewMode === 'docs'}
           title={
-            sidebarOpen
+            viewMode === 'docs'
+              ? 'Left sidebar is locked hidden in Docs view'
+              : sidebarOpen
               ? `Hide Left Sidebar (${modKey}B)`
               : `Show Left Sidebar (${modKey}B)`
           }
-          className="p-2 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 shrink-0"
+          className={`p-2 rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 shrink-0 ${
+            viewMode === 'docs'
+              ? 'text-slate-300 dark:text-slate-700 cursor-not-allowed'
+              : 'text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+          }`}
         >
           <PanelLeft className="w-4 h-4" />
         </button>
@@ -445,32 +441,6 @@ export const TopBar: React.FC<TopBarProps> = ({
               >
                 <Icon className="w-3.5 h-3.5" />
                 <span>{label}</span>
-              </button>
-            );
-          })}
-        </div>
-
-        <div
-          className="flex items-center p-1 rounded-lg bg-slate-100 dark:bg-slate-800/80 border border-slate-200/70 dark:border-slate-700/70"
-          role="group"
-          aria-label="Table Detail Level"
-          title="Control table detail visibility"
-        >
-          <Layers className="w-3.5 h-3.5 text-slate-400 mx-1 shrink-0" />
-          {DETAIL_OPTIONS.map((opt) => {
-            const active = detailLevel === opt.id;
-            return (
-              <button
-                key={opt.id}
-                type="button"
-                onClick={() => onChangeDetailLevel(opt.id)}
-                className={`px-2 py-1 text-xs font-medium rounded-md transition-colors whitespace-nowrap shrink-0 ${
-                  active
-                    ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-50 shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
-                }`}
-              >
-                {opt.label}
               </button>
             );
           })}

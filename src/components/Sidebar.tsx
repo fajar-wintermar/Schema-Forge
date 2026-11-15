@@ -155,38 +155,38 @@ export const Sidebar: React.FC<SidebarProps> = ({
           <button
             type="button"
             onClick={() => onChangeTab('domains')}
-            className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-xs font-medium transition-colors whitespace-nowrap ${
+            className={`flex items-center justify-center gap-1 py-1.5 px-1.5 rounded-md text-[11px] font-medium transition-colors whitespace-nowrap min-w-0 ${
               activeTab === 'domains'
                 ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-50 shadow-xs'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
             }`}
           >
-            <Layers className="w-3.5 h-3.5" />
-            <span>Domains</span>
+            <Layers className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">Domains</span>
           </button>
           <button
             type="button"
             onClick={() => onChangeTab('versions')}
-            className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-xs font-medium transition-colors whitespace-nowrap ${
+            className={`flex items-center justify-center gap-1 py-1.5 px-1.5 rounded-md text-[11px] font-medium transition-colors whitespace-nowrap min-w-0 ${
               activeTab === 'versions'
                 ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-50 shadow-xs'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
             }`}
           >
-            <History className="w-3.5 h-3.5" />
-            <span>Versions</span>
+            <History className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">Versions</span>
           </button>
           <button
             type="button"
             onClick={() => onChangeTab('changelog')}
-            className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-md text-xs font-medium transition-colors whitespace-nowrap ${
+            className={`flex items-center justify-center gap-1 py-1.5 px-1.5 rounded-md text-[11px] font-medium transition-colors whitespace-nowrap min-w-0 ${
               activeTab === 'changelog'
                 ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-50 shadow-xs'
                 : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
             }`}
           >
-            <GitCompare className="w-3.5 h-3.5" />
-            <span>Changelog</span>
+            <GitCompare className="w-3.5 h-3.5 shrink-0" />
+            <span className="truncate">Changelog</span>
           </button>
         </div>
       </div>
