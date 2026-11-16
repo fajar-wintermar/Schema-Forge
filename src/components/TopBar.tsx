@@ -18,6 +18,7 @@ import {
   X,
 } from 'lucide-react';
 import { ParsedSchema, ViewMode } from '../types/schema';
+import { BrandLogo } from './BrandLogo';
 
 export interface GlobalSearchResult {
   kind: 'table' | 'column' | 'group';
@@ -269,9 +270,12 @@ export const TopBar: React.FC<TopBarProps> = ({
           <PanelLeft className="w-4 h-4" />
         </button>
 
-        <span className="text-base font-bold tracking-tight text-slate-900 dark:text-slate-50 whitespace-nowrap shrink-0">
-          SchemaForge
-        </span>
+        <div className="flex items-center gap-2 shrink-0">
+          <BrandLogo className="w-7 h-7 shrink-0" />
+          <span className="text-base font-bold tracking-tight text-slate-900 dark:text-slate-50 whitespace-nowrap">
+            SchemaForge
+          </span>
+        </div>
 
         <span
           className="text-slate-300 dark:text-slate-700 hidden sm:inline"
