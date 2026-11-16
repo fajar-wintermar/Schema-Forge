@@ -285,8 +285,8 @@ export const DocsView: React.FC<DocsViewProps> = ({
   }, [visibleGroups]);
 
   return (
-    <div className="flex-1 h-full overflow-y-auto bg-slate-50 dark:bg-slate-950">
-      <div className="max-w-5xl mx-auto px-6 py-8 space-y-10">
+    <div className="flex-1 w-full h-full overflow-y-auto bg-slate-50 dark:bg-slate-950">
+      <div className="w-full px-6 lg:px-10 py-8 space-y-10">
         {/* Project Header */}
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-6 border-b border-slate-200 dark:border-slate-800">
           <div className="space-y-1.5">
