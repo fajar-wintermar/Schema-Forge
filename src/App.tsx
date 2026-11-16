@@ -60,7 +60,7 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('domains');
   const [viewMode, setViewMode] = useState<ViewMode>('split');
-  const [docsDetailLevel, setDocsDetailLevel] = useState<DetailLevel>('full');
+  const [docsNavOpen, setDocsNavOpen] = useState(true);
   const [editorWidth, setEditorWidth] = useState(410);
   const [editorState, setEditorState] = useState<
     'normal' | 'maximized' | 'minimized'
@@ -192,6 +192,15 @@ export default function App() {
         e.preventDefault();
         if (viewMode !== 'docs') {
           setSidebarOpen((o) => !o);
+        }
+        return;
+      }
+
+      // Mod + J: Toggle Docs Navigation Tree Sidebar (when in Docs view)
+      if (!e.shiftKey && key === 'j') {
+        if (viewMode === 'docs') {
+          e.preventDefault();
+          setDocsNavOpen((o) => !o);
         }
         return;
       }
@@ -778,7 +787,6 @@ export default function App() {
         }}
         viewMode={viewMode}
         onChangeViewMode={handleChangeViewMode}
-        onAutoLayout={handleAutoLayout}
         onSelectSearchResult={handleSelectSearchResult}
         onOpenWorkspaces={() => setWorkspacesModalOpen(true)}
         onOpenImportExport={() => setImportExportOpen(true)}
@@ -808,13 +816,6 @@ export default function App() {
             </button>
           ))}
         </div>
-        <button
-          type="button"
-          onClick={handleAutoLayout}
-          className="px-2 py-1 rounded border border-slate-200 dark:border-slate-700 font-medium"
-        >
-          Auto Layout
-        </button>
       </div>
 
       {/* Main Workspace Area */}
@@ -861,8 +862,9 @@ export default function App() {
           {viewMode === 'docs' ? (
             <DocsView
               schema={parsedSchema}
-              detailLevel={docsDetailLevel}
-              onChangeDetailLevel={setDocsDetailLevel}
+              navOpen={docsNavOpen}
+              onToggleNav={() => setDocsNavOpen((o) => !o)}
+              modKey={modKey}
               selectedDomains={effectiveSelectedDomains}
               onClearDomainFilter={() => setSelectedDomains([])}
               onSelectTable={(id) => {
@@ -987,6 +989,7 @@ export default function App() {
                 onEditGroup={(group) =>
                   setGroupModalState({ open: true, group })
                 }
+                onAutoLayout={handleAutoLayout}
                 onAutoLayoutGroup={handleAutoLayoutGroup}
                 stickyNotes={activeWorkspace.stickyNotes}
                 onAddStickyNote={(x, y) => handleAddStickyNote(x, y)}

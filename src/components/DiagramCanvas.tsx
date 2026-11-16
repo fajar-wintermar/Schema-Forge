@@ -59,6 +59,7 @@ interface DiagramCanvasProps {
     keepInSource?: boolean
   ) => void;
   onEditGroup: (group: TableGroupDef) => void;
+  onAutoLayout: () => void;
   onAutoLayoutGroup: (groupName: string) => void;
   stickyNotes: StickyNote[];
   onAddStickyNote: (x: number, y: number) => void;
@@ -133,6 +134,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
   onChangeTableHeaderColor,
   onAssignTableToGroup,
   onEditGroup,
+  onAutoLayout,
   onAutoLayoutGroup,
   stickyNotes,
   onAddStickyNote,
@@ -1483,6 +1485,18 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
             </div>
           )}
         </div>
+
+        <div className="w-px h-5 bg-slate-200 dark:bg-slate-700" />
+
+        <button
+          type="button"
+          onClick={onAutoLayout}
+          title="Auto-arrange TableGroups and tables to minimize edge overlaps"
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors whitespace-nowrap"
+        >
+          <Sparkles className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+          <span>Auto Layout</span>
+        </button>
 
         <div className="w-px h-5 bg-slate-200 dark:bg-slate-700" />
 

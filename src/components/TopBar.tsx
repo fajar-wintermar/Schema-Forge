@@ -12,7 +12,6 @@ import {
   Moon,
   PanelLeft,
   Search,
-  Sparkles,
   Sun,
   Table2,
   X,
@@ -40,7 +39,6 @@ interface TopBarProps {
   onToggleSidebar: () => void;
   viewMode: ViewMode;
   onChangeViewMode: (mode: ViewMode) => void;
-  onAutoLayout: () => void;
   onSelectSearchResult: (result: GlobalSearchResult) => void;
   onOpenWorkspaces: () => void;
   onOpenImportExport: () => void;
@@ -69,7 +67,6 @@ export const TopBar: React.FC<TopBarProps> = ({
   onToggleSidebar,
   viewMode,
   onChangeViewMode,
-  onAutoLayout,
   onSelectSearchResult,
   onOpenWorkspaces,
   onOpenImportExport,
@@ -423,7 +420,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         )}
       </div>
 
-      {/* Center: View Mode + Detail Level + Auto-Layout */}
+      {/* Center: View Mode */}
       <div className="hidden lg:flex items-center gap-2.5 shrink-0">
         <div
           className="flex items-center p-1 rounded-lg bg-slate-100 dark:bg-slate-800/80 border border-slate-200/70 dark:border-slate-700/70"
@@ -449,16 +446,6 @@ export const TopBar: React.FC<TopBarProps> = ({
             );
           })}
         </div>
-
-        <button
-          type="button"
-          onClick={onAutoLayout}
-          title="Auto-arrange TableGroups and tables to minimize edge overlaps"
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0"
-        >
-          <Sparkles className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-          <span>Auto Layout</span>
-        </button>
       </div>
 
       {/* Right: Shortcuts, Theme, Import/Export, Primary Save Version CTA */}

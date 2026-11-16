@@ -881,6 +881,10 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({
       keys: [`${modKey}`, 'B'],
     },
     {
+      label: 'Toggle Docs table navigation tree',
+      keys: [`${modKey}`, 'J'],
+    },
+    {
       label: 'Toggle code editor (minimize / restore)',
       keys: [`${modKey}`, '\\'],
     },
