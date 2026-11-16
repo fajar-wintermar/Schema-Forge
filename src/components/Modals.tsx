@@ -889,6 +889,18 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({
       keys: [`${modKey}`, '\\'],
     },
     {
+      label: 'Find text in code editor',
+      keys: [`${modKey}`, 'F'],
+    },
+    {
+      label: 'Find & replace in code editor',
+      keys: [`${modKey}`, 'H'],
+    },
+    {
+      label: 'Go to line in code editor',
+      keys: [`${modKey}`, 'G'],
+    },
+    {
       label: 'Toggle maximize / restore code editor',
       keys: [`${modKey}`, '⇧', 'E'],
     },

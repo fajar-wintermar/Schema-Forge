@@ -1,14 +1,23 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
+  ArrowDown,
+  ArrowUp,
+  CaseSensitive,
   CheckCircle2,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   Code2,
   Maximize2,
   Minimize2,
   PanelLeftClose,
   Plus,
+  Replace,
+  ReplaceAll,
+  Search,
+  WholeWord,
+  X,
 } from 'lucide-react';
 import { ParseError, TableDef } from '../types/schema';
 
@@ -653,7 +662,24 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const editorWrapperRef = useRef<HTMLDivElement>(null);
+  const findInputRef = useRef<HTMLInputElement>(null);
+  const replaceInputRef = useRef<HTMLInputElement>(null);
+  const gotoInputRef = useRef<HTMLInputElement>(null);
   const [problemsOpen, setProblemsOpen] = useState(false);
+
+  // Find & Replace state
+  const [findOpen, setFindOpen] = useState(false);
+  const [replaceOpen, setReplaceOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState('');
+  const [replaceQuery, setReplaceQuery] = useState('');
+  const [matchCase, setMatchCase] = useState(false);
+  const [wholeWord, setWholeWord] = useState(false);
+  const [activeMatchIdx, setActiveMatchIdx] = useState(0);
+
+  // Go to Line state
+  const [gotoOpen, setGotoOpen] = useState(false);
+  const [gotoValue, setGotoValue] = useState('');
+  const [gotoHighlightLine, setGotoHighlightLine] = useState<number | null>(null);
 
   // Autocomplete state
   const [acState, setAcState] = useState<{
@@ -675,6 +701,16 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
   });
 
   const lines = value.split('\n');
+  const lineStartOffsets = useMemo(() => {
+    const offsets: number[] = [];
+    let pos = 0;
+    for (let i = 0; i < lines.length; i++) {
+      offsets.push(pos);
+      pos += lines[i].length + 1;
+    }
+    return offsets;
+  }, [lines]);
+
   const errorsByLine = useMemo(() => {
     const map = new Map<number, ParseError[]>();
     for (const err of errors) {
@@ -694,22 +730,239 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
     [value, enumNameSet]
   );
 
-  const jumpToLine = useCallback((lineNum: number) => {
-    if (scrollContainerRef.current) {
-      const targetTop = Math.max(0, (lineNum - 4) * 20);
-      scrollContainerRef.current.scrollTo({ top: targetTop, behavior: 'smooth' });
+  // Compute all Find matches across source text
+  const findMatches = useMemo<Array<{ start: number; end: number }>>(() => {
+    if (!findOpen || !findQuery) return [];
+    const escaped = findQuery.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = wholeWord ? `\\b${escaped}\\b` : escaped;
+    const flags = matchCase ? 'g' : 'gi';
+    let regex: RegExp;
+    try {
+      regex = new RegExp(pattern, flags);
+    } catch {
+      return [];
     }
-    const ta = textareaRef.current;
-    if (ta) {
-      const allLines = value.split('\n');
-      let pos = 0;
-      for (let i = 0; i < Math.min(lineNum - 1, allLines.length); i++) {
-        pos += allLines[i].length + 1;
+    const matches: Array<{ start: number; end: number }> = [];
+    let m: RegExpExecArray | null;
+    while ((m = regex.exec(value)) !== null) {
+      if (m[0].length === 0) {
+        regex.lastIndex++;
+        continue;
       }
-      ta.focus();
-      ta.setSelectionRange(pos, pos);
+      matches.push({ start: m.index, end: m.index + m[0].length });
+      if (matches.length >= 2000) break;
     }
+    return matches;
+  }, [findOpen, findQuery, matchCase, wholeWord, value]);
+
+  const safeMatchIdx =
+    findMatches.length > 0
+      ? Math.min(activeMatchIdx, findMatches.length - 1)
+      : 0;
+
+  const scrollToOffset = useCallback(
+    (offset: number) => {
+      if (!scrollContainerRef.current) return;
+      const before = value.slice(0, offset);
+      const row = before.split('\n').length - 1;
+      const targetTop = Math.max(0, (row - 3) * 20);
+      scrollContainerRef.current.scrollTo({ top: targetTop, behavior: 'smooth' });
+    },
+    [value]
+  );
+
+  const openFindBar = useCallback(
+    (withReplace: boolean) => {
+      const ta = textareaRef.current;
+      let seededQuery = findQuery;
+      if (ta && ta.selectionStart !== ta.selectionEnd) {
+        const selected = value.slice(ta.selectionStart, ta.selectionEnd);
+        if (!selected.includes('\n') && selected.length <= 120) {
+          seededQuery = selected;
+          setFindQuery(selected);
+        }
+      }
+      setFindOpen(true);
+      if (withReplace) setReplaceOpen(true);
+      setAcState((s) => (s.open ? { ...s, open: false } : s));
+      requestAnimationFrame(() => {
+        if (withReplace && seededQuery) {
+          replaceInputRef.current?.focus();
+          replaceInputRef.current?.select();
+        } else {
+          findInputRef.current?.focus();
+          findInputRef.current?.select();
+        }
+      });
+    },
+    [findQuery, value]
+  );
+
+  const closeFindBar = useCallback(() => {
+    setFindOpen(false);
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus({ preventScroll: true });
+    });
+  }, []);
+
+  const goToMatch = useCallback(
+    (nextIdx: number) => {
+      if (findMatches.length === 0) return;
+      const normalized =
+        ((nextIdx % findMatches.length) + findMatches.length) %
+        findMatches.length;
+      setActiveMatchIdx(normalized);
+      scrollToOffset(findMatches[normalized].start);
+    },
+    [findMatches, scrollToOffset]
+  );
+
+  const handleReplaceCurrent = useCallback(() => {
+    if (findMatches.length === 0) return;
+    const target = findMatches[safeMatchIdx];
+    const next =
+      value.slice(0, target.start) + replaceQuery + value.slice(target.end);
+    onChange(next);
+    if (findMatches.length > 1) {
+      const nextOffset = target.start + replaceQuery.length;
+      scrollToOffset(nextOffset);
+    }
+  }, [findMatches, safeMatchIdx, value, replaceQuery, onChange, scrollToOffset]);
+
+  const handleReplaceAll = useCallback(() => {
+    if (findMatches.length === 0) return;
+    let out = '';
+    let last = 0;
+    for (const m of findMatches) {
+      out += value.slice(last, m.start) + replaceQuery;
+      last = m.end;
+    }
+    out += value.slice(last);
+    onChange(out);
+    setActiveMatchIdx(0);
+  }, [findMatches, value, replaceQuery, onChange]);
+
+  const openGotoLine = useCallback(() => {
+    const ta = textareaRef.current;
+    const currentLine = ta
+      ? value.slice(0, ta.selectionStart).split('\n').length
+      : 1;
+    setFindOpen(false);
+    setGotoOpen(true);
+    setGotoValue(String(currentLine));
+    setAcState((s) => (s.open ? { ...s, open: false } : s));
+    requestAnimationFrame(() => {
+      gotoInputRef.current?.focus();
+      gotoInputRef.current?.select();
+    });
   }, [value]);
+
+  const closeGotoLine = useCallback(() => {
+    setGotoOpen(false);
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus({ preventScroll: true });
+    });
+  }, []);
+
+  const jumpToLine = useCallback(
+    (lineNum: number, colNum = 1) => {
+      const clampedLine = Math.max(1, Math.min(lines.length, lineNum));
+      const lineText = lines[clampedLine - 1] || '';
+      const clampedCol = Math.max(1, Math.min(lineText.length + 1, colNum));
+      const pos = (lineStartOffsets[clampedLine - 1] || 0) + (clampedCol - 1);
+
+      setGotoHighlightLine(clampedLine);
+
+      const ta = textareaRef.current;
+      if (ta) {
+        ta.setSelectionRange(pos, pos);
+        ta.focus({ preventScroll: true });
+      }
+
+      const container = scrollContainerRef.current;
+      if (container) {
+        const lineTop = 12 + (clampedLine - 1) * 20;
+        const offsetFromTop = Math.min(
+          140,
+          Math.max(40, Math.floor(container.clientHeight * 0.25))
+        );
+        const targetTop = Math.max(0, lineTop - offsetFromTop);
+
+        const colX = (clampedCol - 1) * 7.5;
+        let targetLeft = container.scrollLeft;
+        if (colX < container.scrollLeft) {
+          targetLeft = Math.max(0, colX - 24);
+        } else if (colX > container.scrollLeft + container.clientWidth - 96) {
+          targetLeft = Math.max(0, colX - container.clientWidth + 120);
+        }
+
+        container.scrollTo({
+          top: targetTop,
+          left: targetLeft,
+          behavior: 'smooth',
+        });
+      }
+    },
+    [lines, lineStartOffsets]
+  );
+
+  const handleSubmitGotoLine = useCallback(() => {
+    const raw = gotoValue.trim();
+    if (!raw) return;
+    const parts = raw.split(':');
+    const parsedLine = parseInt(parts[0], 10);
+    if (Number.isNaN(parsedLine)) return;
+    const parsedCol = parts[1] ? parseInt(parts[1], 10) || 1 : 1;
+    setGotoOpen(false);
+    requestAnimationFrame(() => {
+      jumpToLine(parsedLine, parsedCol);
+    });
+  }, [gotoValue, jumpToLine]);
+
+  // Global editor Find (Ctrl/Cmd+F), Find+Replace (Ctrl/Cmd+H), and Go to Line (Ctrl/Cmd+G) listener
+  useEffect(() => {
+    const onWindowKeyDown = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+      const key = e.key.toLowerCase();
+      if (key !== 'f' && key !== 'h' && key !== 'g') return;
+
+      const active = document.activeElement;
+      const insideEditor = Boolean(
+        editorWrapperRef.current &&
+          active &&
+          editorWrapperRef.current.contains(active)
+      );
+      const typingElsewhere =
+        active &&
+        (active.tagName === 'INPUT' ||
+          active.tagName === 'TEXTAREA' ||
+          (active as HTMLElement).isContentEditable) &&
+        !insideEditor;
+
+      if (typingElsewhere) return;
+
+      e.preventDefault();
+      if (key === 'g') {
+        openGotoLine();
+      } else {
+        setGotoOpen(false);
+        openFindBar(key === 'h');
+      }
+    };
+
+    window.addEventListener('keydown', onWindowKeyDown);
+    return () => window.removeEventListener('keydown', onWindowKeyDown);
+  }, [openFindBar, openGotoLine]);
+
+  // Scroll to active match when query changes
+  useEffect(() => {
+    if (!findOpen || findMatches.length === 0) {
+      setActiveMatchIdx(0);
+      return;
+    }
+    setActiveMatchIdx(0);
+    scrollToOffset(findMatches[0].start);
+  }, [findOpen, findQuery, matchCase, wholeWord]);
 
   useEffect(() => {
     if (!scrollToLine || !scrollContainerRef.current) return;
@@ -902,6 +1155,20 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
             <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-1" />
           )}
 
+          <button
+            type="button"
+            onClick={() => openFindBar(false)}
+            title={`Find & Replace (${modKey}F / ${modKey}H)`}
+            aria-label="Find and replace in editor"
+            className={`p-1.5 rounded transition-colors ${
+              findOpen
+                ? 'text-blue-600 dark:text-blue-400 bg-blue-50 dark:bg-blue-950/50'
+                : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/70 dark:hover:bg-slate-800'
+            }`}
+          >
+            <Search className="w-3.5 h-3.5" />
+          </button>
+
           {onToggleMaximize && (
             <button
               type="button"
@@ -936,6 +1203,214 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
         </div>
       </div>
 
+      {/* Find & Replace Widget */}
+      {findOpen && (
+        <div className="shrink-0 border-b border-slate-200 dark:border-slate-800 bg-slate-50/95 dark:bg-slate-900/95 px-2.5 py-2 space-y-1.5 z-30">
+          {/* Find Row */}
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={() => setReplaceOpen((r) => !r)}
+              title={replaceOpen ? 'Hide Replace' : `Show Replace (${modKey}H)`}
+              aria-label="Toggle replace row"
+              className="p-1 rounded text-slate-500 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/70 dark:hover:bg-slate-800 shrink-0"
+            >
+              {replaceOpen ? (
+                <ChevronDown className="w-3.5 h-3.5" />
+              ) : (
+                <ChevronRight className="w-3.5 h-3.5" />
+              )}
+            </button>
+
+            <div className="relative flex-1 min-w-0 flex items-center">
+              <input
+                ref={findInputRef}
+                type="text"
+                value={findQuery}
+                onChange={(e) => setFindQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    closeFindBar();
+                  } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    goToMatch(e.shiftKey ? safeMatchIdx - 1 : safeMatchIdx + 1);
+                  }
+                }}
+                placeholder="Find..."
+                aria-label="Find text in DBML editor"
+                className="w-full pl-2.5 pr-14 py-1 text-xs font-mono rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+              />
+              <div className="absolute right-1 flex items-center gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => setMatchCase((v) => !v)}
+                  title="Match Case"
+                  aria-label="Match Case"
+                  className={`p-1 rounded transition-colors ${
+                    matchCase
+                      ? 'bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300'
+                      : 'text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+                  }`}
+                >
+                  <CaseSensitive className="w-3.5 h-3.5" />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setWholeWord((v) => !v)}
+                  title="Match Whole Word"
+                  aria-label="Match Whole Word"
+                  className={`p-1 rounded transition-colors ${
+                    wholeWord
+                      ? 'bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300'
+                      : 'text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
+                  }`}
+                >
+                  <WholeWord className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            </div>
+
+            <span
+              className={`text-[11px] font-mono tabular-nums whitespace-nowrap min-w-[54px] text-center ${
+                findQuery && findMatches.length === 0
+                  ? 'text-rose-600 dark:text-rose-400'
+                  : 'text-slate-500 dark:text-slate-400'
+              }`}
+            >
+              {!findQuery
+                ? '0/0'
+                : findMatches.length === 0
+                ? 'No match'
+                : `${safeMatchIdx + 1} of ${findMatches.length}`}
+            </span>
+
+            <button
+              type="button"
+              disabled={findMatches.length === 0}
+              onClick={() => goToMatch(safeMatchIdx - 1)}
+              title="Previous Match (Shift+Enter)"
+              aria-label="Previous Match"
+              className="p-1 rounded text-slate-600 dark:text-slate-300 hover:bg-slate-200/70 dark:hover:bg-slate-800 disabled:opacity-40"
+            >
+              <ArrowUp className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              disabled={findMatches.length === 0}
+              onClick={() => goToMatch(safeMatchIdx + 1)}
+              title="Next Match (Enter)"
+              aria-label="Next Match"
+              className="p-1 rounded text-slate-600 dark:text-slate-300 hover:bg-slate-200/70 dark:hover:bg-slate-800 disabled:opacity-40"
+            >
+              <ArrowDown className="w-3.5 h-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={closeFindBar}
+              title="Close (Esc)"
+              aria-label="Close Find bar"
+              className="p-1 rounded text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-200/70 dark:hover:bg-slate-800"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {/* Replace Row */}
+          {replaceOpen && (
+            <div className="flex items-center gap-1.5 pl-6">
+              <input
+                ref={replaceInputRef}
+                type="text"
+                value={replaceQuery}
+                onChange={(e) => setReplaceQuery(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Escape') {
+                    e.preventDefault();
+                    closeFindBar();
+                  } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && e.altKey) {
+                    e.preventDefault();
+                    handleReplaceAll();
+                  } else if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleReplaceCurrent();
+                  }
+                }}
+                placeholder="Replace with..."
+                aria-label="Replacement text"
+                className="flex-1 min-w-0 px-2.5 py-1 text-xs font-mono rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+              />
+              <button
+                type="button"
+                disabled={findMatches.length === 0}
+                onClick={handleReplaceCurrent}
+                title="Replace Current Match (Enter)"
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-[11px] font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700 disabled:opacity-40 whitespace-nowrap"
+              >
+                <Replace className="w-3 h-3" />
+                <span>Replace</span>
+              </button>
+              <button
+                type="button"
+                disabled={findMatches.length === 0}
+                onClick={handleReplaceAll}
+                title="Replace All Matches"
+                className="inline-flex items-center gap-1 px-2 py-1 rounded-md bg-blue-600 hover:bg-blue-700 text-[11px] font-medium text-white disabled:opacity-40 whitespace-nowrap"
+              >
+                <ReplaceAll className="w-3 h-3" />
+                <span>All</span>
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Go to Line Widget (Ctrl/Cmd+G) */}
+      {gotoOpen && (
+        <div className="shrink-0 border-b border-slate-200 dark:border-slate-800 bg-slate-50/95 dark:bg-slate-900/95 px-2.5 py-2 flex items-center gap-2 z-30">
+          <span className="text-xs font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap">
+            Go to line:
+          </span>
+          <input
+            ref={gotoInputRef}
+            type="text"
+            value={gotoValue}
+            onChange={(e) => setGotoValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                closeGotoLine();
+              } else if (e.key === 'Enter') {
+                e.preventDefault();
+                handleSubmitGotoLine();
+              }
+            }}
+            placeholder={`1–${lines.length} (or line:col)`}
+            aria-label="Go to line number"
+            className="flex-1 min-w-0 px-2.5 py-1 text-xs font-mono rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+          />
+          <span className="text-[11px] font-mono text-slate-400 tabular-nums whitespace-nowrap">
+            / {lines.length}
+          </span>
+          <button
+            type="button"
+            onClick={handleSubmitGotoLine}
+            className="px-2.5 py-1 rounded-md bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-medium whitespace-nowrap"
+          >
+            Go
+          </button>
+          <button
+            type="button"
+            onClick={closeGotoLine}
+            title="Close (Esc)"
+            aria-label="Close Go to Line bar"
+            className="p-1 rounded text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-200/70 dark:hover:bg-slate-800"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
+
       {/* Editor Body with Shared-Scroll Synchronized Syntax Highlighting */}
       <div
         ref={scrollContainerRef}
@@ -949,7 +1424,8 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
             const lineNum = idx + 1;
             const lineErrs = errorsByLine.get(lineNum);
             const hasErr = Boolean(lineErrs && lineErrs.length > 0);
-            const isActiveLine = scrollToLine === lineNum;
+            const isActiveLine =
+              scrollToLine === lineNum || gotoHighlightLine === lineNum;
             return (
               <div
                 key={lineNum}
@@ -982,7 +1458,85 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
             {highlightedLines.map((segs, lineIdx) => {
               const lineNum = lineIdx + 1;
               const hasErr = errorsByLine.has(lineNum);
-              const isHighlighted = scrollToLine === lineNum;
+              const isHighlighted =
+                scrollToLine === lineNum || gotoHighlightLine === lineNum;
+              const lineStart = lineStartOffsets[lineIdx] || 0;
+              const lineLen = lines[lineIdx]?.length || 0;
+              const lineEnd = lineStart + lineLen;
+
+              // Find matches intersecting this line
+              const lineMatchSpans: Array<{
+                start: number;
+                end: number;
+                isActive: boolean;
+              }> = [];
+              if (findMatches.length > 0 && lineLen > 0) {
+                for (let mi = 0; mi < findMatches.length; mi++) {
+                  const m = findMatches[mi];
+                  if (m.end <= lineStart) continue;
+                  if (m.start >= lineEnd) break;
+                  lineMatchSpans.push({
+                    start: Math.max(m.start, lineStart),
+                    end: Math.min(m.end, lineEnd),
+                    isActive: mi === safeMatchIdx,
+                  });
+                }
+              }
+
+              let renderedSegments: React.ReactNode;
+              if (segs.length === 0) {
+                renderedSegments = <span>{'\u200b'}</span>;
+              } else if (lineMatchSpans.length === 0) {
+                renderedSegments = segs.map((seg, sIdx) => (
+                  <span key={sIdx} className={seg.className}>
+                    {seg.text}
+                  </span>
+                ));
+              } else {
+                const nodes: React.ReactNode[] = [];
+                let cursor = lineStart;
+                segs.forEach((seg, sIdx) => {
+                  const segStart = cursor;
+                  const segEnd = segStart + seg.text.length;
+                  cursor = segEnd;
+
+                  let pos = segStart;
+                  for (const ms of lineMatchSpans) {
+                    if (ms.end <= pos || ms.start >= segEnd) continue;
+                    if (ms.start > pos) {
+                      nodes.push(
+                        <span key={`${sIdx}-${pos}`} className={seg.className}>
+                          {seg.text.slice(pos - segStart, ms.start - segStart)}
+                        </span>
+                      );
+                    }
+                    const hiStart = Math.max(pos, ms.start);
+                    const hiEnd = Math.min(segEnd, ms.end);
+                    nodes.push(
+                      <span
+                        key={`${sIdx}-m-${hiStart}`}
+                        className={`${seg.className} ${
+                          ms.isActive
+                            ? 'bg-orange-400/55 dark:bg-orange-500/55 rounded-[2px]'
+                            : 'bg-amber-300/45 dark:bg-amber-500/35 rounded-[2px]'
+                        }`}
+                      >
+                        {seg.text.slice(hiStart - segStart, hiEnd - segStart)}
+                      </span>
+                    );
+                    pos = hiEnd;
+                  }
+                  if (pos < segEnd) {
+                    nodes.push(
+                      <span key={`${sIdx}-tail-${pos}`} className={seg.className}>
+                        {seg.text.slice(pos - segStart)}
+                      </span>
+                    );
+                  }
+                });
+                renderedSegments = nodes;
+              }
+
               return (
                 <div
                   key={lineIdx}
@@ -994,15 +1548,7 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
                       : ''
                   }`}
                 >
-                  {segs.length === 0 ? (
-                    <span>{'\u200b'}</span>
-                  ) : (
-                    segs.map((seg, sIdx) => (
-                      <span key={sIdx} className={seg.className}>
-                        {seg.text}
-                      </span>
-                    ))
-                  )}
+                  {renderedSegments}
                 </div>
               );
             })}
@@ -1136,9 +1682,14 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
             )}
           </button>
         )}
-        <span className="text-slate-400 tabular-nums shrink-0">
-          {lines.length} lines
-        </span>
+        <button
+          type="button"
+          onClick={openGotoLine}
+          title={`Go to line (${modKey}G)`}
+          className="text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 tabular-nums shrink-0"
+        >
+          {lines.length} lines · {modKey}G
+        </button>
       </div>
     </div>
   );
