@@ -37,7 +37,7 @@ interface DocsViewProps {
   navOpen: boolean;
   onToggleNav: () => void;
   modKey?: string;
-  selectedDomains: string[];
+  selectedDomains?: string[];
   onClearDomainFilter?: () => void;
   onSelectTable: (tableId: string) => void;
 }
@@ -228,7 +228,7 @@ export const DocsView: React.FC<DocsViewProps> = ({
   navOpen,
   onToggleNav,
   modKey = '⌘',
-  selectedDomains,
+  selectedDomains = [],
   onClearDomainFilter,
   onSelectTable,
 }) => {

@@ -1818,8 +1818,6 @@ export default function App() {
               navOpen={docsNavOpen}
               onToggleNav={() => setDocsNavOpen((o) => !o)}
               modKey={modKey}
-              selectedDomains={effectiveSelectedDomains}
-              onClearDomainFilter={() => setSelectedDomains([])}
               onSelectTable={(id) => {
                 setSelectedTableId(id);
                 setViewMode('split');
