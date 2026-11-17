@@ -39,6 +39,7 @@ import {
   TABLE_WIDTH,
 } from '../utils/autoLayout';
 import { getContrastTextColor } from '../utils/importExport';
+import { stripMarkdownToPlainText } from './MarkdownContent';
 
 interface DiagramCanvasProps {
   schema: ParsedSchema;
@@ -694,7 +695,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
               </div>
               {gb.note && (
                 <div className="px-4 -mt-1.5 text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                  {gb.note}
+                  {stripMarkdownToPlainText(gb.note)}
                 </div>
               )}
             </div>
@@ -1057,10 +1058,11 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
               {detailLevel === 'full' &&
                 (table.note || table.indexes.length > 0) && (
                   <div className="px-3 py-1.5 bg-slate-50/70 dark:bg-slate-800/40 border-t border-slate-100 dark:border-slate-800 rounded-b-lg text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                    {table.note ||
-                      `${table.indexes.length} index${
-                        table.indexes.length > 1 ? 'es' : ''
-                      }`}
+                    {table.note
+                      ? stripMarkdownToPlainText(table.note)
+                      : `${table.indexes.length} index${
+                          table.indexes.length > 1 ? 'es' : ''
+                        }`}
                   </div>
                 )}
             </div>

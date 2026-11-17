@@ -90,17 +90,50 @@ TableGroup "Order Fulfillment" [color: #D97706] {
 
 export const COMMERCE_V2_DBML = `Project OmnichannelCommerce {
   database_type: 'PostgreSQL'
-  Note: 'Core multi-domain commerce platform covering identity, catalog, fulfillment, and double-entry billing ledger.'
+  Note: '''
+    # Omnichannel Commerce & Ledger Platform
+
+    Core relational data model powering multi-tenant B2B/B2C commerce, inventory reservation, order fulfillment, and an immutable **double-entry financial ledger**.
+
+    > [!IMPORTANT]
+    > All monetary amounts are stored as signed 64-bit integer minor units (\`bigint\` cents) alongside an ISO-4217 currency code. Floating-point numeric types are strictly prohibited for balances or totals.
+
+    ## Domain Architecture
+
+    | Domain | Responsibility | Primary Tables |
+    | :--- | :--- | :--- |
+    | **Identity & Access** | User accounts, tenant orgs, RBAC, and ERP API keys | \`users\`, \`organizations\`, \`org_members\`, \`api_keys\` |
+    | **Product Catalog** | Category tree, master SKUs, sellable variants, warehouse stock | \`categories\`, \`products\`, \`product_variants\`, \`inventory_levels\` |
+    | **Order Fulfillment** | Checkout lifecycle, line-item snapshots, carrier tracking | \`orders\`, \`order_items\`, \`shipments\` |
+    | **Billing & Ledger** | Tax invoices, payment capture, double-entry journal | \`invoices\`, \`payments\`, \`ledger_entries\` |
+
+    ## Engineering Conventions
+
+    - **Primary Keys**: UUIDv7 / UUIDv4 across domain entities; \`bigint\` sequence for append-only \`ledger_entries\`.
+    - **Timestamps**: Stored as \`timestamptz\` in UTC; application layer formats per tenant timezone.
+    - **Tenant Isolation**: Every order and invoice links back to \`organizations.id\` for row-level security (RLS) policies.
+
+    ## Operational Health Check
+
+    \`\`\`sql
+    -- Verify zero-sum ledger invariant per payment capture
+    SELECT payment_id,
+           SUM(CASE WHEN entry_type = 'debit' THEN amount_cents ELSE -amount_cents END) AS net_balance
+    FROM ledger_entries
+    GROUP BY payment_id
+    HAVING SUM(CASE WHEN entry_type = 'debit' THEN amount_cents ELSE -amount_cents END) <> 0;
+    \`\`\`
+  '''
 }
 
 Enum order_status {
-  pending
-  authorized
-  paid
-  partially_shipped
-  fulfilled
-  cancelled
-  refunded
+  pending [note: 'Checkout created, awaiting payment authorization']
+  authorized [note: 'Funds held on payment method, inventory reserved']
+  paid [note: 'Payment captured and tax invoice settled']
+  partially_shipped [note: 'At least one fulfillment shipment dispatched']
+  fulfilled [note: 'All line items delivered to customer']
+  cancelled [note: 'Voided prior to capture; stock reservation released']
+  refunded [note: 'Full or partial credit memo issued']
 }
 
 Enum ledger_entry_type {
@@ -110,7 +143,7 @@ Enum ledger_entry_type {
 
 Table users [headercolor: #1e3a8a] {
   id uuid [pk, not null]
-  email varchar(255) [unique, not null]
+  email varchar(255) [unique, not null, note: 'Normalized lowercase login email']
   full_name varchar(160) [not null]
   mfa_enabled boolean [not null, default: false]
   created_at timestamptz [default: \`now()\`]
@@ -183,11 +216,25 @@ Table orders [headercolor: #9a3412] {
   customer_id uuid [not null, ref: > users.id]
   status order_status [not null, default: 'pending']
   currency char(3) [not null, default: 'USD']
-  total_cents bigint [not null]
+  total_cents bigint [not null, note: 'Pre-computed sum of \`order_items.quantity * unit_price_cents\` plus tax/shipping']
   created_at timestamptz [default: \`now()\`]
   Indexes {
     (org_id, created_at) [name: 'idx_orders_org_created']
   }
+  Note: '''
+    ## Orders Aggregate Root
+
+    Represents a customer purchase contract from checkout initiation through final delivery or refund.
+
+    ### State Machine Transitions
+
+    1. \`pending\` → \`authorized\` when payment gateway places an auth hold and \`inventory_levels.reserved\` is incremented.
+    2. \`authorized\` → \`paid\` upon capture webhook; triggers immutable \`invoices\` generation.
+    3. \`paid\` → \`partially_shipped\` → \`fulfilled\` as \`shipments\` records receive carrier scan timestamps.
+
+    > [!NOTE]
+    > Direct updates to \`total_cents\` after \`status = 'paid'\` are blocked by application policy. Adjustments must be recorded through \`ledger_entries\`.
+  '''
 }
 
 Table order_items [headercolor: #9a3412] {
@@ -195,7 +242,7 @@ Table order_items [headercolor: #9a3412] {
   order_id uuid [not null, ref: > orders.id]
   variant_id uuid [not null, ref: > product_variants.id]
   quantity integer [not null]
-  unit_price_cents bigint [not null]
+  unit_price_cents bigint [not null, note: 'Price snapshot at checkout time; decoupled from future catalog edits']
 }
 
 Table shipments [headercolor: #9a3412] {
@@ -229,11 +276,25 @@ Table payments [headercolor: #5b21b6] {
 Table ledger_entries [headercolor: #5b21b6] {
   id bigint [pk, increment]
   payment_id uuid [ref: > payments.id]
-  account_code varchar(32) [not null]
+  account_code varchar(32) [not null, note: 'Chart-of-accounts identifier, e.g. \`1010-CASH\`, \`4000-REVENUE\`']
   entry_type ledger_entry_type [not null]
   amount_cents bigint [not null]
   posted_at timestamptz [not null, default: \`now()\`]
-  Note: 'Append-only double-entry financial ledger.'
+  Note: '''
+    ## Double-Entry Financial Ledger
+
+    Append-only accounting journal tracking every financial movement across customer receivables, cash clearing, platform fees, and merchant payouts.
+
+    > [!WARNING]
+    > **Immutability Contract**: Never execute \`UPDATE\` or \`DELETE\` statements against \`ledger_entries\`. Corrections and refunds must append offsetting \`debit\` / \`credit\` entries referencing the original \`payment_id\`.
+
+    ### Standard Account Codes
+
+    - \`1010-CASH\`: Settled processor clearing account
+    - \`1200-AR\`: Accounts receivable for pending authorizations
+    - \`4000-REVENUE\`: Recognized merchandise revenue
+    - \`4050-REFUNDS\`: Contra-revenue refund adjustments
+  '''
 }
 
 TableGroup "Identity & Access" [color: #2563EB] {
@@ -260,10 +321,41 @@ TableGroup "Order Fulfillment" [color: #D97706] {
 }
 
 TableGroup "Billing & Ledger" [color: #7C3AED] {
-  Note: 'Invoicing, payment capture, and double-entry accounting ledger'
+  Note: '''
+    ### Billing, Invoicing & Accounting
+
+    Coordinates tax invoice issuance (\`invoices\`), external PSP settlement (\`payments\`), and internal double-entry bookkeeping (\`ledger_entries\`).
+
+    - Supports idempotent webhook retries via \`payments.provider_txn_id\` unique constraint.
+    - Reconciles daily against processor settlement reports.
+  '''
   invoices
   payments
   ledger_entries
+}
+
+Note "Migration & Indexing Guide" {
+  '''
+  # Migration & Indexing Runbook
+
+  Guidelines for evolving **OmnichannelCommerce** safely in production without table locks.
+
+  ## Checklist for Schema Changes
+
+  - [x] Always create indexes \`CONCURRENTLY\` on high-write tables (\`orders\`, \`ledger_entries\`)
+  - [x] Use expand-and-contract migrations when renaming or dropping columns
+  - [ ] Backfill new \`NOT NULL\` columns in batches of 5,000 rows before adding constraints
+
+  ## Recommended Partitioning Strategy
+
+  For deployments exceeding 50M rows in \`ledger_entries\`, partition by monthly range on \`posted_at\`:
+
+  \`\`\`sql
+  CREATE TABLE ledger_entries_2026_11
+    PARTITION OF ledger_entries
+    FOR VALUES FROM ('2026-11-01') TO ('2026-12-01');
+  \`\`\`
+  '''
 }
 `;
 

@@ -78,6 +78,13 @@ export interface ProjectMeta {
   note?: string;
 }
 
+export interface SchemaNoteDef {
+  id: string;
+  name: string;
+  content: string;
+  line?: number;
+}
+
 export interface ParseError {
   line: number;
   message: string;
@@ -89,6 +96,7 @@ export interface ParsedSchema {
   refs: RefDef[];
   enums: EnumDef[];
   tableGroups: TableGroupDef[];
+  notes: SchemaNoteDef[];
   errors: ParseError[];
 }
 

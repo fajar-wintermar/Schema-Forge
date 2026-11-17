@@ -9,6 +9,7 @@ import {
   X,
 } from 'lucide-react';
 import { ParsedSchema, TableDef } from '../types/schema';
+import { MarkdownContent } from './MarkdownContent';
 
 interface InspectorDrawerProps {
   table: TableDef | null;
@@ -190,9 +191,9 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
             <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">
               Table Documentation
             </div>
-            <p className="text-xs leading-relaxed text-slate-600 dark:text-slate-400 p-2.5 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-800">
-              {table.note}
-            </p>
+            <div className="max-h-60 overflow-y-auto p-3 rounded-lg bg-slate-50 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-800">
+              <MarkdownContent content={table.note} compact />
+            </div>
           </div>
         )}
 
@@ -223,7 +224,11 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
                     {c.notNull && !c.pk && <span>not null</span>}
                     {c.unique && <span>unique</span>}
                     {c.defaultValue && <span>default: {c.defaultValue}</span>}
-                    {c.note && <span className="text-slate-500">{c.note}</span>}
+                    {c.note && (
+                      <span className="text-slate-500">
+                        <MarkdownContent content={c.note} inline />
+                      </span>
+                    )}
                   </div>
                 )}
               </div>

@@ -8,9 +8,40 @@ import {
   ProjectMeta,
   RefDef,
   RefRelation,
+  SchemaNoteDef,
   TableDef,
   TableGroupDef,
 } from '../types/schema';
+
+function dedentTripleQuoted(raw: string): string {
+  const normalized = raw.replace(/\r\n?/g, '\n');
+  const lines = normalized.split('\n');
+
+  while (lines.length > 0 && lines[0].trim() === '') {
+    lines.shift();
+  }
+  while (lines.length > 0 && lines[lines.length - 1].trim() === '') {
+    lines.pop();
+  }
+  if (lines.length === 0) return '';
+
+  let minIndent = Infinity;
+  for (const line of lines) {
+    if (line.trim().length === 0) continue;
+    const match = line.match(/^[ \t]*/);
+    const indentLen = match ? match[0].length : 0;
+    if (indentLen < minIndent) minIndent = indentLen;
+  }
+
+  if (!Number.isFinite(minIndent) || minIndent === 0) {
+    return lines.join('\n').trim();
+  }
+
+  return lines
+    .map((line) => (line.trim().length === 0 ? '' : line.slice(minIndent)))
+    .join('\n')
+    .trim();
+}
 
 interface Token {
   type: 'word' | 'string' | 'symbol' | 'newline';
@@ -82,6 +113,11 @@ function tokenizeDbml(input: string, errors: ParseError[]): Token[] {
       let val = '';
       let closed = false;
       while (i < len) {
+        if (input[i] === '\\' && input.slice(i + 1, i + 4) === "'''") {
+          val += "'''";
+          i += 4;
+          continue;
+        }
         if (input.slice(i, i + 3) === "'''") {
           closed = true;
           i += 3;
@@ -97,7 +133,11 @@ function tokenizeDbml(input: string, errors: ParseError[]): Token[] {
           message: "Unclosed multi-line string (missing ''')",
         });
       }
-      tokens.push({ type: 'string', value: val.trim(), line: startLine });
+      tokens.push({
+        type: 'string',
+        value: dedentTripleQuoted(val),
+        line: startLine,
+      });
       continue;
     }
 
@@ -178,6 +218,7 @@ export function parseDbml(source: string): ParsedSchema {
   const refs: RefDef[] = [];
   const enums: EnumDef[] = [];
   const tableGroups: TableGroupDef[] = [];
+  const notes: SchemaNoteDef[] = [];
 
   const aliasToTableId = new Map<string, string>();
   const inlineRefs: Array<{
@@ -391,13 +432,14 @@ export function parseDbml(source: string): ParsedSchema {
           const key = kTok.value.toLowerCase();
           if (peek()?.value === ':') {
             next();
+            skipNewlines();
             const valTok = next();
             if (key === 'database_type') project.databaseType = valTok?.value;
             else if (key === 'note') project.note = valTok?.value;
           } else if (key === 'note' && peek()?.value === '{') {
             next();
             skipNewlines();
-            if (peek()?.type === 'string') {
+            if (peek() && peek()?.value !== '}') {
               project.note = next().value;
             }
             skipNewlines();
@@ -469,11 +511,12 @@ export function parseDbml(source: string): ParsedSchema {
           next();
           if (peek()?.value === ':') {
             next();
+            skipNewlines();
             tableNote = next()?.value;
           } else if (peek()?.value === '{') {
             next();
             skipNewlines();
-            if (peek()?.type === 'string' || peek()?.type === 'word') {
+            if (peek() && peek()?.value !== '}') {
               tableNote = next().value;
             }
             skipNewlines();
@@ -696,11 +739,12 @@ export function parseDbml(source: string): ParsedSchema {
             next();
             if (peek()?.value === ':') {
               next();
+              skipNewlines();
               groupNote = next()?.value;
             } else if (peek()?.value === '{') {
               next();
               skipNewlines();
-              if (peek()) groupNote = next().value;
+              if (peek() && peek()?.value !== '}') groupNote = next().value;
               skipNewlines();
               if (peek()?.value === '}') next();
             }
@@ -842,11 +886,47 @@ export function parseDbml(source: string): ParsedSchema {
         line: startLine,
       });
     } else if (keyword === 'note') {
+      const startLine = tok.line;
+      let noteName: string | undefined;
+      if (peek() && peek()?.value !== ':' && peek()?.value !== '{' && peek()?.type !== 'newline') {
+        noteName = unquote(next().value);
+      }
+      skipNewlines();
+      let content = '';
       if (peek()?.value === ':') {
         next();
-        next();
+        skipNewlines();
+        if (peek()) content = next().value;
       } else if (peek()?.value === '{') {
-        skipBlock();
+        const openBraceLine = peek()!.line;
+        next();
+        skipNewlines();
+        const parts: string[] = [];
+        while (idx < tokens.length && peek()?.value !== '}') {
+          if (peek()?.type === 'newline') {
+            next();
+            continue;
+          }
+          parts.push(next().value);
+        }
+        content = parts.join('\n').trim();
+        if (peek()?.value === '}') {
+          next();
+        } else {
+          errors.push({
+            line: openBraceLine,
+            message: `Unclosed '{' in Note${noteName ? ` "${noteName}"` : ''}`,
+          });
+        }
+      }
+      if (content) {
+        const displayName = noteName || `Project Note ${notes.length + 1}`;
+        notes.push({
+          id: `note_${notes.length + 1}_${displayName.toLowerCase().replace(/[^a-z0-9]+/g, '_')}`,
+          name: displayName,
+          content,
+          line: startLine,
+        });
       }
     } else if (tok.value === '}') {
       errors.push({
@@ -973,6 +1053,7 @@ export function parseDbml(source: string): ParsedSchema {
     refs,
     enums,
     tableGroups,
+    notes,
     errors: uniqueErrors,
   };
 }
@@ -989,7 +1070,19 @@ function formatGroupBlock(
   const opts: string[] = [];
   if (color) opts.push(`color: ${color}`);
   const optStr = opts.length > 0 ? ` [${opts.join(', ')}]` : '';
-  const noteLine = note ? `  Note: '${note.replace(/'/g, "\\'")}'\n` : '';
+  let noteLine = '';
+  if (note) {
+    if (note.includes('\n') || note.includes("'")) {
+      const escaped = note.replace(/'''/g, "\\'''");
+      const indented = escaped
+        .split('\n')
+        .map((l) => (l ? `    ${l}` : ''))
+        .join('\n');
+      noteLine = `  Note: '''\n${indented}\n  '''\n`;
+    } else {
+      noteLine = `  Note: '${note}'\n`;
+    }
+  }
   const tableLines = tables.map((t) => `  ${t}`).join('\n');
   const body = [noteLine.trimEnd(), tableLines].filter(Boolean).join('\n');
   return `TableGroup ${safeName}${optStr} {\n${body ? body + '\n' : ''}}`;

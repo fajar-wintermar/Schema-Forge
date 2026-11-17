@@ -1,15 +1,18 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
   ArrowUpDown,
+  BookOpen,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   ChevronsLeft,
   ChevronsRight,
   Database,
   ExternalLink,
+  FileText,
   Folder,
   GitBranch,
   KeyRound,
@@ -22,6 +25,12 @@ import {
   X,
 } from 'lucide-react';
 import { ParsedSchema, RefRelation, TableDef } from '../types/schema';
+import {
+  MarkdownContent,
+  extractMarkdownHeadings,
+  isRichMarkdownNote,
+  stripMarkdownToPlainText,
+} from './MarkdownContent';
 
 interface DocsViewProps {
   schema: ParsedSchema;
@@ -38,6 +47,8 @@ type DocsSection =
   | { kind: 'overview' }
   | { kind: 'enums' }
   | { kind: 'relationships' }
+  | { kind: 'note'; noteId: string }
+  | { kind: 'group'; groupName: string }
   | { kind: 'table'; tableId: string };
 
 const CARDINALITY_META: Record<
@@ -92,6 +103,126 @@ function getPageNumbers(current: number, total: number): Array<number | 'ellipsi
   return pages;
 }
 
+interface ReadmeNoteCardProps {
+  title: string;
+  subtitle?: string;
+  content: string;
+  accentColor?: string;
+  scrollContainerRef?: React.RefObject<HTMLDivElement | null>;
+}
+
+const ReadmeNoteCard: React.FC<ReadmeNoteCardProps> = ({
+  title,
+  subtitle,
+  content,
+  accentColor,
+  scrollContainerRef,
+}) => {
+  const [collapsed, setCollapsed] = useState(false);
+
+  const headings = useMemo(() => extractMarkdownHeadings(content), [content]);
+  const stats = useMemo(() => {
+    const words = content.trim().split(/\s+/).filter(Boolean).length;
+    const lines = content.split('\n').length;
+    const readMins = Math.max(1, Math.round(words / 200));
+    return { words, lines, readMins };
+  }, [content]);
+
+  const scrollToHeading = (id: string) => {
+    const container = scrollContainerRef?.current;
+    if (!container) return;
+    const escaped = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(id) : id;
+    const target = container.querySelector(`#${escaped}`);
+    if (target instanceof HTMLElement) {
+      target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
+  return (
+    <section className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
+      <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900 flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2.5 min-w-0">
+          {accentColor ? (
+            <span
+              className="w-2.5 h-2.5 rounded-xs shrink-0"
+              style={{ backgroundColor: accentColor }}
+            />
+          ) : (
+            <BookOpen className="w-4 h-4 text-blue-600 dark:text-blue-400 shrink-0" />
+          )}
+          <span className="text-xs font-semibold text-slate-800 dark:text-slate-100">
+            {title}
+          </span>
+          {subtitle && (
+            <>
+              <span className="text-slate-300 dark:text-slate-700">·</span>
+              <span className="text-xs font-mono text-slate-500 dark:text-slate-400 truncate">
+                {subtitle}
+              </span>
+            </>
+          )}
+        </div>
+
+        <div className="flex items-center gap-3 text-[11px] text-slate-400 shrink-0">
+          <span className="tabular-nums hidden sm:inline">
+            {stats.words} words · ~{stats.readMins} min read
+          </span>
+          <button
+            type="button"
+            onClick={() => setCollapsed((c) => !c)}
+            className="inline-flex items-center gap-1 px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+          >
+            {collapsed ? (
+              <>
+                <ChevronDown className="w-3 h-3" />
+                <span>Expand</span>
+              </>
+            ) : (
+              <>
+                <ChevronUp className="w-3 h-3" />
+                <span>Collapse</span>
+              </>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {!collapsed && (
+        <>
+          {headings.length >= 2 && (
+            <div className="px-6 py-2.5 border-b border-slate-100 dark:border-slate-800/80 bg-slate-50/40 dark:bg-slate-950/30 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px]">
+              <span className="font-semibold text-slate-400 uppercase tracking-wider text-[10px]">
+                Contents
+              </span>
+              {headings.map((h) => (
+                <button
+                  key={h.id}
+                  type="button"
+                  onClick={() => scrollToHeading(h.id)}
+                  className={`text-left hover:text-blue-600 dark:hover:text-blue-400 transition-colors ${
+                    h.level === 1
+                      ? 'font-semibold text-slate-700 dark:text-slate-200'
+                      : h.level === 2
+                      ? 'text-slate-600 dark:text-slate-300'
+                      : 'text-slate-500 dark:text-slate-400'
+                  }`}
+                >
+                  {h.text}
+                </button>
+              ))}
+            </div>
+          )}
+          <div className="px-6 py-5 lg:px-8 lg:py-6">
+            <div className="max-w-4xl">
+              <MarkdownContent content={content} />
+            </div>
+          </div>
+        </>
+      )}
+    </section>
+  );
+};
+
 export const DocsView: React.FC<DocsViewProps> = ({
   schema,
   navOpen,
@@ -108,6 +239,7 @@ export const DocsView: React.FC<DocsViewProps> = ({
   const [section, setSection] = useState<DocsSection>({ kind: 'overview' });
   const [expandedDomains, setExpandedDomains] = useState<Record<string, boolean>>({});
   const [expandedTreeTables, setExpandedTreeTables] = useState<Record<string, boolean>>({});
+  const mainPaneRef = useRef<HTMLDivElement | null>(null);
 
   // Pagination states for Overview & Relationships
   const [overviewPage, setOverviewPage] = useState(1);
@@ -117,15 +249,25 @@ export const DocsView: React.FC<DocsViewProps> = ({
   const [relSearch, setRelSearch] = useState('');
   const [enumSearch, setEnumSearch] = useState('');
 
-  // Reset to overview if active table no longer exists after workspace switch
+  // Reset to overview if active table, note, or group no longer exists after workspace switch
   useEffect(() => {
     if (
       section.kind === 'table' &&
       !schema.tables.some((t) => t.id === section.tableId)
     ) {
       setSection({ kind: 'overview' });
+    } else if (
+      section.kind === 'note' &&
+      !schema.notes.some((n) => n.id === section.noteId)
+    ) {
+      setSection({ kind: 'overview' });
+    } else if (
+      section.kind === 'group' &&
+      !schema.tableGroups.some((g) => g.name === section.groupName)
+    ) {
+      setSection({ kind: 'overview' });
     }
-  }, [schema.tables, section]);
+  }, [schema.tables, schema.notes, schema.tableGroups, section]);
 
   // Reset pagination when filters change
   useEffect(() => {
@@ -324,6 +466,14 @@ export const DocsView: React.FC<DocsViewProps> = ({
 
   const activeTableId = section.kind === 'table' ? section.tableId : null;
   const activeTable = activeTableId ? tableMap.get(activeTableId) || null : null;
+  const activeNote =
+    section.kind === 'note'
+      ? schema.notes.find((n) => n.id === section.noteId) || null
+      : null;
+  const activeGroup =
+    section.kind === 'group'
+      ? schema.tableGroups.find((g) => g.name === section.groupName) || null
+      : null;
 
   const toggleDomainExpand = (domainName: string) => {
     setExpandedDomains((prev) => ({
@@ -341,6 +491,7 @@ export const DocsView: React.FC<DocsViewProps> = ({
 
   const openTableDetail = (tableId: string) => {
     setSection({ kind: 'table', tableId });
+    mainPaneRef.current?.scrollTo({ top: 0 });
   };
 
   const renderCardinalityBadge = (relation: RefRelation) => {
@@ -539,6 +690,36 @@ export const DocsView: React.FC<DocsViewProps> = ({
                 {schema.refs.length}
               </span>
             </button>
+
+            {schema.notes.length > 0 && (
+              <div className="pt-1.5 mt-1.5 border-t border-slate-100 dark:border-slate-800 space-y-0.5">
+                <div className="px-2.5 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                  Project Notes
+                </div>
+                {schema.notes.map((n) => {
+                  const isActiveNote =
+                    section.kind === 'note' && section.noteId === n.id;
+                  return (
+                    <button
+                      key={n.id}
+                      type="button"
+                      onClick={() => {
+                        setSection({ kind: 'note', noteId: n.id });
+                        mainPaneRef.current?.scrollTo({ top: 0 });
+                      }}
+                      className={`w-full flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs transition-colors ${
+                        isActiveNote
+                          ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 font-semibold'
+                          : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/70'
+                      }`}
+                    >
+                      <FileText className="w-3.5 h-3.5 shrink-0 text-slate-400" />
+                      <span className="truncate">{n.name}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
 
           {/* Tree Search & Mode Switch */}
@@ -651,27 +832,47 @@ export const DocsView: React.FC<DocsViewProps> = ({
 
                   return (
                     <div key={group.name} className="space-y-0.5">
-                      <button
-                        type="button"
-                        onClick={() => toggleDomainExpand(group.name)}
-                        className="w-full flex items-center gap-1.5 px-1.5 py-1.5 rounded-md text-xs font-semibold text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/70 transition-colors"
-                      >
-                        {isOpen ? (
-                          <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                        ) : (
-                          <ChevronRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                      <div className="flex items-center gap-0.5">
+                        <button
+                          type="button"
+                          onClick={() => toggleDomainExpand(group.name)}
+                          className="flex-1 min-w-0 flex items-center gap-1.5 px-1.5 py-1.5 rounded-md text-xs font-semibold text-slate-800 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800/70 transition-colors"
+                        >
+                          {isOpen ? (
+                            <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                          ) : (
+                            <ChevronRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                          )}
+                          <span
+                            className="w-2.5 h-2.5 rounded-xs shrink-0"
+                            style={{ backgroundColor: group.color || '#2563EB' }}
+                          />
+                          <span className="flex-1 truncate text-left">
+                            {group.name}
+                          </span>
+                          <span className="text-[10px] font-normal text-slate-400 tabular-nums">
+                            {matchingTables.length}
+                          </span>
+                        </button>
+                        {group.note && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSection({ kind: 'group', groupName: group.name });
+                              mainPaneRef.current?.scrollTo({ top: 0 });
+                            }}
+                            title={`Open "${group.name}" documentation`}
+                            className={`p-1 rounded-md transition-colors shrink-0 ${
+                              section.kind === 'group' &&
+                              section.groupName === group.name
+                                ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400'
+                                : 'text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                            }`}
+                          >
+                            <FileText className="w-3 h-3" />
+                          </button>
                         )}
-                        <span
-                          className="w-2.5 h-2.5 rounded-xs shrink-0"
-                          style={{ backgroundColor: group.color || '#2563EB' }}
-                        />
-                        <span className="flex-1 truncate text-left">
-                          {group.name}
-                        </span>
-                        <span className="text-[10px] font-normal text-slate-400 tabular-nums">
-                          {matchingTables.length}
-                        </span>
-                      </button>
+                      </div>
 
                       {isOpen && (
                         <div className="ml-3 pl-1.5 border-l border-slate-200/80 dark:border-slate-800 space-y-0.5">
@@ -752,7 +953,7 @@ export const DocsView: React.FC<DocsViewProps> = ({
       </button>
 
       {/* Main Docs Content Pane */}
-      <div className="flex-1 h-full overflow-y-auto min-w-0">
+      <div ref={mainPaneRef} className="flex-1 h-full overflow-y-auto min-w-0">
         {/* ---------- 1. TABLE DETAIL VIEW ---------- */}
         {section.kind === 'table' && activeTable && (
           <div className="w-full px-6 lg:px-10 py-6 space-y-6">
@@ -806,8 +1007,8 @@ export const DocsView: React.FC<DocsViewProps> = ({
                     key={dom}
                     type="button"
                     onClick={() => {
-                      setTreeMode('domain');
-                      if (!navOpen) onToggleNav();
+                      setSection({ kind: 'group', groupName: dom });
+                      mainPaneRef.current?.scrollTo({ top: 0 });
                     }}
                     className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:border-blue-400"
                   >
@@ -821,6 +1022,17 @@ export const DocsView: React.FC<DocsViewProps> = ({
                   </button>
                 ))}
               </div>
+            )}
+
+            {/* Rich / Long Table README Documentation */}
+            {activeTable.note && isRichMarkdownNote(activeTable.note) && (
+              <ReadmeNoteCard
+                title="Table Documentation"
+                subtitle={activeTable.id}
+                content={activeTable.note}
+                accentColor={activeTable.headerColor}
+                scrollContainerRef={mainPaneRef}
+              />
             )}
 
             {/* Full Column Specification Card */}
@@ -848,9 +1060,9 @@ export const DocsView: React.FC<DocsViewProps> = ({
                 </span>
               </div>
 
-              {activeTable.note && (
+              {activeTable.note && !isRichMarkdownNote(activeTable.note) && (
                 <div className="px-5 py-2.5 bg-slate-50/70 dark:bg-slate-800/40 border-b border-slate-200/70 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-300">
-                  {activeTable.note}
+                  <MarkdownContent content={activeTable.note} compact />
                 </div>
               )}
 
@@ -900,18 +1112,23 @@ export const DocsView: React.FC<DocsViewProps> = ({
                             {col.defaultValue || '—'}
                           </td>
                           <td className="py-2.5 px-5 text-slate-600 dark:text-slate-300">
-                            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                            <div className="space-y-1">
                               {fk && (
                                 <button
                                   type="button"
                                   onClick={() => openTableDetail(fk.targetTable)}
-                                  className="inline-flex items-center gap-1 font-mono text-[11px] text-blue-600 dark:text-blue-400 hover:underline"
+                                  className="inline-flex items-center gap-1 font-mono text-[11px] text-blue-600 dark:text-blue-400 hover:underline mr-2"
                                 >
                                   <Link2 className="w-3 h-3" />
                                   <span>{fk.label}</span>
                                 </button>
                               )}
-                              {col.note && <span>{col.note}</span>}
+                              {col.note &&
+                                (col.note.includes('\n') || col.note.length >= 120 ? (
+                                  <MarkdownContent content={col.note} compact />
+                                ) : (
+                                  <MarkdownContent content={col.note} inline />
+                                ))}
                               {!fk && !col.note && (
                                 <span className="text-slate-400">—</span>
                               )}
@@ -1061,6 +1278,157 @@ export const DocsView: React.FC<DocsViewProps> = ({
           </div>
         )}
 
+        {/* ---------- 1B. STANDALONE NOTE README VIEW ---------- */}
+        {section.kind === 'note' && activeNote && (
+          <div className="w-full px-6 lg:px-10 py-6 space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-200 dark:border-slate-800">
+              <div className="flex items-center gap-2 text-xs">
+                {!navOpen && (
+                  <button
+                    type="button"
+                    onClick={onToggleNav}
+                    title={`Show Docs navigation (${modKey}J)`}
+                    className="p-1.5 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  >
+                    <PanelLeft className="w-3.5 h-3.5" />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setSection({ kind: 'overview' })}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 font-medium"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>Schema Overview</span>
+                </button>
+                <span className="text-slate-400">/</span>
+                <span className="text-slate-500 dark:text-slate-400">
+                  Project Notes
+                </span>
+                <span className="text-slate-400">/</span>
+                <span className="font-semibold text-slate-900 dark:text-slate-100">
+                  {activeNote.name}
+                </span>
+              </div>
+              {activeNote.line && (
+                <span className="text-[11px] font-mono text-slate-400">
+                  DBML line {activeNote.line}
+                </span>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-50">
+                {activeNote.name}
+              </h1>
+            </div>
+
+            <ReadmeNoteCard
+              title="Documentation Note"
+              subtitle={activeNote.name}
+              content={activeNote.content}
+              scrollContainerRef={mainPaneRef}
+            />
+          </div>
+        )}
+
+        {/* ---------- 1C. BUSINESS DOMAIN (TABLEGROUP) README VIEW ---------- */}
+        {section.kind === 'group' && activeGroup && (
+          <div className="w-full px-6 lg:px-10 py-6 space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-200 dark:border-slate-800">
+              <div className="flex items-center gap-2 text-xs">
+                {!navOpen && (
+                  <button
+                    type="button"
+                    onClick={onToggleNav}
+                    title={`Show Docs navigation (${modKey}J)`}
+                    className="p-1.5 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  >
+                    <PanelLeft className="w-3.5 h-3.5" />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setSection({ kind: 'overview' })}
+                  className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 font-medium"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>Schema Overview</span>
+                </button>
+                <span className="text-slate-400">/</span>
+                <span className="text-slate-500 dark:text-slate-400">
+                  Business Domain
+                </span>
+                <span className="text-slate-400">/</span>
+                <span className="font-semibold text-slate-900 dark:text-slate-100">
+                  {activeGroup.name}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <span
+                className="w-3.5 h-3.5 rounded-xs shrink-0"
+                style={{ backgroundColor: activeGroup.color || '#2563EB' }}
+              />
+              <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-50">
+                {activeGroup.name}
+              </h1>
+              <span className="text-xs text-slate-400 tabular-nums">
+                ({activeGroup.tables.length} tables)
+              </span>
+            </div>
+
+            {activeGroup.note && (
+              <ReadmeNoteCard
+                title="Domain Documentation"
+                subtitle={activeGroup.name}
+                content={activeGroup.note}
+                accentColor={activeGroup.color || '#2563EB'}
+                scrollContainerRef={mainPaneRef}
+              />
+            )}
+
+            <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
+              <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200">
+                Tables in {activeGroup.name} ({activeGroup.tables.length})
+              </div>
+              <div className="divide-y divide-slate-100 dark:divide-slate-800/70">
+                {activeGroup.tables.map((tId) => {
+                  const tbl = tableMap.get(tId);
+                  if (!tbl) return null;
+                  return (
+                    <button
+                      key={tId}
+                      type="button"
+                      onClick={() => openTableDetail(tbl.id)}
+                      className="w-full px-5 py-3 flex items-center justify-between gap-4 text-left hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors"
+                    >
+                      <div className="min-w-0 space-y-0.5">
+                        <div className="flex items-center gap-2 font-mono text-xs font-semibold text-slate-900 dark:text-slate-100">
+                          <span
+                            className="w-2 h-2 rounded-xs shrink-0"
+                            style={{ backgroundColor: tbl.headerColor || '#0f172a' }}
+                          />
+                          <span>{tbl.id}</span>
+                        </div>
+                        {tbl.note && (
+                          <p className="text-xs text-slate-500 dark:text-slate-400 truncate">
+                            {stripMarkdownToPlainText(tbl.note)}
+                          </p>
+                        )}
+                      </div>
+                      <span className="text-xs text-blue-600 dark:text-blue-400 font-medium shrink-0">
+                        {tbl.columns.length} cols →
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* ---------- 2. ENUMERATED TYPES VIEW (ENHANCED TABLE) ---------- */}
         {section.kind === 'enums' && (
           <div className="w-full px-6 lg:px-10 py-6 space-y-6">
@@ -1159,8 +1527,8 @@ export const DocsView: React.FC<DocsViewProps> = ({
                                       {v.name}
                                     </span>
                                     {v.note && (
-                                      <span className="font-sans text-[11px] text-slate-400 truncate">
-                                        — {v.note}
+                                      <span className="font-sans text-[11px] text-slate-400">
+                                        — <MarkdownContent content={v.note} inline />
                                       </span>
                                     )}
                                   </div>
@@ -1440,10 +1808,10 @@ export const DocsView: React.FC<DocsViewProps> = ({
                 <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-50">
                   {schema.project.name || 'Database Schema Documentation'}
                 </h1>
-                {schema.project.note && (
-                  <p className="text-sm text-slate-600 dark:text-slate-300 max-w-3xl">
-                    {schema.project.note}
-                  </p>
+                {schema.project.note && !isRichMarkdownNote(schema.project.note) && (
+                  <div className="text-sm text-slate-600 dark:text-slate-300 max-w-3xl">
+                    <MarkdownContent content={schema.project.note} compact />
+                  </div>
                 )}
               </div>
 
@@ -1458,6 +1826,100 @@ export const DocsView: React.FC<DocsViewProps> = ({
                 />
               </div>
             </div>
+
+            {/* Project README Card (for rich / multi-line project notes) */}
+            {schema.project.note && isRichMarkdownNote(schema.project.note) && (
+              <ReadmeNoteCard
+                title="README"
+                subtitle={schema.project.name || 'Project Documentation'}
+                content={schema.project.note}
+                scrollContainerRef={mainPaneRef}
+              />
+            )}
+
+            {/* Standalone Project Notes Directory (if any Note blocks exist) */}
+            {schema.notes.length > 0 && (
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between text-xs font-semibold text-slate-700 dark:text-slate-200">
+                  <span className="flex items-center gap-2">
+                    <FileText className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                    <span>Documentation Notes ({schema.notes.length})</span>
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {schema.notes.map((n) => (
+                    <button
+                      key={n.id}
+                      type="button"
+                      onClick={() => {
+                        setSection({ kind: 'note', noteId: n.id });
+                        mainPaneRef.current?.scrollTo({ top: 0 });
+                      }}
+                      className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-blue-400 dark:hover:border-blue-600 text-left space-y-1.5 transition-colors"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-xs font-semibold text-slate-900 dark:text-slate-100 truncate">
+                          {n.name}
+                        </span>
+                        <ArrowRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                      </div>
+                      <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2">
+                        {stripMarkdownToPlainText(n.content)}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Business Domains Guide Strip (when TableGroups have notes) */}
+            {visibleGroups.some((g) => Boolean(g.note)) && (
+              <div className="space-y-2.5">
+                <div className="flex items-center justify-between text-xs font-semibold text-slate-700 dark:text-slate-200">
+                  <span className="flex items-center gap-2">
+                    <Layers className="w-3.5 h-3.5 text-slate-500" />
+                    <span>Business Domains ({visibleGroups.length})</span>
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
+                  {visibleGroups.map((g) => (
+                    <button
+                      key={g.name}
+                      type="button"
+                      onClick={() => {
+                        setSection({ kind: 'group', groupName: g.name });
+                        mainPaneRef.current?.scrollTo({ top: 0 });
+                      }}
+                      className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-blue-400 dark:hover:border-blue-600 text-left space-y-1.5 transition-colors"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="inline-flex items-center gap-2 min-w-0">
+                          <span
+                            className="w-2.5 h-2.5 rounded-xs shrink-0"
+                            style={{ backgroundColor: g.color || '#2563EB' }}
+                          />
+                          <span className="text-xs font-semibold text-slate-900 dark:text-slate-100 truncate">
+                            {g.name}
+                          </span>
+                        </span>
+                        <span className="text-[10px] text-slate-400 tabular-nums shrink-0">
+                          {g.tables.length}t
+                        </span>
+                      </div>
+                      {g.note ? (
+                        <p className="text-[11.5px] text-slate-500 dark:text-slate-400 line-clamp-2">
+                          {stripMarkdownToPlainText(g.note)}
+                        </p>
+                      ) : (
+                        <p className="text-[11.5px] text-slate-400 italic">
+                          No domain notes
+                        </p>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {isFilteringDomains && (
               <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 text-xs">
@@ -1531,7 +1993,11 @@ export const DocsView: React.FC<DocsViewProps> = ({
                                 {domains.length > 0 ? domains.join(', ') : '—'}
                               </td>
                               <td className="py-2.5 px-4 text-slate-600 dark:text-slate-300 max-w-md truncate">
-                                {t.note || <span className="text-slate-400">—</span>}
+                                {t.note ? (
+                                  stripMarkdownToPlainText(t.note)
+                                ) : (
+                                  <span className="text-slate-400">—</span>
+                                )}
                               </td>
                               <td className="py-2.5 px-4 text-right font-mono text-slate-500 dark:text-slate-400 tabular-nums whitespace-nowrap">
                                 {t.columns.length}
