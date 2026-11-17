@@ -272,6 +272,26 @@ async function githubApiFetch(
   });
 }
 
+async function isGithubRepoEmpty(
+  owner: string,
+  repo: string,
+  accessToken?: string
+): Promise<boolean> {
+  try {
+    const res = await githubApiFetch(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+        repo
+      )}/branches?per_page=1`,
+      accessToken
+    );
+    if (!res.ok) return false;
+    const branches = (await res.json()) as unknown[];
+    return Array.isArray(branches) && branches.length === 0;
+  } catch {
+    return false;
+  }
+}
+
 // ---------- Shared Hono API Router ----------
 
 export const api = new Hono<{ Bindings: AppEnv }>();
@@ -691,63 +711,169 @@ api.post('/api/fetch-url', handleFetchUrl);
 
 // 3. GitHub Repository, Tree, File & Push Proxy
 
-api.get('/api/github/repos', async (c) => {
+// Explicit single-repo branch initialization (creates `main` on empty repos)
+api.post('/api/github/init-branch', async (c) => {
   const session = await getGithubSession(c);
   if (!session) {
-    return c.json({ error: 'Not authenticated with GitHub.' }, 401);
+    return c.json(
+      { error: 'Please connect your GitHub account before creating a branch.' },
+      401
+    );
+  }
+
+  const body = await c.req
+    .json<{ owner?: string; repo?: string; branch?: string }>()
+    .catch(() => ({} as { owner?: string; repo?: string; branch?: string }));
+
+  const owner = (body.owner || '').trim();
+  const repo = (body.repo || '').trim();
+  const branch = (body.branch || 'main').trim();
+
+  if (!owner || !repo || !branch) {
+    return c.json(
+      { error: 'Missing required fields: owner, repo, and branch.' },
+      400
+    );
+  }
+
+  if (/[\s~^:?*\[]/.test(branch)) {
+    return c.json(
+      {
+        error:
+          'Please enter a valid branch name (no spaces or special characters).',
+      },
+      400
+    );
   }
 
   try {
-    const ghRes = await githubApiFetch(
-      '/user/repos?sort=updated&per_page=100&affiliation=owner,collaborator,organization_member',
+    const branchesRes = await githubApiFetch(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+        repo
+      )}/branches?per_page=100`,
       session.accessToken
     );
-    const data = await ghRes.json();
-    if (!ghRes.ok) {
+    const branchesData = (await branchesRes.json()) as
+      | Array<{ name: string; commit?: { sha: string } }>
+      | { message?: string };
+
+    if (!branchesRes.ok) {
       return c.json(
         {
           error:
-            (data as { message?: string }).message ||
-            'Failed to load GitHub repositories.',
+            (!Array.isArray(branchesData) && branchesData.message) ||
+            'Repository not found or inaccessible.',
         },
-        ghRes.status as 400
+        branchesRes.status as 400
       );
     }
 
-    const repos = (
-      data as Array<{
-        id: number;
-        full_name: string;
-        name: string;
-        owner: { login: string; avatar_url: string };
-        private: boolean;
-        default_branch: string;
-        description: string | null;
-        html_url: string;
-        updated_at: string;
-        permissions?: { push?: boolean };
-      }>
-    ).map((r) => ({
-      id: r.id,
-      full_name: r.full_name,
-      owner: r.owner.login,
-      name: r.name,
-      private: r.private,
-      default_branch: r.default_branch,
-      description: r.description,
-      html_url: r.html_url,
-      updated_at: r.updated_at,
-      canPush: r.permissions?.push ?? true,
-    }));
+    const existingBranches = Array.isArray(branchesData) ? branchesData : [];
 
-    return c.json({ repos });
+    // Empty repository: create an initial README.md commit to bootstrap the branch
+    if (existingBranches.length === 0) {
+      const readmeContent = `# ${repo}\n\nDBML database schema repository managed with SchemaForge.\n`;
+      const putRes = await githubApiFetch(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+          repo
+        )}/contents/README.md`,
+        session.accessToken,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: `Initialize ${branch} branch`,
+            content: encodeBase64Utf8(readmeContent),
+            branch,
+          }),
+        }
+      );
+
+      const putJson = (await putRes.json()) as {
+        commit?: { sha: string; html_url?: string };
+        message?: string;
+      };
+
+      if (!putRes.ok || !putJson.commit?.sha) {
+        return c.json(
+          {
+            error:
+              putJson.message ||
+              `Failed to create "${branch}" branch on empty repository.`,
+          },
+          (putRes.status || 400) as 400
+        );
+      }
+
+      return c.json({
+        branch,
+        initialized: true,
+        alreadyExists: false,
+        commitSha: putJson.commit.sha,
+        commitUrl:
+          putJson.commit.html_url ||
+          `https://github.com/${owner}/${repo}/commit/${putJson.commit.sha}`,
+      });
+    }
+
+    if (existingBranches.some((b) => b.name === branch)) {
+      return c.json({
+        branch,
+        initialized: false,
+        alreadyExists: true,
+      });
+    }
+
+    const baseSha = existingBranches[0]?.commit?.sha;
+    if (!baseSha) {
+      return c.json(
+        { error: 'Unable to resolve base commit SHA for branch creation.' },
+        400
+      );
+    }
+
+    const createRefRes = await githubApiFetch(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/refs`,
+      session.accessToken,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ref: `refs/heads/${branch}`,
+          sha: baseSha,
+        }),
+      }
+    );
+    const createRefJson = (await createRefRes.json()) as { message?: string };
+    if (!createRefRes.ok) {
+      return c.json(
+        {
+          error:
+            createRefJson.message || `Failed to create branch "${branch}".`,
+        },
+        (createRefRes.status || 400) as 400
+      );
+    }
+
+    return c.json({
+      branch,
+      initialized: true,
+      alreadyExists: false,
+      commitSha: baseSha,
+    });
   } catch (err) {
     return c.json(
-      { error: err instanceof Error ? err.message : 'GitHub API error.' },
+      {
+        error:
+          err instanceof Error
+            ? err.message
+            : 'Failed to initialize repository branch.',
+      },
       502
     );
   }
 });
+
 
 api.get('/api/github/repo-info', async (c) => {
   const owner = (c.req.query('owner') || '').trim();
@@ -791,6 +917,8 @@ api.get('/api/github/repo-info', async (c) => {
       ? ((await branchesRes.json()) as Array<{ name: string }>)
       : [];
 
+    const branches = branchesRaw.map((b) => b.name);
+
     return c.json({
       full_name: repoJson.full_name,
       owner,
@@ -799,7 +927,8 @@ api.get('/api/github/repo-info', async (c) => {
       private: Boolean(repoJson.private),
       html_url: repoJson.html_url,
       canPush: Boolean(session && (repoJson.permissions?.push ?? true)),
-      branches: branchesRaw.map((b) => b.name),
+      branches,
+      isEmpty: branches.length === 0,
     });
   } catch (err) {
     return c.json(
@@ -837,6 +966,13 @@ api.get('/api/github/tree', async (c) => {
     };
 
     if (!treeRes.ok) {
+      if (treeRes.status === 409 || /empty/i.test(treeJson.message || '')) {
+        return c.json({
+          files: [],
+          truncated: false,
+          isEmpty: true,
+        });
+      }
       return c.json(
         { error: treeJson.message || 'Failed to read repository file tree.' },
         treeRes.status as 400
@@ -859,6 +995,7 @@ api.get('/api/github/tree', async (c) => {
     return c.json({
       files,
       truncated: Boolean(treeJson.truncated),
+      isEmpty: false,
     });
   } catch (err) {
     return c.json(
@@ -1008,43 +1145,54 @@ api.post('/api/github/push', async (c) => {
         message?: string;
       };
       if (!refRes.ok || !refData.object?.sha) {
-        return c.json(
-          {
-            error:
-              refData.message ||
-              `Unable to resolve base branch "${targetBranch}".`,
-          },
-          (refRes.status || 400) as 400
+        const emptyRepo = await isGithubRepoEmpty(
+          owner,
+          repo,
+          session.accessToken
         );
-      }
-
-      const createRefRes = await githubApiFetch(
-        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
-          repo
-        )}/git/refs`,
-        session.accessToken,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            ref: `refs/heads/${cleanBranch}`,
-            sha: refData.object.sha,
-          }),
+        if (emptyRepo) {
+          targetBranch = cleanBranch;
+        } else {
+          return c.json(
+            {
+              error:
+                refData.message ||
+                `Unable to resolve base branch "${targetBranch}".`,
+            },
+            (refRes.status || 400) as 400
+          );
         }
-      );
-
-      const createRefJson = (await createRefRes.json()) as { message?: string };
-      if (!createRefRes.ok) {
-        return c.json(
+      } else {
+        const createRefRes = await githubApiFetch(
+          `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+            repo
+          )}/git/refs`,
+          session.accessToken,
           {
-            error:
-              createRefJson.message ||
-              `Failed to create branch "${cleanBranch}".`,
-          },
-          createRefRes.status as 400
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              ref: `refs/heads/${cleanBranch}`,
+              sha: refData.object.sha,
+            }),
+          }
         );
+
+        const createRefJson = (await createRefRes.json()) as {
+          message?: string;
+        };
+        if (!createRefRes.ok) {
+          return c.json(
+            {
+              error:
+                createRefJson.message ||
+                `Failed to create branch "${cleanBranch}".`,
+            },
+            createRefRes.status as 400
+          );
+        }
+        targetBranch = cleanBranch;
       }
-      targetBranch = cleanBranch;
     }
 
     let shaToUse = expectedSha || undefined;
@@ -1182,47 +1330,136 @@ api.get('/api/github/folder', async (c) => {
       );
     }
 
-    if (dbmlItems.length > 80) {
+    if (dbmlItems.length > 250) {
       return c.json(
-        { error: `Folder contains ${dbmlItems.length} .dbml files (max 80 per load).` },
+        { error: `Folder contains ${dbmlItems.length} .dbml files (max 250 per load).` },
         400
       );
     }
 
     const loadedFiles: Array<{ path: string; content: string; sha: string }> = [];
-    const batchSize = 8;
-    for (let i = 0; i < dbmlItems.length; i += batchSize) {
-      const slice = dbmlItems.slice(i, i + batchSize);
-      const results = await Promise.all(
-        slice.map(async (item) => {
-          const blobRes = await githubApiFetch(
-            `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
-              repo
-            )}/git/blobs/${encodeURIComponent(item.sha)}`,
-            session?.accessToken
-          );
-          const blobJson = (await blobRes.json()) as {
-            content?: string;
-            encoding?: string;
-            message?: string;
+
+    // Use GitHub GraphQL batching when authenticated so large modular folders (e.g. 95+ files)
+    // fit well within Cloudflare Workers subrequest limits.
+    if (session?.accessToken) {
+      const gqlChunkSize = 40;
+      for (let i = 0; i < dbmlItems.length; i += gqlChunkSize) {
+        const slice = dbmlItems.slice(i, i + gqlChunkSize);
+        const aliasFields = slice
+          .map(
+            (item, idx) =>
+              `f${idx}: object(oid: ${JSON.stringify(
+                item.sha
+              )}) { ... on Blob { text } }`
+          )
+          .join('\n');
+        const gqlQuery = `query($owner: String!, $repo: String!) {
+  repository(owner: $owner, name: $repo) {
+    ${aliasFields}
+  }
+}`;
+        const gqlRes = await fetch('https://api.github.com/graphql', {
+          method: 'POST',
+          headers: {
+            Accept: 'application/json',
+            'Content-Type': 'application/json',
+            'User-Agent': 'SchemaForge-DBML-Studio',
+            Authorization: `Bearer ${session.accessToken}`,
+          },
+          body: JSON.stringify({
+            query: gqlQuery,
+            variables: { owner, repo },
+          }),
+        });
+
+        const gqlJson = (await gqlRes.json().catch(() => ({}))) as {
+          data?: {
+            repository?: Record<string, { text?: string | null } | null>;
           };
-          if (!blobRes.ok || typeof blobJson.content !== 'string') {
-            throw new Error(
-              blobJson.message || `Failed to read blob for ${item.path}`
-            );
+          errors?: Array<{ message?: string }>;
+        };
+
+        if (gqlRes.ok && gqlJson.data?.repository) {
+          const repoData = gqlJson.data.repository;
+          for (let idx = 0; idx < slice.length; idx++) {
+            const item = slice[idx];
+            const text = repoData[`f${idx}`]?.text;
+            if (typeof text === 'string') {
+              loadedFiles.push({
+                path: item.path,
+                content: text,
+                sha: item.sha,
+              });
+            } else {
+              const blobRes = await githubApiFetch(
+                `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+                  repo
+                )}/git/blobs/${encodeURIComponent(item.sha)}`,
+                session.accessToken
+              );
+              const blobJson = (await blobRes.json()) as {
+                content?: string;
+                encoding?: string;
+                message?: string;
+              };
+              if (!blobRes.ok || typeof blobJson.content !== 'string') {
+                throw new Error(
+                  blobJson.message || `Failed to read blob for ${item.path}`
+                );
+              }
+              loadedFiles.push({
+                path: item.path,
+                content:
+                  blobJson.encoding === 'base64'
+                    ? decodeBase64Utf8(blobJson.content)
+                    : blobJson.content,
+                sha: item.sha,
+              });
+            }
           }
-          const content =
-            blobJson.encoding === 'base64'
-              ? decodeBase64Utf8(blobJson.content)
-              : blobJson.content;
-          return {
-            path: item.path,
-            content,
-            sha: item.sha,
-          };
-        })
-      );
-      loadedFiles.push(...results);
+          continue;
+        }
+        // If GraphQL failed, fall back to REST blob fetching below for remaining slices
+        throw new Error(
+          gqlJson.errors?.[0]?.message ||
+            'Failed to batch-load modular files from GitHub.'
+        );
+      }
+    } else {
+      const batchSize = 8;
+      for (let i = 0; i < dbmlItems.length; i += batchSize) {
+        const slice = dbmlItems.slice(i, i + batchSize);
+        const results = await Promise.all(
+          slice.map(async (item) => {
+            const blobRes = await githubApiFetch(
+              `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+                repo
+              )}/git/blobs/${encodeURIComponent(item.sha)}`,
+              session?.accessToken
+            );
+            const blobJson = (await blobRes.json()) as {
+              content?: string;
+              encoding?: string;
+              message?: string;
+            };
+            if (!blobRes.ok || typeof blobJson.content !== 'string') {
+              throw new Error(
+                blobJson.message || `Failed to read blob for ${item.path}`
+              );
+            }
+            const content =
+              blobJson.encoding === 'base64'
+                ? decodeBase64Utf8(blobJson.content)
+                : blobJson.content;
+            return {
+              path: item.path,
+              content,
+              sha: item.sha,
+            };
+          })
+        );
+        loadedFiles.push(...results);
+      }
     }
 
     return c.json({
@@ -1295,6 +1532,238 @@ api.post('/api/github/push-batch', async (c) => {
 
   try {
     let targetBranch = branch.trim();
+    const cleanFiles = files.map((f) => ({
+      ...f,
+      cleanPath: f.path.trim().replace(/^\/+/, ''),
+    }));
+
+    const repoEmpty = await isGithubRepoEmpty(owner, repo, session.accessToken);
+
+    if (repoEmpty) {
+      if (createNewBranch) {
+        const cleanBranch = (newBranchName || '').trim();
+        if (!cleanBranch || /[\s~^:?*\[]/.test(cleanBranch)) {
+          return c.json(
+            {
+              error:
+                'Please enter a valid new branch name (no spaces or special characters).',
+            },
+            400
+          );
+        }
+        targetBranch = cleanBranch;
+      }
+
+      // Empty repositories have no Git refs or trees yet; bootstrap with Contents API
+      const first = cleanFiles[0];
+      const initMsg =
+        cleanFiles.length === 1
+          ? message.trim()
+          : `${message.trim()} (initialize repository)`;
+      const initPutRes = await githubApiFetch(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+          repo
+        )}/contents/${encodeGithubPath(first.cleanPath)}`,
+        session.accessToken,
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: initMsg,
+            content: encodeBase64Utf8(first.content),
+            branch: targetBranch,
+          }),
+        }
+      );
+      const initPutJson = (await initPutRes.json()) as {
+        content?: { sha: string; path: string; html_url: string };
+        commit?: { sha: string; html_url: string };
+        message?: string;
+      };
+      if (!initPutRes.ok || !initPutJson.content || !initPutJson.commit) {
+        return c.json(
+          {
+            error:
+              initPutJson.message ||
+              'Failed to initialize empty repository on GitHub.',
+          },
+          (initPutRes.status || 400) as 400
+        );
+      }
+
+      const firstFileResult = {
+        path: initPutJson.content.path,
+        sha: initPutJson.content.sha,
+        htmlUrl:
+          initPutJson.content.html_url ||
+          `https://github.com/${owner}/${repo}/blob/${encodeURIComponent(
+            targetBranch
+          )}/${initPutJson.content.path}`,
+      };
+
+      if (cleanFiles.length === 1) {
+        return c.json({
+          branch: targetBranch,
+          commitSha: initPutJson.commit.sha,
+          commitUrl:
+            initPutJson.commit.html_url ||
+            `https://github.com/${owner}/${repo}/commit/${initPutJson.commit.sha}`,
+          files: [firstFileResult],
+        });
+      }
+
+      const initCommitRes = await githubApiFetch(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+          repo
+        )}/git/commits/${encodeURIComponent(initPutJson.commit.sha)}`,
+        session.accessToken
+      );
+      const initCommitJson = (await initCommitRes.json()) as {
+        tree?: { sha: string };
+        message?: string;
+      };
+      if (!initCommitRes.ok || !initCommitJson.tree?.sha) {
+        return c.json(
+          {
+            error:
+              initCommitJson.message ||
+              'Initialized repository but failed to read initial commit tree.',
+          },
+          (initCommitRes.status || 400) as 400
+        );
+      }
+
+      const remaining = cleanFiles.slice(1);
+
+      // Send inline `content` inside a single POST /git/trees request so pushing 95+ files
+      // takes 1 API call instead of 95+ blob calls (critical for Cloudflare Workers limits).
+      const newTreeRes = await githubApiFetch(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+          repo
+        )}/git/trees`,
+        session.accessToken,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            base_tree: initCommitJson.tree.sha,
+            tree: remaining.map((f) => ({
+              path: f.cleanPath,
+              mode: '100644',
+              type: 'blob',
+              content: f.content,
+            })),
+          }),
+        }
+      );
+      const newTreeJson = (await newTreeRes.json()) as {
+        sha?: string;
+        tree?: Array<{ path: string; type: string; sha: string }>;
+        truncated?: boolean;
+        message?: string;
+      };
+      if (!newTreeRes.ok || !newTreeJson.sha) {
+        return c.json(
+          { error: newTreeJson.message || 'Failed to construct commit tree.' },
+          (newTreeRes.status || 400) as 400
+        );
+      }
+
+      const newCommitRes = await githubApiFetch(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+          repo
+        )}/git/commits`,
+        session.accessToken,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: message.trim(),
+            tree: newTreeJson.sha,
+            parents: [initPutJson.commit.sha],
+          }),
+        }
+      );
+      const newCommitJson = (await newCommitRes.json()) as {
+        sha?: string;
+        html_url?: string;
+        message?: string;
+      };
+      if (!newCommitRes.ok || !newCommitJson.sha) {
+        return c.json(
+          { error: newCommitJson.message || 'Failed to create Git commit.' },
+          (newCommitRes.status || 400) as 400
+        );
+      }
+
+      const updateRefRes = await githubApiFetch(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+          repo
+        )}/git/refs/heads/${encodeURIComponent(targetBranch)}`,
+        session.accessToken,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sha: newCommitJson.sha,
+            force: false,
+          }),
+        }
+      );
+      const updateRefJson = (await updateRefRes.json()) as { message?: string };
+      if (!updateRefRes.ok) {
+        return c.json(
+          {
+            error:
+              updateRefJson.message ||
+              'Failed to advance branch reference after initialization.',
+          },
+          (updateRefRes.status || 400) as 400
+        );
+      }
+
+      const resolvedShas = new Map<string, string>();
+      for (const entry of newTreeJson.tree || []) {
+        if (entry.type === 'blob') resolvedShas.set(entry.path, entry.sha);
+      }
+      if (
+        newTreeJson.truncated ||
+        remaining.some((f) => !resolvedShas.has(f.cleanPath))
+      ) {
+        const fullTreeRes = await githubApiFetch(
+          `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+            repo
+          )}/git/trees/${encodeURIComponent(newTreeJson.sha)}?recursive=1`,
+          session.accessToken
+        );
+        if (fullTreeRes.ok) {
+          const fullTreeJson = (await fullTreeRes.json()) as {
+            tree?: Array<{ path: string; type: string; sha: string }>;
+          };
+          for (const entry of fullTreeJson.tree || []) {
+            if (entry.type === 'blob') resolvedShas.set(entry.path, entry.sha);
+          }
+        }
+      }
+
+      return c.json({
+        branch: targetBranch,
+        commitSha: newCommitJson.sha,
+        commitUrl:
+          newCommitJson.html_url ||
+          `https://github.com/${owner}/${repo}/commit/${newCommitJson.sha}`,
+        files: [
+          firstFileResult,
+          ...remaining.map((f) => ({
+            path: f.cleanPath,
+            sha: resolvedShas.get(f.cleanPath) || '',
+            htmlUrl: `https://github.com/${owner}/${repo}/blob/${encodeURIComponent(
+              targetBranch
+            )}/${f.cleanPath}`,
+          })),
+        ],
+      });
+    }
 
     if (createNewBranch) {
       const cleanBranch = (newBranchName || '').trim();
@@ -1434,37 +1903,8 @@ api.post('/api/github/push-batch', async (c) => {
       }
     }
 
-    // Create blobs for each file in parallel
-    const blobResults = await Promise.all(
-      files.map(async (f) => {
-        const cleanPath = f.path.trim().replace(/^\/+/, '');
-        const blobRes = await githubApiFetch(
-          `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/blobs`,
-          session.accessToken,
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              content: encodeBase64Utf8(f.content),
-              encoding: 'base64',
-            }),
-          }
-        );
-        const blobJson = (await blobRes.json()) as {
-          sha?: string;
-          message?: string;
-        };
-        if (!blobRes.ok || !blobJson.sha) {
-          throw new Error(blobJson.message || `Failed to upload ${cleanPath}`);
-        }
-        return {
-          path: cleanPath,
-          sha: blobJson.sha,
-        };
-      })
-    );
-
-    // Build new Git tree on top of baseTreeSha
+    // Build new Git tree with inline UTF-8 file contents in a single API call
+    // (avoids 95+ individual /git/blobs subrequests on Cloudflare Workers).
     const newTreeRes = await githubApiFetch(
       `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees`,
       session.accessToken,
@@ -1473,17 +1913,19 @@ api.post('/api/github/push-batch', async (c) => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           base_tree: baseTreeSha,
-          tree: blobResults.map((b) => ({
-            path: b.path,
+          tree: cleanFiles.map((f) => ({
+            path: f.cleanPath,
             mode: '100644',
             type: 'blob',
-            sha: b.sha,
+            content: f.content,
           })),
         }),
       }
     );
     const newTreeJson = (await newTreeRes.json()) as {
       sha?: string;
+      tree?: Array<{ path: string; type: string; sha: string }>;
+      truncated?: boolean;
       message?: string;
     };
     if (!newTreeRes.ok || !newTreeJson.sha) {
@@ -1546,18 +1988,42 @@ api.post('/api/github/push-batch', async (c) => {
       );
     }
 
+    const resolvedShas = new Map<string, string>();
+    for (const entry of newTreeJson.tree || []) {
+      if (entry.type === 'blob') resolvedShas.set(entry.path, entry.sha);
+    }
+    if (
+      newTreeJson.truncated ||
+      cleanFiles.some((f) => !resolvedShas.has(f.cleanPath))
+    ) {
+      const fullTreeRes = await githubApiFetch(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+          repo
+        )}/git/trees/${encodeURIComponent(newTreeJson.sha)}?recursive=1`,
+        session.accessToken
+      );
+      if (fullTreeRes.ok) {
+        const fullTreeJson = (await fullTreeRes.json()) as {
+          tree?: Array<{ path: string; type: string; sha: string }>;
+        };
+        for (const entry of fullTreeJson.tree || []) {
+          if (entry.type === 'blob') resolvedShas.set(entry.path, entry.sha);
+        }
+      }
+    }
+
     return c.json({
       branch: targetBranch,
       commitSha: newCommitJson.sha,
       commitUrl:
         newCommitJson.html_url ||
         `https://github.com/${owner}/${repo}/commit/${newCommitJson.sha}`,
-      files: blobResults.map((b) => ({
-        path: b.path,
-        sha: b.sha,
+      files: cleanFiles.map((f) => ({
+        path: f.cleanPath,
+        sha: resolvedShas.get(f.cleanPath) || '',
         htmlUrl: `https://github.com/${owner}/${repo}/blob/${encodeURIComponent(
           targetBranch
-        )}/${b.path}`,
+        )}/${f.cleanPath}`,
       })),
     });
   } catch (err) {

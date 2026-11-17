@@ -10,11 +10,13 @@ import {
   FolderGit2,
   FolderTree,
   GitBranch,
+  Globe,
   Loader2,
   Lock,
   LogOut,
   RefreshCw,
   Search,
+  ShieldCheck,
   UploadCloud,
   X,
 } from 'lucide-react';
@@ -36,9 +38,8 @@ import {
   GithubFolderResult,
   GithubPushResult,
   GithubRepoInfo,
-  GithubRepoItem,
   GithubTreeFile,
-  listGithubRepos,
+  initGithubBranch,
   logoutGithub,
   parseGithubTargetInput,
   pushGithubBatch,
@@ -102,22 +103,23 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
   const [connecting, setConnecting] = useState(false);
   const [copiedCallback, setCopiedCallback] = useState(false);
 
-  // Repo browser state
-  const [repos, setRepos] = useState<GithubRepoItem[]>([]);
-  const [reposLoading, setReposLoading] = useState(false);
-  const [repoSearch, setRepoSearch] = useState('');
-  const [quickRepoInput, setQuickRepoInput] = useState(
+  // Explicit single-repository selection state (never fetches or lists all user/org repos)
+  const [repoInput, setRepoInput] = useState(
     repoLinked
       ? `${repoLinked.owner}/${repoLinked.repo}`
       : linked
       ? `${linked.owner}/${linked.repo}`
       : ''
   );
-
   const [selectedRepo, setSelectedRepo] = useState<GithubRepoInfo | null>(null);
   const [selectedBranch, setSelectedBranch] = useState<string>(
-    repoLinked?.branch || linked?.branch || ''
+    repoLinked?.branch || linked?.branch || 'main'
   );
+  const [initBranchName, setInitBranchName] = useState('main');
+  const [initializingBranch, setInitializingBranch] = useState(false);
+  const [initBranchSuccess, setInitBranchSuccess] = useState<string | null>(null);
+
+  // File & folder browser state for selected repository
   const [treeFiles, setTreeFiles] = useState<GithubTreeFile[]>([]);
   const [treeLoading, setTreeLoading] = useState(false);
   const [fileSearch, setFileSearch] = useState('');
@@ -186,24 +188,11 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
 
   const [error, setError] = useState<string | null>(null);
 
-  const refreshAuthAndRepos = useCallback(async () => {
+  const refreshAuthStatus = useCallback(async () => {
     setAuthLoading(true);
     try {
       const status = await getGithubAuthStatus();
       setAuthStatus(status);
-      if (status.connected) {
-        setReposLoading(true);
-        try {
-          const { repos: loadedRepos } = await listGithubRepos();
-          setRepos(loadedRepos);
-        } catch {
-          // Non-fatal if repo list fails
-        } finally {
-          setReposLoading(false);
-        }
-      } else {
-        setRepos([]);
-      }
     } catch (err) {
       setError(
         err instanceof Error ? err.message : 'Failed to check GitHub status.'
@@ -214,8 +203,58 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
   }, []);
 
   useEffect(() => {
-    refreshAuthAndRepos();
-  }, [refreshAuthAndRepos]);
+    refreshAuthStatus();
+  }, [refreshAuthStatus]);
+
+  const loadRepoDetails = useCallback(
+    async (
+      owner: string,
+      repo: string,
+      preferredBranch?: string,
+      preferredPath?: string
+    ) => {
+      setError(null);
+      setTreeLoading(true);
+      try {
+        const info = await getGithubRepoInfo(owner, repo);
+        setSelectedRepo(info);
+        setRepoInput(info.full_name);
+
+        const branchToUse = info.isEmpty
+          ? preferredBranch || info.default_branch || 'main'
+          : preferredBranch && info.branches.includes(preferredBranch)
+          ? preferredBranch
+          : info.branches.includes(info.default_branch)
+          ? info.default_branch
+          : info.branches[0] || 'main';
+        setSelectedBranch(branchToUse);
+
+        if (info.isEmpty) {
+          setTreeFiles([]);
+          setSelectedFilePath('');
+          return;
+        }
+
+        const { files } = await getGithubTree(owner, repo, branchToUse);
+        setTreeFiles(files);
+        if (preferredPath) {
+          setSelectedFilePath(preferredPath);
+        } else {
+          const firstDbml = files.find((f) => f.isDbml);
+          setSelectedFilePath(firstDbml?.path || '');
+        }
+      } catch (err) {
+        setSelectedRepo(null);
+        setTreeFiles([]);
+        setError(
+          err instanceof Error ? err.message : 'Failed to inspect repository.'
+        );
+      } finally {
+        setTreeLoading(false);
+      }
+    },
+    []
+  );
 
   // Listen for OAuth popup completion
   useEffect(() => {
@@ -228,13 +267,24 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
       ) {
         return;
       }
-      if (event.data?.type === 'OAUTH_AUTH_SUCCESS' && event.data?.provider === 'github') {
+      if (
+        event.data?.type === 'OAUTH_AUTH_SUCCESS' &&
+        event.data?.provider === 'github'
+      ) {
         if (typeof event.data.sessionToken === 'string') {
           setStoredGithubSessionToken(event.data.sessionToken);
         }
         setConnecting(false);
         setError(null);
-        refreshAuthAndRepos();
+        refreshAuthStatus().then(() => {
+          if (selectedRepo) {
+            loadRepoDetails(
+              selectedRepo.owner,
+              selectedRepo.repo,
+              selectedBranch
+            );
+          }
+        });
       } else if (
         event.data?.type === 'OAUTH_AUTH_ERROR' &&
         event.data?.provider === 'github'
@@ -245,51 +295,27 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
     };
     window.addEventListener('message', handleMessage);
     return () => window.removeEventListener('message', handleMessage);
-  }, [refreshAuthAndRepos]);
+  }, [refreshAuthStatus, selectedRepo, selectedBranch, loadRepoDetails]);
 
-  const loadRepoDetails = useCallback(
-    async (owner: string, repo: string, preferredBranch?: string, preferredPath?: string) => {
-      setError(null);
-      setTreeLoading(true);
-      try {
-        const info = await getGithubRepoInfo(owner, repo);
-        setSelectedRepo(info);
-        const branchToUse =
-          preferredBranch && info.branches.includes(preferredBranch)
-            ? preferredBranch
-            : info.default_branch;
-        setSelectedBranch(branchToUse);
-        const { files } = await getGithubTree(owner, repo, branchToUse);
-        setTreeFiles(files);
-        if (preferredPath) {
-          setSelectedFilePath(preferredPath);
-        } else {
-          const firstDbml = files.find((f) => f.isDbml);
-          setSelectedFilePath(firstDbml?.path || '');
-        }
-      } catch (err) {
-        setError(
-          err instanceof Error ? err.message : 'Failed to inspect repository.'
-        );
-      } finally {
-        setTreeLoading(false);
-      }
-    },
-    []
-  );
-
-  // If workspace already linked to GitHub and user opens Browse, pre-select it cleanly
+  // Pre-load ONLY the single already-linked repository if the workspace is already linked
   useEffect(() => {
+    if (authLoading) return;
     if (repoLinked && !selectedRepo) {
       loadRepoDetails(repoLinked.owner, repoLinked.repo, repoLinked.branch);
     } else if (linked && !selectedRepo) {
       loadRepoDetails(linked.owner, linked.repo, linked.branch, linked.path);
     }
-  }, [repoLinked, linked, selectedRepo, loadRepoDetails]);
+    // Only auto-load once when linked workspace opens
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authLoading, repoLinked?.owner, repoLinked?.repo, linked?.owner, linked?.repo]);
 
   const handleBranchChange = async (nextBranch: string) => {
     setSelectedBranch(nextBranch);
     if (!selectedRepo) return;
+    if (selectedRepo.isEmpty) {
+      setTreeFiles([]);
+      return;
+    }
     setTreeLoading(true);
     setError(null);
     try {
@@ -338,26 +364,32 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
 
   const handleLogout = async () => {
     await logoutGithub();
-    setRepos([]);
+    setSelectedRepo(null);
+    setTreeFiles([]);
+    setInitBranchSuccess(null);
     setAuthStatus((prev) =>
       prev ? { ...prev, connected: false, user: null } : prev
     );
   };
 
-  const handleQuickLookup = async (e: React.FormEvent) => {
+  const handleSelectRepository = async (e: React.FormEvent) => {
     e.preventDefault();
-    const parsed = parseGithubTargetInput(quickRepoInput);
+    setError(null);
+    setInitBranchSuccess(null);
+    setPushSuccess(null);
+    setBatchPushSummary(null);
+
+    const parsed = parseGithubTargetInput(repoInput);
     if (!parsed) {
       setError(
-        'Enter owner/repo or a full GitHub URL (e.g. https://github.com/org/repo/blob/main/schema.dbml).'
+        'Enter owner/repo (e.g. acme/database-schema) or a GitHub URL (e.g. https://github.com/acme/database-schema).'
       );
       return;
     }
 
-    // If full path to a file was pasted, load it immediately!
-    if (parsed.path && parsed.branch) {
+    // If user pasted a direct file URL while on Load from GitHub tab, load that file right away
+    if (tab === 'browse' && parsed.path && parsed.branch) {
       setLoadingFile(true);
-      setError(null);
       try {
         const file = await getGithubFile(
           parsed.owner,
@@ -378,6 +410,48 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
     }
 
     await loadRepoDetails(parsed.owner, parsed.repo, parsed.branch, parsed.path);
+  };
+
+  const handleChangeRepository = () => {
+    setSelectedRepo(null);
+    setTreeFiles([]);
+    setSelectedFilePath('');
+    setInitBranchSuccess(null);
+    setPushSuccess(null);
+    setBatchPushSummary(null);
+    setError(null);
+    if (linked || repoLinked) {
+      setPushMode('new-file');
+    }
+  };
+
+  const handleCreateMainBranch = async () => {
+    if (!selectedRepo) return;
+    const cleanBranch = initBranchName.trim() || 'main';
+    setInitializingBranch(true);
+    setError(null);
+    setInitBranchSuccess(null);
+    try {
+      const res = await initGithubBranch(
+        selectedRepo.owner,
+        selectedRepo.repo,
+        cleanBranch
+      );
+      setInitBranchSuccess(
+        res.alreadyExists
+          ? `Branch "${res.branch}" already exists.`
+          : `Created "${res.branch}" branch in ${selectedRepo.full_name}.`
+      );
+      await loadRepoDetails(selectedRepo.owner, selectedRepo.repo, res.branch);
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : `Failed to create "${cleanBranch}" branch.`
+      );
+    } finally {
+      setInitializingBranch(false);
+    }
   };
 
   const handleLoadSelectedFile = async () => {
@@ -563,7 +637,7 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
     );
 
     if (!targetOwner || !targetRepo || !targetBranch) {
-      setError('Select a repository and branch first.');
+      setError('Choose and verify a repository first.');
       return;
     }
     if (!commitMessage.trim()) {
@@ -657,6 +731,9 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
         branch: result.branch,
         fileCount: result.files.length,
       });
+
+      // Refresh selectedRepo so newly initialized branches show immediately
+      loadRepoDetails(targetOwner, targetRepo, result.branch);
     } catch (err) {
       const e = err as Error & { code?: string; status?: number };
       if (e.code === 'SHA_CONFLICT' || e.status === 409) {
@@ -694,7 +771,7 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
         : treeFiles.find((f) => f.path === targetPath)?.sha;
 
     if (!targetOwner || !targetRepo || !targetBranch || !targetPath) {
-      setError('Select a repository, branch, and file path first.');
+      setError('Choose a repository, branch, and file path first.');
       return;
     }
     if (!commitMessage.trim()) {
@@ -735,6 +812,8 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
       setCreateNewBranch(false);
       setNewBranchName('');
       setPushSuccess(result);
+
+      loadRepoDetails(targetOwner, targetRepo, result.branch, result.path);
     } catch (err) {
       const e = err as Error & { code?: string; status?: number };
       if (e.code === 'SHA_CONFLICT' || e.status === 409) {
@@ -745,16 +824,6 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
       setPushing(false);
     }
   };
-
-  const filteredRepos = useMemo(() => {
-    const q = repoSearch.trim().toLowerCase();
-    if (!q) return repos;
-    return repos.filter(
-      (r) =>
-        r.full_name.toLowerCase().includes(q) ||
-        (r.description || '').toLowerCase().includes(q)
-    );
-  }, [repos, repoSearch]);
 
   const filteredFiles = useMemo(() => {
     const q = fileSearch.trim().toLowerCase();
@@ -773,7 +842,14 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
     }
     if (!linked || pushMode !== 'linked') return null;
     return computeSchemaDiff(linked.lastSyncedDbml, workspace.dbml);
-  }, [isModularWorkspace, workspace.schemaFiles, previewDiffPath, linked, pushMode, workspace.dbml]);
+  }, [
+    isModularWorkspace,
+    workspace.schemaFiles,
+    previewDiffPath,
+    linked,
+    pushMode,
+    workspace.dbml,
+  ]);
 
   const changedDiffLines = useMemo(() => {
     if (!diffPreview) return [];
@@ -790,6 +866,11 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
       // Ignore
     }
   };
+
+  const hasVerifiedPushTarget = Boolean(
+    (pushMode === 'linked' && (isModularWorkspace ? repoLinked : linked)) ||
+      (selectedRepo && selectedRepo.canPush)
+  );
 
   return (
     <div
@@ -809,7 +890,7 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
                 GitHub Repository Sync
               </h2>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                Load DBML files from repositories, edit visually, and push commits back
+                Choose a specific repository first, then load or commit DBML files
               </p>
             </div>
           </div>
@@ -977,13 +1058,21 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
             </div>
           )}
 
+          {initBranchSuccess && (
+            <div className="px-3.5 py-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-800 dark:text-emerald-200 flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+              <span>{initBranchSuccess}</span>
+            </div>
+          )}
+
           {pushSuccess && (
             <div className="px-3.5 py-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-800 dark:text-emerald-200 flex items-center justify-between gap-3">
               <div className="flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
                 <span>
-                  Pushed commit <code className="font-mono">{pushSuccess.commitSha.slice(0, 7)}</code> to{' '}
-                  <code className="font-mono">{pushSuccess.branch}</code>
+                  Pushed commit{' '}
+                  <code className="font-mono">{pushSuccess.commitSha.slice(0, 7)}</code>{' '}
+                  to <code className="font-mono">{pushSuccess.branch}</code>
                 </span>
               </div>
               <a
@@ -1008,8 +1097,8 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
                   <code className="font-mono">
                     {batchPushSummary.commitSha.slice(0, 7)}
                   </code>{' '}
-                  to <code className="font-mono">{batchPushSummary.branch}</code>{' '}
-                  (<code className="font-mono">schema.dbml</code> kept local)
+                  to <code className="font-mono">{batchPushSummary.branch}</code> (
+                  <code className="font-mono">schema.dbml</code> kept local)
                 </span>
               </div>
               <a
@@ -1024,121 +1113,203 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
             </div>
           )}
 
-          {tab === 'browse' ? (
-            <div className="space-y-4">
-              {/* Direct Repo or File URL Lookup */}
-              <form onSubmit={handleQuickLookup} className="flex items-center gap-2">
+          {/* Step 1: Explicit Single-Repository Selector */}
+          <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/50 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2 text-xs font-semibold text-slate-800 dark:text-slate-100">
+                <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                <span>Step 1 · Target Repository</span>
+              </div>
+              <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                Only the exact repository you specify is accessed
+              </span>
+            </div>
+
+            {!selectedRepo ? (
+              <form
+                onSubmit={handleSelectRepository}
+                className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2"
+              >
                 <input
                   type="text"
-                  value={quickRepoInput}
-                  onChange={(e) => setQuickRepoInput(e.target.value)}
-                  placeholder="owner/repo or https://github.com/owner/repo/blob/main/schema.dbml"
+                  value={repoInput}
+                  onChange={(e) => setRepoInput(e.target.value)}
+                  placeholder="owner/repo or https://github.com/owner/repo"
                   className="flex-1 px-3 py-2 font-mono text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
                 <button
                   type="submit"
-                  disabled={loadingFile || treeLoading}
-                  className="px-3.5 py-2 rounded-lg text-xs font-semibold bg-slate-800 hover:bg-slate-700 dark:bg-slate-700 dark:hover:bg-slate-600 text-white whitespace-nowrap"
+                  disabled={loadingFile || treeLoading || !repoInput.trim()}
+                  className="inline-flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold bg-slate-900 hover:bg-slate-800 dark:bg-slate-100 dark:hover:bg-white text-white dark:text-slate-900 disabled:opacity-50 whitespace-nowrap"
                 >
-                  {loadingFile ? 'Loading...' : 'Open / Browse'}
+                  {(treeLoading || loadingFile) && (
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  )}
+                  <span>
+                    {treeLoading
+                      ? 'Inspecting...'
+                      : loadingFile
+                      ? 'Loading...'
+                      : 'Select Repository'}
+                  </span>
                 </button>
               </form>
-
-              <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
-                {/* Left Column: Connected Repositories */}
-                <div className="md:col-span-5 space-y-2">
-                  <div className="flex items-center justify-between text-xs font-semibold text-slate-700 dark:text-slate-300">
-                    <span>Repositories</span>
-                    {reposLoading && <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-400" />}
+            ) : (
+              <div className="space-y-2.5">
+                <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800">
+                  <div className="flex flex-wrap items-center gap-2 min-w-0">
+                    {selectedRepo.private ? (
+                      <Lock className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                    ) : (
+                      <Globe className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+                    )}
+                    <span className="font-mono text-xs font-bold text-slate-900 dark:text-slate-100 truncate">
+                      {selectedRepo.full_name}
+                    </span>
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-semibold bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                      {selectedRepo.private ? 'Private' : 'Public'}
+                    </span>
+                    {authStatus?.connected && (
+                      <span
+                        className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                          selectedRepo.canPush
+                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                            : 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+                        }`}
+                      >
+                        {selectedRepo.canPush ? 'Push access' : 'Read-only'}
+                      </span>
+                    )}
+                    {selectedRepo.html_url && (
+                      <a
+                        href={selectedRepo.html_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        title="Open repository on GitHub"
+                        className="text-slate-400 hover:text-blue-600 dark:hover:text-blue-400"
+                      >
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                    )}
                   </div>
 
-                  {authStatus?.connected ? (
-                    <>
-                      <div className="relative">
-                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                        <input
-                          type="text"
-                          value={repoSearch}
-                          onChange={(e) => setRepoSearch(e.target.value)}
-                          placeholder="Filter your repositories..."
-                          className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
-                        />
-                      </div>
-                      <div className="h-64 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800/70">
-                        {filteredRepos.length === 0 ? (
-                          <div className="p-4 text-center text-xs text-slate-400">
-                            {reposLoading ? 'Loading repositories...' : 'No matching repositories'}
-                          </div>
-                        ) : (
-                          filteredRepos.map((r) => {
-                            const active = selectedRepo?.full_name === r.full_name;
-                            return (
-                              <button
-                                key={r.id}
-                                type="button"
-                                onClick={() => {
-                                  setQuickRepoInput(r.full_name);
-                                  loadRepoDetails(r.owner, r.name, r.default_branch);
-                                }}
-                                className={`w-full px-3 py-2 text-left transition-colors ${
-                                  active
-                                    ? 'bg-blue-50 dark:bg-blue-950/50'
-                                    : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'
-                                }`}
-                              >
-                                <div className="flex items-center justify-between gap-2">
-                                  <span className="text-xs font-semibold font-mono text-slate-800 dark:text-slate-100 truncate">
-                                    {r.full_name}
-                                  </span>
-                                  {r.private && (
-                                    <Lock className="w-3 h-3 text-slate-400 shrink-0" />
-                                  )}
-                                </div>
-                                {r.description && (
-                                  <div className="text-[11px] text-slate-400 truncate">
-                                    {r.description}
-                                  </div>
-                                )}
-                              </button>
-                            );
-                          })
-                        )}
-                      </div>
-                    </>
-                  ) : (
-                    <div className="h-64 rounded-lg border border-dashed border-slate-200 dark:border-slate-700 p-4 flex flex-col items-center justify-center text-center space-y-3">
-                      <FolderGit2 className="w-7 h-7 text-slate-400" />
-                      <div className="text-xs text-slate-500 dark:text-slate-400">
-                        Connect GitHub to browse your private &amp; team repositories and push updates, or enter any public <code className="font-mono">owner/repo</code> above.
-                      </div>
-                      {authStatus?.configured && (
-                        <button
-                          type="button"
-                          onClick={handleConnectGithub}
-                          disabled={connecting}
-                          className="px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900"
-                        >
-                          Connect GitHub Account
-                        </button>
-                      )}
-                    </div>
-                  )}
+                  <button
+                    type="button"
+                    onClick={handleChangeRepository}
+                    className="px-2.5 py-1 rounded-md border border-slate-200 dark:border-slate-700 text-[11px] font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  >
+                    Change Repository
+                  </button>
                 </div>
 
-                {/* Right Column: Branch & File Picker */}
-                <div className="md:col-span-7 space-y-2">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-300 truncate">
-                      {selectedRepo ? selectedRepo.full_name : 'Select a repository'}
-                    </span>
+                {/* Empty Repository / No Branch State */}
+                {selectedRepo.isEmpty && (
+                  <div className="p-3 rounded-lg border border-blue-200 dark:border-blue-900/60 bg-blue-50/70 dark:bg-blue-950/30 space-y-2.5">
+                    <div className="flex items-start gap-2 text-xs text-blue-900 dark:text-blue-100">
+                      <GitBranch className="w-4 h-4 shrink-0 mt-0.5 text-blue-600 dark:text-blue-400" />
+                      <div className="space-y-0.5">
+                        <div className="font-semibold">
+                          Empty repository — no branches exist yet
+                        </div>
+                        <div className="text-[11px] text-blue-800/90 dark:text-blue-200/80">
+                          Create the initial <code className="font-mono font-semibold">main</code> branch now, or switch to{' '}
+                          <span className="font-semibold">Commit &amp; Push</span> to push your DBML schema and initialize{' '}
+                          <code className="font-mono font-semibold">main</code> in one commit.
+                        </div>
+                      </div>
+                    </div>
 
-                    {selectedRepo && (
+                    {authStatus?.connected ? (
+                      <div className="flex flex-wrap items-center gap-2 pl-6">
+                        <input
+                          type="text"
+                          value={initBranchName}
+                          onChange={(e) => setInitBranchName(e.target.value)}
+                          placeholder="main"
+                          className="w-32 px-2.5 py-1 text-xs font-mono rounded-md border border-blue-200 dark:border-blue-800 bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleCreateMainBranch}
+                          disabled={initializingBranch || !selectedRepo.canPush}
+                          className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-semibold bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white"
+                        >
+                          {initializingBranch ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : (
+                            <GitBranch className="w-3.5 h-3.5" />
+                          )}
+                          <span>
+                            {initializingBranch
+                              ? 'Creating branch...'
+                              : `Create ${initBranchName.trim() || 'main'} branch`}
+                          </span>
+                        </button>
+                      </div>
+                    ) : (
+                      authStatus?.configured && (
+                        <div className="pl-6">
+                          <button
+                            type="button"
+                            onClick={handleConnectGithub}
+                            disabled={connecting}
+                            className="inline-flex items-center gap-1.5 px-3 py-1 rounded-md text-xs font-semibold bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900"
+                          >
+                            <FolderGit2 className="w-3.5 h-3.5" />
+                            <span>Connect GitHub to Create Branch</span>
+                          </button>
+                        </div>
+                      )
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+          {tab === 'browse' ? (
+            <div className="space-y-4">
+              {!selectedRepo ? (
+                <div className="p-6 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 text-center text-xs text-slate-500 dark:text-slate-400 space-y-1.5">
+                  <FolderGit2 className="w-7 h-7 text-slate-400 mx-auto" />
+                  <div className="font-semibold text-slate-700 dark:text-slate-200">
+                    Select a repository in Step 1 to browse and load DBML files
+                  </div>
+                  <div>
+                    Enter <code className="font-mono">owner/repo</code> or paste a GitHub repository or file URL above.
+                  </div>
+                </div>
+              ) : selectedRepo.isEmpty ? (
+                <div className="p-6 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 text-center text-xs text-slate-500 dark:text-slate-400 space-y-3">
+                  <div>
+                    Repository <code className="font-mono font-semibold">{selectedRepo.full_name}</code> has no commits or branches to load yet.
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTab('push');
+                      setError(null);
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white"
+                  >
+                    <UploadCloud className="w-3.5 h-3.5" />
+                    <span>Push Current Project to Initialize</span>
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {/* Branch & File Picker for Selected Repository */}
+                  <div className="space-y-2.5">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                        Step 2 · Load File or Modular Folder
+                      </span>
                       <div className="flex items-center gap-1.5">
                         <GitBranch className="w-3.5 h-3.5 text-slate-400" />
                         <select
                           value={selectedBranch}
                           onChange={(e) => handleBranchChange(e.target.value)}
-                          className="px-2 py-1 text-xs font-mono rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
+                          className="px-2.5 py-1 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
                         >
                           {(selectedRepo.branches.length > 0
                             ? selectedRepo.branches
@@ -1150,173 +1321,170 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
                           ))}
                         </select>
                       </div>
-                    )}
-                  </div>
-
-                  <div className="flex items-center gap-2">
-                    <div className="relative flex-1">
-                      <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                      <input
-                        type="text"
-                        disabled={!selectedRepo}
-                        value={fileSearch}
-                        onChange={(e) => setFileSearch(e.target.value)}
-                        placeholder="Filter file paths..."
-                        className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 disabled:opacity-50"
-                      />
                     </div>
-                    <label className="flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-300 whitespace-nowrap cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={onlyDbmlFiles}
-                        onChange={(e) => setOnlyDbmlFiles(e.target.checked)}
-                        className="rounded border-slate-300 text-blue-600"
-                      />
-                      <span>.dbml only</span>
-                    </label>
-                  </div>
 
-                  <div className="h-64 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800/70">
-                    {!selectedRepo ? (
-                      <div className="h-full flex items-center justify-center text-xs text-slate-400 p-4 text-center">
-                        Pick a repository on the left or enter owner/repo above to inspect its files.
+                    <div className="flex items-center gap-2">
+                      <div className="relative flex-1">
+                        <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          value={fileSearch}
+                          onChange={(e) => setFileSearch(e.target.value)}
+                          placeholder="Filter file paths..."
+                          className="w-full pl-8 pr-3 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950"
+                        />
                       </div>
-                    ) : treeLoading ? (
-                      <div className="h-full flex items-center justify-center gap-2 text-xs text-slate-400">
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        <span>Loading files...</span>
-                      </div>
-                    ) : filteredFiles.length === 0 ? (
-                      <div className="h-full flex flex-col items-center justify-center text-xs text-slate-400 p-4 text-center gap-2">
-                        <span>
-                          {onlyDbmlFiles
-                            ? 'No .dbml files found on this branch.'
-                            : 'No matching files found.'}
-                        </span>
-                        {onlyDbmlFiles && treeFiles.length > 0 && (
-                          <button
-                            type="button"
-                            onClick={() => setOnlyDbmlFiles(false)}
-                            className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
-                          >
-                            Show all {treeFiles.length} repository files
-                          </button>
-                        )}
-                      </div>
-                    ) : (
-                      filteredFiles.map((file) => {
-                        const active = selectedFilePath === file.path;
-                        return (
-                          <button
-                            key={file.path}
-                            type="button"
-                            onClick={() => setSelectedFilePath(file.path)}
-                            className={`w-full px-3 py-2 text-left flex items-center justify-between gap-2 transition-colors ${
-                              active
-                                ? 'bg-blue-50 dark:bg-blue-950/50'
-                                : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'
-                            }`}
-                          >
-                            <div className="flex items-center gap-2 min-w-0">
-                              <FileCode2
-                                className={`w-3.5 h-3.5 shrink-0 ${
-                                  file.isDbml
-                                    ? 'text-blue-600 dark:text-blue-400'
-                                    : 'text-slate-400'
-                                }`}
-                              />
-                              <span className="text-xs font-mono text-slate-800 dark:text-slate-200 truncate">
-                                {file.path}
+                      <label className="flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-300 whitespace-nowrap cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={onlyDbmlFiles}
+                          onChange={(e) => setOnlyDbmlFiles(e.target.checked)}
+                          className="rounded border-slate-300 text-blue-600"
+                        />
+                        <span>.dbml only</span>
+                      </label>
+                    </div>
+
+                    <div className="h-56 overflow-y-auto rounded-lg border border-slate-200 dark:border-slate-800 divide-y divide-slate-100 dark:divide-slate-800/70">
+                      {treeLoading ? (
+                        <div className="h-full flex items-center justify-center gap-2 text-xs text-slate-400">
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Loading files...</span>
+                        </div>
+                      ) : filteredFiles.length === 0 ? (
+                        <div className="h-full flex flex-col items-center justify-center text-xs text-slate-400 p-4 text-center gap-2">
+                          <span>
+                            {onlyDbmlFiles
+                              ? 'No .dbml files found on this branch.'
+                              : 'No matching files found.'}
+                          </span>
+                          {onlyDbmlFiles && treeFiles.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => setOnlyDbmlFiles(false)}
+                              className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                            >
+                              Show all {treeFiles.length} repository files
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        filteredFiles.map((file) => {
+                          const active = selectedFilePath === file.path;
+                          return (
+                            <button
+                              key={file.path}
+                              type="button"
+                              onClick={() => setSelectedFilePath(file.path)}
+                              className={`w-full px-3 py-2 text-left flex items-center justify-between gap-2 transition-colors ${
+                                active
+                                  ? 'bg-blue-50 dark:bg-blue-950/50'
+                                  : 'hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2 min-w-0">
+                                <FileCode2
+                                  className={`w-3.5 h-3.5 shrink-0 ${
+                                    file.isDbml
+                                      ? 'text-blue-600 dark:text-blue-400'
+                                      : 'text-slate-400'
+                                  }`}
+                                />
+                                <span className="text-xs font-mono text-slate-800 dark:text-slate-200 truncate">
+                                  {file.path}
+                                </span>
+                              </div>
+                              <span className="text-[10px] font-mono text-slate-400 shrink-0 tabular-nums">
+                                {file.size > 1024
+                                  ? `${(file.size / 1024).toFixed(1)} KB`
+                                  : `${file.size} B`}
                               </span>
-                            </div>
-                            <span className="text-[10px] font-mono text-slate-400 shrink-0 tabular-nums">
-                              {file.size > 1024
-                                ? `${(file.size / 1024).toFixed(1)} KB`
-                                : `${file.size} B`}
-                            </span>
-                          </button>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-              </div>
-
-              {onLoadGithubFolder && dbmlFolders.length > 0 && selectedRepo && (
-                <div className="p-3 rounded-lg border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/50 dark:bg-emerald-950/20 flex flex-wrap items-center justify-between gap-3 text-xs">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <FolderTree className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                    <div className="min-w-0">
-                      <div className="font-semibold text-slate-800 dark:text-slate-100">
-                        Load Modular Schema Folder
-                      </div>
-                      <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                        Loads all <code className="font-mono">.dbml</code> files in the folder and merges{' '}
-                        <code className="font-mono">schema.dbml</code> locally on the fly
-                      </div>
+                            </button>
+                          );
+                        })
+                      )}
                     </div>
                   </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <select
-                      value={selectedFolderToLoad}
-                      onChange={(e) => setSelectedFolderToLoad(e.target.value)}
-                      className="px-2.5 py-1.5 text-xs font-mono rounded-lg border border-emerald-300 dark:border-emerald-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100"
-                    >
-                      {dbmlFolders.map((d) => (
-                        <option key={d.folder} value={d.folder}>
-                          {d.folder}/ ({d.count} files)
-                        </option>
-                      ))}
-                    </select>
+
+                  {onLoadGithubFolder && dbmlFolders.length > 0 && (
+                    <div className="p-3 rounded-lg border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/50 dark:bg-emerald-950/20 flex flex-wrap items-center justify-between gap-3 text-xs">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <FolderTree className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                        <div className="min-w-0">
+                          <div className="font-semibold text-slate-800 dark:text-slate-100">
+                            Load Modular Schema Folder
+                          </div>
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                            Loads all <code className="font-mono">.dbml</code> files in the folder and merges{' '}
+                            <code className="font-mono">schema.dbml</code> locally on the fly
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <select
+                          value={selectedFolderToLoad}
+                          onChange={(e) => setSelectedFolderToLoad(e.target.value)}
+                          className="px-2.5 py-1.5 text-xs font-mono rounded-lg border border-emerald-300 dark:border-emerald-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100"
+                        >
+                          {dbmlFolders.map((d) => (
+                            <option key={d.folder} value={d.folder}>
+                              {d.folder}/ ({d.count} files)
+                            </option>
+                          ))}
+                        </select>
+                        <button
+                          type="button"
+                          disabled={loadingFolder || !selectedFolderToLoad}
+                          onClick={handleLoadSelectedFolder}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white whitespace-nowrap"
+                        >
+                          {loadingFolder && (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          )}
+                          <span>
+                            {loadingFolder ? 'Loading Folder...' : 'Load Folder'}
+                          </span>
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                    <div className="flex items-center gap-4 text-xs">
+                      <label className="flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300">
+                        <input
+                          type="radio"
+                          name="ghLoadTarget"
+                          checked={openInNewWorkspace}
+                          onChange={() => setOpenInNewWorkspace(true)}
+                          className="text-blue-600"
+                        />
+                        <span>Open as new workspace</span>
+                      </label>
+                      <label className="flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300">
+                        <input
+                          type="radio"
+                          name="ghLoadTarget"
+                          checked={!openInNewWorkspace}
+                          onChange={() => setOpenInNewWorkspace(false)}
+                          className="text-blue-600"
+                        />
+                        <span>Replace current workspace</span>
+                      </label>
+                    </div>
+
                     <button
                       type="button"
-                      disabled={loadingFolder || !selectedFolderToLoad}
-                      onClick={handleLoadSelectedFolder}
-                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white whitespace-nowrap"
+                      disabled={!selectedRepo || !selectedFilePath || loadingFile}
+                      onClick={handleLoadSelectedFile}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white"
                     >
-                      {loadingFolder && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                      <span>
-                        {loadingFolder ? 'Loading Folder...' : 'Load Folder'}
-                      </span>
+                      {loadingFile && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                      <span>{loadingFile ? 'Loading...' : 'Load Single File'}</span>
                     </button>
                   </div>
-                </div>
+                </>
               )}
-
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-                <div className="flex items-center gap-4 text-xs">
-                  <label className="flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300">
-                    <input
-                      type="radio"
-                      name="ghLoadTarget"
-                      checked={openInNewWorkspace}
-                      onChange={() => setOpenInNewWorkspace(true)}
-                      className="text-blue-600"
-                    />
-                    <span>Open as new workspace</span>
-                  </label>
-                  <label className="flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300">
-                    <input
-                      type="radio"
-                      name="ghLoadTarget"
-                      checked={!openInNewWorkspace}
-                      onChange={() => setOpenInNewWorkspace(false)}
-                      className="text-blue-600"
-                    />
-                    <span>Replace current workspace</span>
-                  </label>
-                </div>
-
-                <button
-                  type="button"
-                  disabled={!selectedRepo || !selectedFilePath || loadingFile}
-                  onClick={handleLoadSelectedFile}
-                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white"
-                >
-                  {loadingFile && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  <span>{loadingFile ? 'Loading...' : 'Load Single File'}</span>
-                </button>
-              </div>
             </div>
           ) : (
             /* Tab 2: Commit & Push to GitHub */
@@ -1329,7 +1497,7 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
                       Sign in with GitHub to Push Changes
                     </h3>
                     <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
-                      Connect your GitHub account to commit modified DBML schemas back to the repository or create a new branch.
+                      Connect your GitHub account, then choose the target repository above before committing DBML changes.
                     </p>
                   </div>
                   {authStatus?.configured && (
@@ -1344,6 +1512,18 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
                     </button>
                   )}
                 </div>
+              ) : !selectedRepo &&
+                !(pushMode === 'linked' && (isModularWorkspace ? repoLinked : linked)) ? (
+                <div className="p-6 rounded-xl border border-dashed border-slate-200 dark:border-slate-800 text-center text-xs text-slate-500 dark:text-slate-400 space-y-1.5">
+                  <ShieldCheck className="w-7 h-7 text-slate-400 mx-auto" />
+                  <div className="font-semibold text-slate-700 dark:text-slate-200">
+                    Choose your destination repository in Step 1 first
+                  </div>
+                  <div>
+                    Enter <code className="font-mono">owner/repo</code> above and click{' '}
+                    <span className="font-semibold">Select Repository</span> to configure branch, folder path, and push.
+                  </div>
+                </div>
               ) : (
                 <>
                   {/* Modular Folder Push vs Single-File Push */}
@@ -1353,14 +1533,18 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
                         <FolderTree className="w-4 h-4 shrink-0 mt-0.5 text-emerald-600 dark:text-emerald-400" />
                         <div>
                           <span className="font-semibold">
-                            Modular Folder Sync ({repoLinked && pushMode === 'linked' ? repoLinked.schemaFolder : cleanFolderPrefix(targetFolderInput)}/):
+                            Modular Folder Sync (
+                            {repoLinked && pushMode === 'linked'
+                              ? repoLinked.schemaFolder
+                              : cleanFolderPrefix(targetFolderInput)}
+                            /):
                           </span>{' '}
                           Auto-generated <code className="font-mono font-semibold">schema.dbml</code> stays local for full-project viewing and is{' '}
                           <span className="font-semibold">never pushed to GitHub</span> — only the checked per-table files below are committed.
                         </div>
                       </div>
 
-                      {repoLinked && (
+                      {repoLinked && pushMode === 'linked' && (
                         <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60">
                           <div className="space-y-0.5 min-w-0">
                             <div className="flex items-center gap-2 text-xs font-semibold text-slate-900 dark:text-slate-100">
@@ -1397,54 +1581,29 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
                         </div>
                       )}
 
-                      {(!repoLinked || pushMode === 'new-file') && (
+                      {(!repoLinked || pushMode === 'new-file') && selectedRepo && (
                         <div className="p-3.5 rounded-lg border border-slate-200 dark:border-slate-800 space-y-3">
                           <div className="text-xs font-semibold text-slate-800 dark:text-slate-200">
-                            Destination Repository &amp; Schema Folder
+                            Step 2 · Destination Branch &amp; Schema Folder
                           </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                            <div className="space-y-1">
-                              <label className="block text-[11px] font-medium text-slate-500">
-                                Repository
-                              </label>
-                              <select
-                                value={selectedRepo?.full_name || ''}
-                                onChange={(e) => {
-                                  const found = repos.find(
-                                    (r) => r.full_name === e.target.value
-                                  );
-                                  if (found) {
-                                    loadRepoDetails(
-                                      found.owner,
-                                      found.name,
-                                      found.default_branch
-                                    );
-                                  }
-                                }}
-                                className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
-                              >
-                                <option value="">Select repository...</option>
-                                {repos
-                                  .filter((r) => r.canPush)
-                                  .map((r) => (
-                                    <option key={r.id} value={r.full_name}>
-                                      {r.full_name}
-                                    </option>
-                                  ))}
-                              </select>
-                            </div>
-
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                             <div className="space-y-1">
                               <label className="block text-[11px] font-medium text-slate-500">
                                 Branch
                               </label>
                               <select
-                                disabled={!selectedRepo}
                                 value={selectedBranch}
                                 onChange={(e) => handleBranchChange(e.target.value)}
-                                className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 disabled:opacity-50"
+                                className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
                               >
-                                {(selectedRepo?.branches || ['main']).map((b) => (
+                                {(selectedRepo.branches.length > 0
+                                  ? selectedRepo.branches
+                                  : [
+                                      selectedBranch ||
+                                        selectedRepo.default_branch ||
+                                        'main',
+                                    ]
+                                ).map((b) => (
                                   <option key={b} value={b}>
                                     {b}
                                   </option>
@@ -1592,7 +1751,7 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
                   ) : (
                     <>
                       {/* Single-file linked status */}
-                      {linked && (
+                      {linked && pushMode === 'linked' && (
                         <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60">
                           <div className="space-y-0.5 min-w-0">
                             <div className="flex items-center gap-2 text-xs font-semibold text-slate-900 dark:text-slate-100">
@@ -1642,54 +1801,29 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
                         </div>
                       )}
 
-                      {(!linked || pushMode === 'new-file') && (
+                      {(!linked || pushMode === 'new-file') && selectedRepo && (
                         <div className="p-3.5 rounded-lg border border-slate-200 dark:border-slate-800 space-y-3">
                           <div className="text-xs font-semibold text-slate-800 dark:text-slate-200">
-                            Destination Repository &amp; File Path
+                            Step 2 · Destination Branch &amp; File Path
                           </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                            <div className="space-y-1">
-                              <label className="block text-[11px] font-medium text-slate-500">
-                                Repository
-                              </label>
-                              <select
-                                value={selectedRepo?.full_name || ''}
-                                onChange={(e) => {
-                                  const found = repos.find(
-                                    (r) => r.full_name === e.target.value
-                                  );
-                                  if (found) {
-                                    loadRepoDetails(
-                                      found.owner,
-                                      found.name,
-                                      found.default_branch
-                                    );
-                                  }
-                                }}
-                                className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
-                              >
-                                <option value="">Select repository...</option>
-                                {repos
-                                  .filter((r) => r.canPush)
-                                  .map((r) => (
-                                    <option key={r.id} value={r.full_name}>
-                                      {r.full_name}
-                                    </option>
-                                  ))}
-                              </select>
-                            </div>
-
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                             <div className="space-y-1">
                               <label className="block text-[11px] font-medium text-slate-500">
                                 Branch
                               </label>
                               <select
-                                disabled={!selectedRepo}
                                 value={selectedBranch}
                                 onChange={(e) => handleBranchChange(e.target.value)}
-                                className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 disabled:opacity-50"
+                                className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
                               >
-                                {(selectedRepo?.branches || ['main']).map((b) => (
+                                {(selectedRepo.branches.length > 0
+                                  ? selectedRepo.branches
+                                  : [
+                                      selectedBranch ||
+                                        selectedRepo.default_branch ||
+                                        'main',
+                                    ]
+                                ).map((b) => (
                                   <option key={b} value={b}>
                                     {b}
                                   </option>
@@ -1843,6 +1977,7 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
                       type="button"
                       disabled={
                         pushing ||
+                        !hasVerifiedPushTarget ||
                         (isModularWorkspace
                           ? selectedPushPaths.length === 0
                           : pushMode === 'linked' &&

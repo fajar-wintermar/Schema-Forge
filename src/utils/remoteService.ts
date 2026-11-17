@@ -27,18 +27,6 @@ export interface GithubAuthStatus {
   callbackUrl: string;
 }
 
-export interface GithubRepoItem {
-  id: number;
-  full_name: string;
-  owner: string;
-  name: string;
-  private: boolean;
-  default_branch: string;
-  description: string | null;
-  html_url: string;
-  updated_at: string;
-  canPush: boolean;
-}
 
 export interface GithubRepoInfo {
   full_name: string;
@@ -49,6 +37,7 @@ export interface GithubRepoInfo {
   html_url: string;
   canPush: boolean;
   branches: string[];
+  isEmpty?: boolean;
 }
 
 export interface GithubTreeFile {
@@ -161,8 +150,24 @@ export async function logoutGithub(): Promise<void> {
   });
 }
 
-export function listGithubRepos(): Promise<{ repos: GithubRepoItem[] }> {
-  return apiRequest<{ repos: GithubRepoItem[] }>('/api/github/repos');
+export interface GithubInitBranchResult {
+  branch: string;
+  initialized: boolean;
+  alreadyExists?: boolean;
+  commitSha?: string;
+  commitUrl?: string;
+}
+
+export function initGithubBranch(
+  owner: string,
+  repo: string,
+  branch = 'main'
+): Promise<GithubInitBranchResult> {
+  return apiRequest<GithubInitBranchResult>('/api/github/init-branch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ owner, repo, branch }),
+  });
 }
 
 export function getGithubRepoInfo(
@@ -177,9 +182,9 @@ export function getGithubTree(
   owner: string,
   repo: string,
   branch: string
-): Promise<{ files: GithubTreeFile[]; truncated: boolean }> {
+): Promise<{ files: GithubTreeFile[]; truncated: boolean; isEmpty?: boolean }> {
   const qs = new URLSearchParams({ owner, repo, branch });
-  return apiRequest<{ files: GithubTreeFile[]; truncated: boolean }>(
+  return apiRequest<{ files: GithubTreeFile[]; truncated: boolean; isEmpty?: boolean }>(
     `/api/github/tree?${qs.toString()}`
   );
 }
