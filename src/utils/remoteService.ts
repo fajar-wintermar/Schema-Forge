@@ -195,6 +195,64 @@ export function getGithubFile(
   return apiRequest<GithubFileResult>(`/api/github/file?${qs.toString()}`);
 }
 
+export interface GithubFolderResult {
+  owner: string;
+  repo: string;
+  branch: string;
+  folder: string;
+  files: Array<{
+    path: string;
+    content: string;
+    sha: string;
+  }>;
+}
+
+export interface GithubBatchPushPayload {
+  owner: string;
+  repo: string;
+  branch: string;
+  message: string;
+  files: Array<{
+    path: string;
+    content: string;
+    expectedSha?: string;
+  }>;
+  createNewBranch?: boolean;
+  newBranchName?: string;
+  forceWithLatestSha?: boolean;
+}
+
+export interface GithubBatchPushResult {
+  branch: string;
+  commitSha: string;
+  commitUrl: string;
+  files: Array<{
+    path: string;
+    sha: string;
+    htmlUrl: string;
+  }>;
+}
+
+export function getGithubFolderFiles(
+  owner: string,
+  repo: string,
+  branch: string,
+  folder: string
+): Promise<GithubFolderResult> {
+  const qs = new URLSearchParams({ owner, repo, branch, folder });
+  return apiRequest<GithubFolderResult>(`/api/github/folder?${qs.toString()}`);
+}
+
+export function pushGithubBatch(
+  payload: GithubBatchPushPayload
+): Promise<GithubBatchPushResult> {
+  return apiRequest<GithubBatchPushResult>('/api/github/push-batch', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+}
+
 export function pushGithubFile(
   payload: GithubPushPayload
 ): Promise<GithubPushResult> {

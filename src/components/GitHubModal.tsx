@@ -8,6 +8,7 @@ import {
   ExternalLink,
   FileCode2,
   FolderGit2,
+  FolderTree,
   GitBranch,
   Loader2,
   Lock,
@@ -17,15 +18,22 @@ import {
   UploadCloud,
   X,
 } from 'lucide-react';
-import { GithubFileLink, WorkspaceProject } from '../types/schema';
+import {
+  GithubFileLink,
+  GithubRepoLink,
+  SchemaModuleFile,
+  WorkspaceProject,
+} from '../types/schema';
 import {
   getGithubAuthStatus,
   getGithubAuthUrl,
   getGithubFile,
+  getGithubFolderFiles,
   getGithubRepoInfo,
   getGithubTree,
   GithubAuthStatus,
   GithubFileResult,
+  GithubFolderResult,
   GithubPushResult,
   GithubRepoInfo,
   GithubRepoItem,
@@ -33,10 +41,12 @@ import {
   listGithubRepos,
   logoutGithub,
   parseGithubTargetInput,
+  pushGithubBatch,
   pushGithubFile,
   setStoredGithubSessionToken,
 } from '../utils/remoteService';
 import { computeSchemaDiff } from '../utils/schemaDiff';
+import { cleanFolderPrefix } from '../utils/schemaModules';
 
 interface GitHubModalProps {
   workspace: WorkspaceProject;
@@ -46,6 +56,15 @@ interface GitHubModalProps {
     openInNewWorkspace: boolean
   ) => void;
   onSyncedGithubFile: (link: GithubFileLink, updatedDbml?: string) => void;
+  onLoadGithubFolder?: (
+    result: GithubFolderResult,
+    openInNewWorkspace: boolean
+  ) => void;
+  onSyncedGithubFolder?: (
+    repoLink: GithubRepoLink,
+    updatedFiles: SchemaModuleFile[],
+    replaceAll?: boolean
+  ) => void;
   onClose: () => void;
 }
 
@@ -54,15 +73,27 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
   initialTab,
   onLoadGithubFile,
   onSyncedGithubFile,
+  onLoadGithubFolder,
+  onSyncedGithubFolder,
   onClose,
 }) => {
-  const linked = workspace.githubLink;
-  const hasLocalChanges = Boolean(
-    linked && workspace.dbml !== linked.lastSyncedDbml
+  const isModularWorkspace = Boolean(
+    workspace.schemaFiles && workspace.schemaFiles.length > 0
   );
+  const linked = workspace.githubLink;
+  const repoLinked = workspace.githubRepoLink;
+  const hasModularLocalChanges = Boolean(
+    isModularWorkspace &&
+      workspace.schemaFiles?.some(
+        (f) => f.lastSyncedContent === undefined || f.content !== f.lastSyncedContent
+      )
+  );
+  const hasLocalChanges = isModularWorkspace
+    ? hasModularLocalChanges
+    : Boolean(linked && workspace.dbml !== linked.lastSyncedDbml);
 
   const [tab, setTab] = useState<'browse' | 'push'>(
-    initialTab || (linked ? 'push' : 'browse')
+    initialTab || (linked || repoLinked ? 'push' : 'browse')
   );
 
   // Auth state
@@ -76,12 +107,16 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
   const [reposLoading, setReposLoading] = useState(false);
   const [repoSearch, setRepoSearch] = useState('');
   const [quickRepoInput, setQuickRepoInput] = useState(
-    linked ? `${linked.owner}/${linked.repo}` : ''
+    repoLinked
+      ? `${repoLinked.owner}/${repoLinked.repo}`
+      : linked
+      ? `${linked.owner}/${linked.repo}`
+      : ''
   );
 
   const [selectedRepo, setSelectedRepo] = useState<GithubRepoInfo | null>(null);
   const [selectedBranch, setSelectedBranch] = useState<string>(
-    linked?.branch || ''
+    repoLinked?.branch || linked?.branch || ''
   );
   const [treeFiles, setTreeFiles] = useState<GithubTreeFile[]>([]);
   const [treeLoading, setTreeLoading] = useState(false);
@@ -90,12 +125,16 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
   const [selectedFilePath, setSelectedFilePath] = useState<string>(
     linked?.path || ''
   );
+  const [selectedFolderToLoad, setSelectedFolderToLoad] = useState<string>(
+    repoLinked?.schemaFolder || ''
+  );
+  const [loadingFolder, setLoadingFolder] = useState(false);
   const [openInNewWorkspace, setOpenInNewWorkspace] = useState(true);
   const [loadingFile, setLoadingFile] = useState(false);
 
   // Push state
   const [pushMode, setPushMode] = useState<'linked' | 'new-file'>(
-    linked ? 'linked' : 'new-file'
+    linked || repoLinked ? 'linked' : 'new-file'
   );
   const [targetPathInput, setTargetPathInput] = useState(
     linked?.path ||
@@ -106,8 +145,29 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
           .replace(/^-|-$/g, '') || 'schema'
       }.dbml`
   );
+  const [targetFolderInput, setTargetFolderInput] = useState(
+    repoLinked?.schemaFolder || workspace.schemaFolder || 'schema'
+  );
+  const [selectedPushPaths, setSelectedPushPaths] = useState<string[]>(() => {
+    const files = workspace.schemaFiles || [];
+    const dirty = files
+      .filter(
+        (f) => f.lastSyncedContent === undefined || f.content !== f.lastSyncedContent
+      )
+      .map((f) => f.path);
+    return dirty.length > 0 ? dirty : files.map((f) => f.path);
+  });
+  const [previewDiffPath, setPreviewDiffPath] = useState<string>(() => {
+    const files = workspace.schemaFiles || [];
+    const firstDirty = files.find(
+      (f) => f.lastSyncedContent === undefined || f.content !== f.lastSyncedContent
+    );
+    return firstDirty?.path || files[0]?.path || '';
+  });
   const [commitMessage, setCommitMessage] = useState(
-    linked
+    isModularWorkspace
+      ? `Update ${repoLinked?.schemaFolder || workspace.schemaFolder || 'schema'}/ DBML modules`
+      : linked
       ? `Update ${linked.path.split('/').pop() || 'schema.dbml'}`
       : 'Add DBML schema via SchemaForge'
   );
@@ -117,6 +177,12 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
   const [pullingLatest, setPullingLatest] = useState(false);
   const [shaConflict, setShaConflict] = useState(false);
   const [pushSuccess, setPushSuccess] = useState<GithubPushResult | null>(null);
+  const [batchPushSummary, setBatchPushSummary] = useState<{
+    commitSha: string;
+    commitUrl: string;
+    branch: string;
+    fileCount: number;
+  } | null>(null);
 
   const [error, setError] = useState<string | null>(null);
 
@@ -214,10 +280,12 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
 
   // If workspace already linked to GitHub and user opens Browse, pre-select it cleanly
   useEffect(() => {
-    if (linked && !selectedRepo) {
+    if (repoLinked && !selectedRepo) {
+      loadRepoDetails(repoLinked.owner, repoLinked.repo, repoLinked.branch);
+    } else if (linked && !selectedRepo) {
       loadRepoDetails(linked.owner, linked.repo, linked.branch, linked.path);
     }
-  }, [linked, selectedRepo, loadRepoDetails]);
+  }, [repoLinked, linked, selectedRepo, loadRepoDetails]);
 
   const handleBranchChange = async (nextBranch: string) => {
     setSelectedBranch(nextBranch);
@@ -334,7 +402,100 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
     }
   };
 
+  const dbmlFolders = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const f of treeFiles) {
+      if (!f.isDbml) continue;
+      const slash = f.path.lastIndexOf('/');
+      if (slash <= 0) continue;
+      const dir = f.path.slice(0, slash);
+      counts.set(dir, (counts.get(dir) || 0) + 1);
+    }
+    return Array.from(counts.entries())
+      .map(([folder, count]) => ({ folder, count }))
+      .sort((a, b) => b.count - a.count || a.folder.localeCompare(b.folder));
+  }, [treeFiles]);
+
+  useEffect(() => {
+    if (dbmlFolders.length === 0) {
+      setSelectedFolderToLoad('');
+    } else if (
+      !selectedFolderToLoad ||
+      !dbmlFolders.some((d) => d.folder === selectedFolderToLoad)
+    ) {
+      setSelectedFolderToLoad(dbmlFolders[0].folder);
+    }
+  }, [dbmlFolders, selectedFolderToLoad]);
+
+  const handleLoadSelectedFolder = async () => {
+    if (!selectedRepo || !selectedFolderToLoad || !onLoadGithubFolder) return;
+    setLoadingFolder(true);
+    setError(null);
+    try {
+      const result = await getGithubFolderFiles(
+        selectedRepo.owner,
+        selectedRepo.repo,
+        selectedBranch,
+        selectedFolderToLoad
+      );
+      onLoadGithubFolder(result, openInNewWorkspace);
+      onClose();
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Failed to load modular DBML folder from GitHub.'
+      );
+    } finally {
+      setLoadingFolder(false);
+    }
+  };
+
   const handlePullLatest = async () => {
+    if (isModularWorkspace && repoLinked && onSyncedGithubFolder) {
+      setPullingLatest(true);
+      setError(null);
+      setShaConflict(false);
+      try {
+        const res = await getGithubFolderFiles(
+          repoLinked.owner,
+          repoLinked.repo,
+          repoLinked.branch,
+          repoLinked.schemaFolder
+        );
+        const now = new Date().toISOString();
+        const nextFiles: SchemaModuleFile[] = res.files.map((f, idx) => ({
+          id: `mod_gh_${Date.now()}_${idx}`,
+          path: f.path,
+          content: f.content,
+          sha: f.sha,
+          lastSyncedContent: f.content,
+          lastSyncedAt: now,
+        }));
+        onSyncedGithubFolder(
+          {
+            owner: res.owner,
+            repo: res.repo,
+            branch: res.branch,
+            schemaFolder: res.folder,
+            lastSyncedAt: now,
+          },
+          nextFiles,
+          true
+        );
+        setSelectedPushPaths([]);
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : 'Failed to pull latest folder from GitHub.'
+        );
+      } finally {
+        setPullingLatest(false);
+      }
+      return;
+    }
+
     if (!linked) return;
     setPullingLatest(true);
     setError(null);
@@ -368,7 +529,151 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
     }
   };
 
+  const resolveModularPushPath = useCallback(
+    (filePath: string, destinationFolder: string): string => {
+      const cleanDest = cleanFolderPrefix(destinationFolder);
+      const sourceFolder = cleanFolderPrefix(
+        repoLinked?.schemaFolder || workspace.schemaFolder || 'schema'
+      );
+      if (filePath.startsWith(`${sourceFolder}/`)) {
+        return `${cleanDest}/${filePath.slice(sourceFolder.length + 1)}`;
+      }
+      const base = filePath.split('/').pop() || filePath;
+      return `${cleanDest}/${base}`;
+    },
+    [repoLinked?.schemaFolder, workspace.schemaFolder]
+  );
+
+  const handlePushModularBatch = async (forceWithLatestSha = false) => {
+    setError(null);
+    setShaConflict(false);
+    setPushSuccess(null);
+    setBatchPushSummary(null);
+
+    const targetOwner =
+      pushMode === 'linked' && repoLinked ? repoLinked.owner : selectedRepo?.owner;
+    const targetRepo =
+      pushMode === 'linked' && repoLinked ? repoLinked.repo : selectedRepo?.repo;
+    const targetBranch =
+      pushMode === 'linked' && repoLinked ? repoLinked.branch : selectedBranch;
+    const destFolder = cleanFolderPrefix(
+      pushMode === 'linked' && repoLinked
+        ? repoLinked.schemaFolder
+        : targetFolderInput
+    );
+
+    if (!targetOwner || !targetRepo || !targetBranch) {
+      setError('Select a repository and branch first.');
+      return;
+    }
+    if (!commitMessage.trim()) {
+      setError('Enter a commit message.');
+      return;
+    }
+    if (createNewBranch && !newBranchName.trim()) {
+      setError('Enter a name for the new branch.');
+      return;
+    }
+
+    const allFiles = workspace.schemaFiles || [];
+    const chosenFiles = allFiles.filter((f) => selectedPushPaths.includes(f.path));
+    if (chosenFiles.length === 0) {
+      setError('Select at least one modular .dbml file to push.');
+      return;
+    }
+
+    const payloadFiles = chosenFiles.map((f) => {
+      const resolvedPath =
+        pushMode === 'linked' && repoLinked
+          ? f.path
+          : resolveModularPushPath(f.path, destFolder);
+      const matchingTreeSha =
+        pushMode === 'linked' && repoLinked
+          ? f.sha
+          : treeFiles.find((tf) => tf.path === resolvedPath)?.sha;
+      return {
+        originalPath: f.path,
+        path: resolvedPath,
+        content: f.content,
+        expectedSha: matchingTreeSha,
+      };
+    });
+
+    setPushing(true);
+    try {
+      const result = await pushGithubBatch({
+        owner: targetOwner,
+        repo: targetRepo,
+        branch: targetBranch,
+        message: commitMessage.trim(),
+        files: payloadFiles.map(({ path, content, expectedSha }) => ({
+          path,
+          content,
+          expectedSha,
+        })),
+        createNewBranch,
+        newBranchName: createNewBranch ? newBranchName.trim() : undefined,
+        forceWithLatestSha,
+      });
+
+      const now = new Date().toISOString();
+      const returnedByPath = new Map(result.files.map((rf) => [rf.path, rf]));
+      const pushedByOriginal = new Map(
+        payloadFiles.map((pf) => [pf.originalPath, pf.path])
+      );
+
+      const updatedModules: SchemaModuleFile[] = allFiles.map((f) => {
+        const pushedPath = pushedByOriginal.get(f.path);
+        if (!pushedPath) return f;
+        const pushedMeta = returnedByPath.get(pushedPath);
+        return {
+          ...f,
+          path: pushedPath,
+          sha: pushedMeta?.sha || f.sha,
+          lastSyncedContent: f.content,
+          lastSyncedAt: now,
+        };
+      });
+
+      onSyncedGithubFolder?.(
+        {
+          owner: targetOwner,
+          repo: targetRepo,
+          branch: result.branch,
+          schemaFolder: destFolder,
+          lastSyncedAt: now,
+        },
+        updatedModules,
+        false
+      );
+
+      setPushMode('linked');
+      setCreateNewBranch(false);
+      setNewBranchName('');
+      setSelectedPushPaths([]);
+      setBatchPushSummary({
+        commitSha: result.commitSha,
+        commitUrl: result.commitUrl,
+        branch: result.branch,
+        fileCount: result.files.length,
+      });
+    } catch (err) {
+      const e = err as Error & { code?: string; status?: number };
+      if (e.code === 'SHA_CONFLICT' || e.status === 409) {
+        setShaConflict(true);
+      }
+      setError(e.message || 'Failed to push modular files to GitHub.');
+    } finally {
+      setPushing(false);
+    }
+  };
+
   const handlePush = async (forceWithLatestSha = false) => {
+    if (isModularWorkspace) {
+      await handlePushModularBatch(forceWithLatestSha);
+      return;
+    }
+
     setError(null);
     setShaConflict(false);
     setPushSuccess(null);
@@ -461,9 +766,14 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
   }, [treeFiles, fileSearch, onlyDbmlFiles]);
 
   const diffPreview = useMemo(() => {
+    if (isModularWorkspace) {
+      const file = workspace.schemaFiles?.find((f) => f.path === previewDiffPath);
+      if (!file) return null;
+      return computeSchemaDiff(file.lastSyncedContent || '', file.content);
+    }
     if (!linked || pushMode !== 'linked') return null;
     return computeSchemaDiff(linked.lastSyncedDbml, workspace.dbml);
-  }, [linked, pushMode, workspace.dbml]);
+  }, [isModularWorkspace, workspace.schemaFiles, previewDiffPath, linked, pushMode, workspace.dbml]);
 
   const changedDiffLines = useMemo(() => {
     if (!diffPreview) return [];
@@ -591,11 +901,13 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
             </button>
           </div>
 
-          {linked && (
+          {(repoLinked || linked) && (
             <div className="hidden sm:flex items-center gap-1.5 text-[11px] font-mono text-slate-500 dark:text-slate-400 pb-1.5">
               <GitBranch className="w-3 h-3" />
               <span>
-                {linked.owner}/{linked.repo}:{linked.branch}/{linked.path}
+                {repoLinked
+                  ? `${repoLinked.owner}/${repoLinked.repo}:${repoLinked.branch}/${repoLinked.schemaFolder}/`
+                  : `${linked!.owner}/${linked!.repo}:${linked!.branch}/${linked!.path}`}
               </span>
             </div>
           )}
@@ -681,6 +993,32 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
                 className="inline-flex items-center gap-1 font-semibold text-emerald-700 dark:text-emerald-300 hover:underline shrink-0"
               >
                 <span>View on GitHub</span>
+                <ExternalLink className="w-3 h-3" />
+              </a>
+            </div>
+          )}
+
+          {batchPushSummary && (
+            <div className="px-3.5 py-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-800 dark:text-emerald-200 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                <span>
+                  Pushed {batchPushSummary.fileCount} modular{' '}
+                  {batchPushSummary.fileCount === 1 ? 'file' : 'files'} in commit{' '}
+                  <code className="font-mono">
+                    {batchPushSummary.commitSha.slice(0, 7)}
+                  </code>{' '}
+                  to <code className="font-mono">{batchPushSummary.branch}</code>{' '}
+                  (<code className="font-mono">schema.dbml</code> kept local)
+                </span>
+              </div>
+              <a
+                href={batchPushSummary.commitUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 font-semibold text-emerald-700 dark:text-emerald-300 hover:underline shrink-0"
+              >
+                <span>View Commit</span>
                 <ExternalLink className="w-3 h-3" />
               </a>
             </div>
@@ -904,6 +1242,47 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
                 </div>
               </div>
 
+              {onLoadGithubFolder && dbmlFolders.length > 0 && selectedRepo && (
+                <div className="p-3 rounded-lg border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/50 dark:bg-emerald-950/20 flex flex-wrap items-center justify-between gap-3 text-xs">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <FolderTree className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                    <div className="min-w-0">
+                      <div className="font-semibold text-slate-800 dark:text-slate-100">
+                        Load Modular Schema Folder
+                      </div>
+                      <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Loads all <code className="font-mono">.dbml</code> files in the folder and merges{' '}
+                        <code className="font-mono">schema.dbml</code> locally on the fly
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <select
+                      value={selectedFolderToLoad}
+                      onChange={(e) => setSelectedFolderToLoad(e.target.value)}
+                      className="px-2.5 py-1.5 text-xs font-mono rounded-lg border border-emerald-300 dark:border-emerald-800 bg-white dark:bg-slate-950 text-slate-800 dark:text-slate-100"
+                    >
+                      {dbmlFolders.map((d) => (
+                        <option key={d.folder} value={d.folder}>
+                          {d.folder}/ ({d.count} files)
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      disabled={loadingFolder || !selectedFolderToLoad}
+                      onClick={handleLoadSelectedFolder}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white whitespace-nowrap"
+                    >
+                      {loadingFolder && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                      <span>
+                        {loadingFolder ? 'Loading Folder...' : 'Load Folder'}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
                 <div className="flex items-center gap-4 text-xs">
                   <label className="flex items-center gap-2 cursor-pointer text-slate-700 dark:text-slate-300">
@@ -935,7 +1314,7 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
                   className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white"
                 >
                   {loadingFile && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
-                  <span>{loadingFile ? 'Loading...' : 'Load File'}</span>
+                  <span>{loadingFile ? 'Loading...' : 'Load Single File'}</span>
                 </button>
               </div>
             </div>
@@ -967,136 +1346,385 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
                 </div>
               ) : (
                 <>
-                  {/* Target selector if linked vs saving new file */}
-                  {linked && (
-                    <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60">
-                      <div className="space-y-0.5 min-w-0">
-                        <div className="flex items-center gap-2 text-xs font-semibold text-slate-900 dark:text-slate-100">
-                          <span className="font-mono truncate">
-                            {linked.owner}/{linked.repo}/{linked.path}
-                          </span>
-                          <span
-                            className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
-                              hasLocalChanges
-                                ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
-                                : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
-                            }`}
-                          >
-                            {hasLocalChanges ? 'Modified' : 'In sync'}
-                          </span>
-                        </div>
-                        <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
-                          Branch: {linked.branch} · Last synced{' '}
-                          {new Date(linked.lastSyncedAt).toLocaleString()}
+                  {/* Modular Folder Push vs Single-File Push */}
+                  {isModularWorkspace ? (
+                    <>
+                      <div className="px-3.5 py-2.5 rounded-lg border border-emerald-200 dark:border-emerald-900/60 bg-emerald-50/70 dark:bg-emerald-950/25 text-xs text-emerald-900 dark:text-emerald-200 flex items-start gap-2.5">
+                        <FolderTree className="w-4 h-4 shrink-0 mt-0.5 text-emerald-600 dark:text-emerald-400" />
+                        <div>
+                          <span className="font-semibold">
+                            Modular Folder Sync ({repoLinked && pushMode === 'linked' ? repoLinked.schemaFolder : cleanFolderPrefix(targetFolderInput)}/):
+                          </span>{' '}
+                          Auto-generated <code className="font-mono font-semibold">schema.dbml</code> stays local for full-project viewing and is{' '}
+                          <span className="font-semibold">never pushed to GitHub</span> — only the checked per-table files below are committed.
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-2 shrink-0">
-                        <button
-                          type="button"
-                          onClick={handlePullLatest}
-                          disabled={pullingLatest}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
-                        >
-                          <RefreshCw
-                            className={`w-3.5 h-3.5 ${pullingLatest ? 'animate-spin' : ''}`}
-                          />
-                          <span>Pull Latest</span>
-                        </button>
-                        {linked.htmlUrl && (
-                          <a
-                            href={linked.htmlUrl}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-900 dark:hover:text-slate-100"
-                            title="Open file on GitHub"
-                          >
-                            <ExternalLink className="w-3.5 h-3.5" />
-                          </a>
-                        )}
-                      </div>
-                    </div>
-                  )}
+                      {repoLinked && (
+                        <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60">
+                          <div className="space-y-0.5 min-w-0">
+                            <div className="flex items-center gap-2 text-xs font-semibold text-slate-900 dark:text-slate-100">
+                              <span className="font-mono truncate">
+                                {repoLinked.owner}/{repoLinked.repo}/{repoLinked.schemaFolder}/
+                              </span>
+                              <span
+                                className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                                  hasModularLocalChanges
+                                    ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+                                    : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                                }`}
+                              >
+                                {hasModularLocalChanges ? 'Modified' : 'In sync'}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
+                              Branch: {repoLinked.branch} · Last synced{' '}
+                              {new Date(repoLinked.lastSyncedAt).toLocaleString()}
+                            </div>
+                          </div>
 
-                  {(!linked || pushMode === 'new-file') && (
-                    <div className="p-3.5 rounded-lg border border-slate-200 dark:border-slate-800 space-y-3">
-                      <div className="text-xs font-semibold text-slate-800 dark:text-slate-200">
-                        Destination Repository &amp; File Path
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                        <div className="space-y-1">
-                          <label className="block text-[11px] font-medium text-slate-500">
-                            Repository
-                          </label>
-                          <select
-                            value={selectedRepo?.full_name || ''}
-                            onChange={(e) => {
-                              const found = repos.find(
-                                (r) => r.full_name === e.target.value
-                              );
-                              if (found) {
-                                loadRepoDetails(
-                                  found.owner,
-                                  found.name,
-                                  found.default_branch
-                                );
+                          <button
+                            type="button"
+                            onClick={handlePullLatest}
+                            disabled={pullingLatest}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+                          >
+                            <RefreshCw
+                              className={`w-3.5 h-3.5 ${pullingLatest ? 'animate-spin' : ''}`}
+                            />
+                            <span>Pull Latest Folder</span>
+                          </button>
+                        </div>
+                      )}
+
+                      {(!repoLinked || pushMode === 'new-file') && (
+                        <div className="p-3.5 rounded-lg border border-slate-200 dark:border-slate-800 space-y-3">
+                          <div className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                            Destination Repository &amp; Schema Folder
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                            <div className="space-y-1">
+                              <label className="block text-[11px] font-medium text-slate-500">
+                                Repository
+                              </label>
+                              <select
+                                value={selectedRepo?.full_name || ''}
+                                onChange={(e) => {
+                                  const found = repos.find(
+                                    (r) => r.full_name === e.target.value
+                                  );
+                                  if (found) {
+                                    loadRepoDetails(
+                                      found.owner,
+                                      found.name,
+                                      found.default_branch
+                                    );
+                                  }
+                                }}
+                                className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
+                              >
+                                <option value="">Select repository...</option>
+                                {repos
+                                  .filter((r) => r.canPush)
+                                  .map((r) => (
+                                    <option key={r.id} value={r.full_name}>
+                                      {r.full_name}
+                                    </option>
+                                  ))}
+                              </select>
+                            </div>
+
+                            <div className="space-y-1">
+                              <label className="block text-[11px] font-medium text-slate-500">
+                                Branch
+                              </label>
+                              <select
+                                disabled={!selectedRepo}
+                                value={selectedBranch}
+                                onChange={(e) => handleBranchChange(e.target.value)}
+                                className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 disabled:opacity-50"
+                              >
+                                {(selectedRepo?.branches || ['main']).map((b) => (
+                                  <option key={b} value={b}>
+                                    {b}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div className="space-y-1">
+                              <label className="block text-[11px] font-medium text-slate-500">
+                                Schema Folder
+                              </label>
+                              <input
+                                type="text"
+                                value={targetFolderInput}
+                                onChange={(e) => setTargetFolderInput(e.target.value)}
+                                placeholder="db/schema"
+                                className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* File Checklist */}
+                      <div className="rounded-lg border border-slate-200 dark:border-slate-800 overflow-hidden">
+                        <div className="px-3 py-2 bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs">
+                          <span className="font-semibold text-slate-700 dark:text-slate-300">
+                            Modular Files to Commit ({selectedPushPaths.length}/
+                            {workspace.schemaFiles?.length || 0})
+                          </span>
+                          <div className="flex items-center gap-3 text-[11px]">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setSelectedPushPaths(
+                                  (workspace.schemaFiles || [])
+                                    .filter(
+                                      (f) =>
+                                        f.lastSyncedContent === undefined ||
+                                        f.content !== f.lastSyncedContent
+                                    )
+                                    .map((f) => f.path)
+                                )
                               }
-                            }}
-                            className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
-                          >
-                            <option value="">Select repository...</option>
-                            {repos
-                              .filter((r) => r.canPush)
-                              .map((r) => (
-                                <option key={r.id} value={r.full_name}>
-                                  {r.full_name}
-                                </option>
-                              ))}
-                          </select>
+                              className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                            >
+                              Select Changed
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setSelectedPushPaths(
+                                  (workspace.schemaFiles || []).map((f) => f.path)
+                                )
+                              }
+                              className="text-slate-600 dark:text-slate-400 hover:underline font-medium"
+                            >
+                              Select All
+                            </button>
+                          </div>
                         </div>
 
-                        <div className="space-y-1">
-                          <label className="block text-[11px] font-medium text-slate-500">
-                            Branch
-                          </label>
-                          <select
-                            disabled={!selectedRepo}
-                            value={selectedBranch}
-                            onChange={(e) => handleBranchChange(e.target.value)}
-                            className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 disabled:opacity-50"
-                          >
-                            {(selectedRepo?.branches || ['main']).map((b) => (
-                              <option key={b} value={b}>
-                                {b}
-                              </option>
-                            ))}
-                          </select>
-                        </div>
+                        <div className="max-h-44 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/70">
+                          {[...(workspace.schemaFiles || [])]
+                            .sort((a, b) => a.path.localeCompare(b.path))
+                            .map((file) => {
+                              const checked = selectedPushPaths.includes(file.path);
+                              const isNew =
+                                file.sha === undefined &&
+                                file.lastSyncedContent === undefined;
+                              const isModified =
+                                file.lastSyncedContent !== undefined &&
+                                file.content !== file.lastSyncedContent;
+                              const destPath =
+                                pushMode === 'linked' && repoLinked
+                                  ? file.path
+                                  : resolveModularPushPath(
+                                      file.path,
+                                      targetFolderInput
+                                    );
+                              const isPreview = previewDiffPath === file.path;
 
-                        <div className="space-y-1">
-                          <label className="block text-[11px] font-medium text-slate-500">
-                            File Path
-                          </label>
-                          <input
-                            type="text"
-                            value={targetPathInput}
-                            onChange={(e) => setTargetPathInput(e.target.value)}
-                            placeholder="docs/schema.dbml"
-                            className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
-                          />
+                              return (
+                                <div
+                                  key={file.path}
+                                  className={`px-3 py-2 flex items-center justify-between gap-2 text-xs ${
+                                    isPreview
+                                      ? 'bg-blue-50/50 dark:bg-blue-950/30'
+                                      : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'
+                                  }`}
+                                >
+                                  <label className="flex items-center gap-2 min-w-0 flex-1 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={checked}
+                                      onChange={(e) => {
+                                        if (e.target.checked) {
+                                          setSelectedPushPaths((prev) =>
+                                            prev.includes(file.path)
+                                              ? prev
+                                              : [...prev, file.path]
+                                          );
+                                        } else {
+                                          setSelectedPushPaths((prev) =>
+                                            prev.filter((p) => p !== file.path)
+                                          );
+                                        }
+                                      }}
+                                      className="rounded border-slate-300 text-blue-600"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.preventDefault();
+                                        setPreviewDiffPath(file.path);
+                                      }}
+                                      className="font-mono text-slate-800 dark:text-slate-100 truncate hover:text-blue-600 dark:hover:text-blue-400 text-left"
+                                      title="Click to inspect line diff"
+                                    >
+                                      {destPath}
+                                    </button>
+                                  </label>
+
+                                  <span
+                                    className={`text-[10px] font-semibold px-1.5 py-0.5 rounded shrink-0 ${
+                                      isNew
+                                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                                        : isModified
+                                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+                                        : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
+                                    }`}
+                                  >
+                                    {isNew
+                                      ? 'New'
+                                      : isModified
+                                      ? 'Modified'
+                                      : 'In sync'}
+                                  </span>
+                                </div>
+                              );
+                            })}
                         </div>
                       </div>
-                    </div>
+                    </>
+                  ) : (
+                    <>
+                      {/* Single-file linked status */}
+                      {linked && (
+                        <div className="flex flex-wrap items-center justify-between gap-3 p-3 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60">
+                          <div className="space-y-0.5 min-w-0">
+                            <div className="flex items-center gap-2 text-xs font-semibold text-slate-900 dark:text-slate-100">
+                              <span className="font-mono truncate">
+                                {linked.owner}/{linked.repo}/{linked.path}
+                              </span>
+                              <span
+                                className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                                  hasLocalChanges
+                                    ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+                                    : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+                                }`}
+                              >
+                                {hasLocalChanges ? 'Modified' : 'In sync'}
+                              </span>
+                            </div>
+                            <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
+                              Branch: {linked.branch} · Last synced{' '}
+                              {new Date(linked.lastSyncedAt).toLocaleString()}
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              type="button"
+                              onClick={handlePullLatest}
+                              disabled={pullingLatest}
+                              className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+                            >
+                              <RefreshCw
+                                className={`w-3.5 h-3.5 ${pullingLatest ? 'animate-spin' : ''}`}
+                              />
+                              <span>Pull Latest</span>
+                            </button>
+                            {linked.htmlUrl && (
+                              <a
+                                href={linked.htmlUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-900 dark:hover:text-slate-100"
+                                title="Open file on GitHub"
+                              >
+                                <ExternalLink className="w-3.5 h-3.5" />
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {(!linked || pushMode === 'new-file') && (
+                        <div className="p-3.5 rounded-lg border border-slate-200 dark:border-slate-800 space-y-3">
+                          <div className="text-xs font-semibold text-slate-800 dark:text-slate-200">
+                            Destination Repository &amp; File Path
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                            <div className="space-y-1">
+                              <label className="block text-[11px] font-medium text-slate-500">
+                                Repository
+                              </label>
+                              <select
+                                value={selectedRepo?.full_name || ''}
+                                onChange={(e) => {
+                                  const found = repos.find(
+                                    (r) => r.full_name === e.target.value
+                                  );
+                                  if (found) {
+                                    loadRepoDetails(
+                                      found.owner,
+                                      found.name,
+                                      found.default_branch
+                                    );
+                                  }
+                                }}
+                                className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
+                              >
+                                <option value="">Select repository...</option>
+                                {repos
+                                  .filter((r) => r.canPush)
+                                  .map((r) => (
+                                    <option key={r.id} value={r.full_name}>
+                                      {r.full_name}
+                                    </option>
+                                  ))}
+                              </select>
+                            </div>
+
+                            <div className="space-y-1">
+                              <label className="block text-[11px] font-medium text-slate-500">
+                                Branch
+                              </label>
+                              <select
+                                disabled={!selectedRepo}
+                                value={selectedBranch}
+                                onChange={(e) => handleBranchChange(e.target.value)}
+                                className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 disabled:opacity-50"
+                              >
+                                {(selectedRepo?.branches || ['main']).map((b) => (
+                                  <option key={b} value={b}>
+                                    {b}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+
+                            <div className="space-y-1">
+                              <label className="block text-[11px] font-medium text-slate-500">
+                                File Path
+                              </label>
+                              <input
+                                type="text"
+                                value={targetPathInput}
+                                onChange={(e) => setTargetPathInput(e.target.value)}
+                                placeholder="docs/schema.dbml"
+                                className="w-full px-2.5 py-1.5 text-xs font-mono rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </>
                   )}
 
-                  {/* Schema & Line Diff Preview when linked */}
+                  {/* Schema & Line Diff Preview */}
                   {diffPreview && (
                     <div className="rounded-lg border border-slate-200 dark:border-slate-800 overflow-hidden">
                       <div className="px-3 py-2 bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs">
-                        <span className="font-semibold text-slate-700 dark:text-slate-300">
-                          Changes to Commit
+                        <span className="font-semibold text-slate-700 dark:text-slate-300 truncate">
+                          {isModularWorkspace
+                            ? `Diff: ${previewDiffPath}`
+                            : 'Changes to Commit'}
                         </span>
-                        <span className="text-[11px] text-slate-500 tabular-nums">
+                        <span className="text-[11px] text-slate-500 tabular-nums shrink-0">
                           {changedDiffLines.length === 0
                             ? 'No edits since last sync'
                             : `${changedDiffLines.filter((l) => l.type === 'added').length} additions · ${changedDiffLines.filter((l) => l.type === 'removed').length} deletions`}
@@ -1125,7 +1753,7 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
                         </div>
                       ) : (
                         <div className="px-3 py-3 text-xs text-slate-500 dark:text-slate-400">
-                          Your local DBML matches the latest synced GitHub commit.
+                          Matches the last synced GitHub state.
                         </div>
                       )}
                     </div>
@@ -1145,8 +1773,8 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
                         <span>
                           Commit directly to{' '}
                           <code className="font-mono font-semibold">
-                            {(pushMode === 'linked' && linked
-                              ? linked.branch
+                            {(pushMode === 'linked' && (repoLinked || linked)
+                              ? (repoLinked || linked)!.branch
                               : selectedBranch) || 'branch'}
                           </code>
                         </span>
@@ -1186,14 +1814,14 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
                         type="text"
                         value={commitMessage}
                         onChange={(e) => setCommitMessage(e.target.value)}
-                        placeholder="Update database schema in schema.dbml"
+                        placeholder="Update database schema modules"
                         className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
                       />
                     </div>
                   </div>
 
                   <div className="flex items-center justify-between gap-2 pt-1">
-                    {linked ? (
+                    {(isModularWorkspace ? repoLinked : linked) ? (
                       <button
                         type="button"
                         onClick={() =>
@@ -1202,8 +1830,10 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
                         className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
                       >
                         {pushMode === 'linked'
-                          ? 'Push to a different repo or file path'
-                          : 'Back to linked file'}
+                          ? isModularWorkspace
+                            ? 'Push to a different repo or folder'
+                            : 'Push to a different repo or file path'
+                          : 'Back to linked target'}
                       </button>
                     ) : (
                       <span />
@@ -1213,10 +1843,12 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
                       type="button"
                       disabled={
                         pushing ||
-                        (pushMode === 'linked' &&
-                          Boolean(linked) &&
-                          !hasLocalChanges &&
-                          !createNewBranch)
+                        (isModularWorkspace
+                          ? selectedPushPaths.length === 0
+                          : pushMode === 'linked' &&
+                            Boolean(linked) &&
+                            !hasLocalChanges &&
+                            !createNewBranch)
                       }
                       onClick={() => handlePush(false)}
                       className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white"
@@ -1226,7 +1858,15 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
                       ) : (
                         <UploadCloud className="w-3.5 h-3.5" />
                       )}
-                      <span>{pushing ? 'Pushing...' : 'Commit & Push to GitHub'}</span>
+                      <span>
+                        {pushing
+                          ? 'Pushing...'
+                          : isModularWorkspace
+                          ? `Commit & Push ${selectedPushPaths.length} ${
+                              selectedPushPaths.length === 1 ? 'File' : 'Files'
+                            }`
+                          : 'Commit & Push to GitHub'}
+                      </span>
                     </button>
                   </div>
                 </>

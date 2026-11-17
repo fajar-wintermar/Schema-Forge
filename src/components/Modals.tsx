@@ -791,6 +791,7 @@ interface WorkspacesModalProps {
   onSelectWorkspace: (id: string) => void;
   onCreateBlank: (name: string) => void;
   onLoadSampleTelemetry: () => void;
+  onCreateModularProject?: () => void;
   onDeleteWorkspace: (id: string) => void;
   onClose: () => void;
 }
@@ -801,6 +802,7 @@ export const WorkspacesModal: React.FC<WorkspacesModalProps> = ({
   onSelectWorkspace,
   onCreateBlank,
   onLoadSampleTelemetry,
+  onCreateModularProject,
   onDeleteWorkspace,
   onClose,
 }) => {
@@ -852,17 +854,36 @@ export const WorkspacesModal: React.FC<WorkspacesModalProps> = ({
             </button>
           </form>
 
-          <button
-            type="button"
-            onClick={onLoadSampleTelemetry}
-            className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/60"
-          >
-            <span className="flex items-center gap-2">
-              <FolderPlus className="w-4 h-4 text-blue-600" />
-              <span>Create from Template: Multi-Tenant SaaS Telemetry</span>
-            </span>
-            <span className="text-blue-600 dark:text-blue-400">Load</span>
-          </button>
+          <div className="space-y-2">
+            <button
+              type="button"
+              onClick={onLoadSampleTelemetry}
+              className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-lg border border-dashed border-slate-300 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/60"
+            >
+              <span className="flex items-center gap-2">
+                <FolderPlus className="w-4 h-4 text-blue-600" />
+                <span>Create from Template: Multi-Tenant SaaS Telemetry</span>
+              </span>
+              <span className="text-blue-600 dark:text-blue-400">Load</span>
+            </button>
+
+            {onCreateModularProject && (
+              <button
+                type="button"
+                onClick={onCreateModularProject}
+                className="w-full flex items-center justify-between px-3.5 py-2.5 rounded-lg border border-dashed border-emerald-300 dark:border-emerald-800 bg-emerald-50/40 dark:bg-emerald-950/20 text-xs font-medium text-slate-700 dark:text-slate-300 hover:bg-emerald-50 dark:hover:bg-emerald-950/40"
+              >
+                <span className="flex items-center gap-2 text-left">
+                  <FolderPlus className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                  <span>
+                    Create Modular Project (<code className="font-mono">schema/*.dbml</code> → merged{' '}
+                    <code className="font-mono">schema.dbml</code>)
+                  </span>
+                </span>
+                <span className="text-emerald-600 dark:text-emerald-400 shrink-0">Create</span>
+              </button>
+            )}
+          </div>
 
           <div className="space-y-2 max-h-64 overflow-y-auto">
             {workspaces.map((ws) => {

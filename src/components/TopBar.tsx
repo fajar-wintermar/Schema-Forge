@@ -18,7 +18,12 @@ import {
   Table2,
   X,
 } from 'lucide-react';
-import { GithubFileLink, ParsedSchema, ViewMode } from '../types/schema';
+import {
+  GithubFileLink,
+  GithubRepoLink,
+  ParsedSchema,
+  ViewMode,
+} from '../types/schema';
 import { BrandLogo } from './BrandLogo';
 
 export interface GlobalSearchResult {
@@ -49,6 +54,7 @@ interface TopBarProps {
   onOpenSaveVersion: () => void;
   onOpenShortcuts: () => void;
   githubLink?: GithubFileLink;
+  githubRepoLink?: GithubRepoLink;
   hasGithubChanges?: boolean;
   modKey: string;
   darkMode: boolean;
@@ -81,6 +87,7 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenSaveVersion,
   onOpenShortcuts,
   githubLink,
+  githubRepoLink,
   hasGithubChanges = false,
   modKey,
   darkMode,
@@ -494,7 +501,11 @@ export const TopBar: React.FC<TopBarProps> = ({
           type="button"
           onClick={onOpenGithubModal}
           title={
-            githubLink
+            githubRepoLink
+              ? `GitHub Folder: ${githubRepoLink.owner}/${githubRepoLink.repo}/${githubRepoLink.schemaFolder}/ (${githubRepoLink.branch}) · ${
+                  hasGithubChanges ? 'Unpushed changes' : 'In sync'
+                }`
+              : githubLink
               ? `GitHub: ${githubLink.owner}/${githubLink.repo} (${githubLink.branch}) · ${
                   hasGithubChanges ? 'Unpushed changes' : 'In sync'
                 }`
@@ -502,16 +513,20 @@ export const TopBar: React.FC<TopBarProps> = ({
           }
           aria-label="GitHub repository sync"
           className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors whitespace-nowrap shrink-0 ${
-            githubLink && hasGithubChanges
+            (githubRepoLink || githubLink) && hasGithubChanges
               ? 'border-amber-300 dark:border-amber-700 bg-amber-50/70 dark:bg-amber-950/30 text-amber-800 dark:text-amber-200 hover:bg-amber-100/70 dark:hover:bg-amber-950/50'
               : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800'
           }`}
         >
           <FolderGit2 className="w-3.5 h-3.5" />
           <span className="hidden xl:inline">
-            {githubLink ? (hasGithubChanges ? 'Push GitHub' : 'GitHub') : 'GitHub'}
+            {githubRepoLink || githubLink
+              ? hasGithubChanges
+                ? 'Push GitHub'
+                : 'GitHub'
+              : 'GitHub'}
           </span>
-          {githubLink && (
+          {(githubRepoLink || githubLink) && (
             <span
               className={`w-1.5 h-1.5 rounded-full ${
                 hasGithubChanges ? 'bg-amber-500' : 'bg-emerald-500'

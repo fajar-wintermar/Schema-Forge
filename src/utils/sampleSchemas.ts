@@ -1,6 +1,7 @@
-import { WorkspaceProject } from '../types/schema';
+import { SchemaModuleFile, WorkspaceProject } from '../types/schema';
 import { computeAutoLayout } from './autoLayout';
 import { parseDbml } from './dbmlParser';
+import { mergeSchemaFiles } from './schemaModules';
 
 export const COMMERCE_V1_DBML = `Project OmnichannelCommerce {
   database_type: 'PostgreSQL'
@@ -537,3 +538,66 @@ export function createSaaSTelemetryWorkspace(): WorkspaceProject {
     updatedAt: now,
   };
 }
+
+export function createModularStarterWorkspace(): WorkspaceProject {
+  const now = new Date().toISOString();
+  const schemaFolder = 'schema';
+  const schemaFiles: SchemaModuleFile[] = [
+    {
+      id: `mod_${Date.now()}_project`,
+      path: `${schemaFolder}/_project.dbml`,
+      content: `Project ModularStore {\n  database_type: 'PostgreSQL'\n  Note: '''\n    # Modular Store Schema\n\n    Each domain team owns its own \`.dbml\` file under \`schema/\`.\n    \`schema.dbml\` is merged automatically on the fly for diagram & docs inspection and is never pushed to GitHub.\n  '''\n}\n\nTableGroup "Identity" [color: #2563EB] {\n  users\n}\n\nTableGroup "Catalog" [color: #059669] {\n  products\n}\n\nTableGroup "Fulfillment" [color: #D97706] {\n  orders\n  order_items\n}\n`,
+    },
+    {
+      id: `mod_${Date.now()}_users`,
+      path: `${schemaFolder}/users.dbml`,
+      content: `Table users [headercolor: #1e3a8a] {\n  id integer [pk, increment]\n  email varchar(255) [unique, not null]\n  full_name varchar(160) [not null]\n  created_at timestamp [default: \`now()\`]\n  Note: 'Owned by Identity team.'\n}\n`,
+    },
+    {
+      id: `mod_${Date.now()}_products`,
+      path: `${schemaFolder}/products.dbml`,
+      content: `Table products [headercolor: #065f46] {\n  id integer [pk, increment]\n  sku varchar(64) [unique, not null]\n  title varchar(200) [not null]\n  price_cents integer [not null]\n  created_at timestamp [default: \`now()\`]\n  Note: 'Owned by Catalog team.'\n}\n`,
+    },
+    {
+      id: `mod_${Date.now()}_orders`,
+      path: `${schemaFolder}/orders.dbml`,
+      content: `Table orders [headercolor: #9a3412] {\n  id integer [pk, increment]\n  user_id integer [not null]\n  status varchar(40) [not null, default: 'pending']\n  created_at timestamp [default: \`now()\`]\n  Note: 'Owned by Orders team.'\n}\n\nRef: orders.user_id > users.id\n\nTable order_items [headercolor: #9a3412] {\n  id integer [pk, increment]\n  order_id integer [not null]\n  product_id integer [not null]\n  quantity integer [not null, default: 1]\n}\n\nRef: order_items.order_id > orders.id [delete: cascade]\nRef: order_items.product_id > products.id\n`,
+    },
+  ];
+
+  const merged = mergeSchemaFiles(schemaFiles, { schemaFolder });
+  const parsed = parseDbml(merged.mergedDbml);
+  const pos = computeAutoLayout(parsed, 'full');
+
+  return {
+    id: `ws_modular_${Date.now()}`,
+    name: 'Modular Store (schema/*.dbml)',
+    description:
+      'Modular per-table DBML files under schema/ merged automatically into schema.dbml on the fly.',
+    dbml: merged.mergedDbml,
+    schemaFiles,
+    activeSchemaFile: `${schemaFolder}/orders.dbml`,
+    schemaFolder,
+    tablePositions: pos,
+    groupMeta: {},
+    stickyNotes: [],
+    detailLevel: 'full',
+    versions: [
+      {
+        id: `ver_${Date.now()}`,
+        tag: 'v1.0.0',
+        title: 'Initial Modular Schema',
+        description:
+          'Split into schema/_project.dbml, schema/users.dbml, schema/products.dbml, and schema/orders.dbml.',
+        dbml: merged.mergedDbml,
+        tablePositions: pos,
+        stickyNotes: [],
+        createdAt: now,
+        isPublished: true,
+      },
+    ],
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+

@@ -1126,3 +1126,449 @@ api.post('/api/github/push', async (c) => {
     );
   }
 });
+
+// 4. Modular Schema Folder Load & Atomic Multi-File Push
+
+api.get('/api/github/folder', async (c) => {
+  const owner = (c.req.query('owner') || '').trim();
+  const repo = (c.req.query('repo') || '').trim();
+  const branch = (c.req.query('branch') || 'main').trim();
+  const folder = (c.req.query('folder') || 'schema')
+    .trim()
+    .replace(/^\/+|\/+$/g, '');
+
+  if (!owner || !repo || !branch || !folder) {
+    return c.json(
+      { error: 'Missing required parameters: owner, repo, branch, folder.' },
+      400
+    );
+  }
+
+  const session = await getGithubSession(c);
+  try {
+    const treeRes = await githubApiFetch(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+        repo
+      )}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
+      session?.accessToken
+    );
+
+    const treeJson = (await treeRes.json()) as {
+      tree?: Array<{ path: string; type: string; size?: number; sha: string }>;
+      message?: string;
+    };
+
+    if (!treeRes.ok) {
+      return c.json(
+        { error: treeJson.message || 'Failed to read repository tree.' },
+        treeRes.status as 400
+      );
+    }
+
+    const prefix = `${folder}/`;
+    const dbmlItems = (treeJson.tree || [])
+      .filter(
+        (item) =>
+          item.type === 'blob' &&
+          item.path.startsWith(prefix) &&
+          item.path.toLowerCase().endsWith('.dbml')
+      )
+      .sort((a, b) => a.path.localeCompare(b.path));
+
+    if (dbmlItems.length === 0) {
+      return c.json(
+        { error: `No .dbml files found inside "${folder}/" on branch "${branch}".` },
+        404
+      );
+    }
+
+    if (dbmlItems.length > 80) {
+      return c.json(
+        { error: `Folder contains ${dbmlItems.length} .dbml files (max 80 per load).` },
+        400
+      );
+    }
+
+    const loadedFiles: Array<{ path: string; content: string; sha: string }> = [];
+    const batchSize = 8;
+    for (let i = 0; i < dbmlItems.length; i += batchSize) {
+      const slice = dbmlItems.slice(i, i + batchSize);
+      const results = await Promise.all(
+        slice.map(async (item) => {
+          const blobRes = await githubApiFetch(
+            `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+              repo
+            )}/git/blobs/${encodeURIComponent(item.sha)}`,
+            session?.accessToken
+          );
+          const blobJson = (await blobRes.json()) as {
+            content?: string;
+            encoding?: string;
+            message?: string;
+          };
+          if (!blobRes.ok || typeof blobJson.content !== 'string') {
+            throw new Error(
+              blobJson.message || `Failed to read blob for ${item.path}`
+            );
+          }
+          const content =
+            blobJson.encoding === 'base64'
+              ? decodeBase64Utf8(blobJson.content)
+              : blobJson.content;
+          return {
+            path: item.path,
+            content,
+            sha: item.sha,
+          };
+        })
+      );
+      loadedFiles.push(...results);
+    }
+
+    return c.json({
+      owner,
+      repo,
+      branch,
+      folder,
+      files: loadedFiles,
+    });
+  } catch (err) {
+    return c.json(
+      {
+        error:
+          err instanceof Error
+            ? err.message
+            : 'Failed to load modular schema folder.',
+      },
+      502
+    );
+  }
+});
+
+api.post('/api/github/push-batch', async (c) => {
+  const session = await getGithubSession(c);
+  if (!session) {
+    return c.json(
+      { error: 'Please connect your GitHub account before pushing changes.' },
+      401
+    );
+  }
+
+  const body = await c.req.json<{
+    owner?: string;
+    repo?: string;
+    branch?: string;
+    message?: string;
+    files?: Array<{ path: string; content: string; expectedSha?: string }>;
+    createNewBranch?: boolean;
+    newBranchName?: string;
+    forceWithLatestSha?: boolean;
+  }>();
+
+  const {
+    owner,
+    repo,
+    branch,
+    message,
+    files,
+    createNewBranch,
+    newBranchName,
+    forceWithLatestSha,
+  } = body;
+
+  if (
+    !owner ||
+    !repo ||
+    !branch ||
+    !message?.trim() ||
+    !Array.isArray(files) ||
+    files.length === 0
+  ) {
+    return c.json(
+      {
+        error:
+          'Missing required fields: owner, repo, branch, message, and at least one file.',
+      },
+      400
+    );
+  }
+
+  try {
+    let targetBranch = branch.trim();
+
+    if (createNewBranch) {
+      const cleanBranch = (newBranchName || '').trim();
+      if (!cleanBranch || /[\s~^:?*\[]/.test(cleanBranch)) {
+        return c.json(
+          {
+            error:
+              'Please enter a valid new branch name (no spaces or special characters).',
+          },
+          400
+        );
+      }
+
+      const baseRefRes = await githubApiFetch(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+          repo
+        )}/git/ref/heads/${encodeURIComponent(targetBranch)}`,
+        session.accessToken
+      );
+      const baseRefData = (await baseRefRes.json()) as {
+        object?: { sha: string };
+        message?: string;
+      };
+      if (!baseRefRes.ok || !baseRefData.object?.sha) {
+        return c.json(
+          {
+            error:
+              baseRefData.message ||
+              `Unable to resolve base branch "${targetBranch}".`,
+          },
+          (baseRefRes.status || 400) as 400
+        );
+      }
+
+      const createRefRes = await githubApiFetch(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/refs`,
+        session.accessToken,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ref: `refs/heads/${cleanBranch}`,
+            sha: baseRefData.object.sha,
+          }),
+        }
+      );
+      const createRefJson = (await createRefRes.json()) as { message?: string };
+      if (!createRefRes.ok) {
+        return c.json(
+          {
+            error:
+              createRefJson.message ||
+              `Failed to create branch "${cleanBranch}".`,
+          },
+          createRefRes.status as 400
+        );
+      }
+      targetBranch = cleanBranch;
+    }
+
+    // Resolve current branch commit and tree
+    const headRefRes = await githubApiFetch(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+        repo
+      )}/git/ref/heads/${encodeURIComponent(targetBranch)}`,
+      session.accessToken
+    );
+    const headRefJson = (await headRefRes.json()) as {
+      object?: { sha: string };
+      message?: string;
+    };
+    if (!headRefRes.ok || !headRefJson.object?.sha) {
+      return c.json(
+        {
+          error:
+            headRefJson.message ||
+            `Could not find branch "${targetBranch}" in ${owner}/${repo}.`,
+        },
+        (headRefRes.status || 400) as 400
+      );
+    }
+    const parentCommitSha = headRefJson.object.sha;
+
+    const commitRes = await githubApiFetch(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+        repo
+      )}/git/commits/${encodeURIComponent(parentCommitSha)}`,
+      session.accessToken
+    );
+    const commitJson = (await commitRes.json()) as {
+      tree?: { sha: string };
+      message?: string;
+    };
+    if (!commitRes.ok || !commitJson.tree?.sha) {
+      return c.json(
+        { error: commitJson.message || 'Failed to read branch commit tree.' },
+        (commitRes.status || 400) as 400
+      );
+    }
+    const baseTreeSha = commitJson.tree.sha;
+
+    // Check remote tree for per-file SHA conflicts when not forcing overwrite
+    if (!forceWithLatestSha && files.some((f) => Boolean(f.expectedSha))) {
+      const treeCheckRes = await githubApiFetch(
+        `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+          repo
+        )}/git/trees/${encodeURIComponent(baseTreeSha)}?recursive=1`,
+        session.accessToken
+      );
+      if (treeCheckRes.ok) {
+        const treeCheckJson = (await treeCheckRes.json()) as {
+          tree?: Array<{ path: string; sha: string; type: string }>;
+        };
+        const remoteShas = new Map<string, string>();
+        for (const entry of treeCheckJson.tree || []) {
+          if (entry.type === 'blob') remoteShas.set(entry.path, entry.sha);
+        }
+        const conflicts = files
+          .filter((f) => {
+            if (!f.expectedSha) return false;
+            const currentRemoteSha = remoteShas.get(f.path.replace(/^\/+/, ''));
+            return currentRemoteSha && currentRemoteSha !== f.expectedSha;
+          })
+          .map((f) => f.path);
+        if (conflicts.length > 0) {
+          return c.json(
+            {
+              code: 'SHA_CONFLICT',
+              conflictPaths: conflicts,
+              error: `Remote changes detected in: ${conflicts.join(
+                ', '
+              )}. Pull latest files or overwrite with your changes.`,
+            },
+            409
+          );
+        }
+      }
+    }
+
+    // Create blobs for each file in parallel
+    const blobResults = await Promise.all(
+      files.map(async (f) => {
+        const cleanPath = f.path.trim().replace(/^\/+/, '');
+        const blobRes = await githubApiFetch(
+          `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/blobs`,
+          session.accessToken,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              content: encodeBase64Utf8(f.content),
+              encoding: 'base64',
+            }),
+          }
+        );
+        const blobJson = (await blobRes.json()) as {
+          sha?: string;
+          message?: string;
+        };
+        if (!blobRes.ok || !blobJson.sha) {
+          throw new Error(blobJson.message || `Failed to upload ${cleanPath}`);
+        }
+        return {
+          path: cleanPath,
+          sha: blobJson.sha,
+        };
+      })
+    );
+
+    // Build new Git tree on top of baseTreeSha
+    const newTreeRes = await githubApiFetch(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees`,
+      session.accessToken,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          base_tree: baseTreeSha,
+          tree: blobResults.map((b) => ({
+            path: b.path,
+            mode: '100644',
+            type: 'blob',
+            sha: b.sha,
+          })),
+        }),
+      }
+    );
+    const newTreeJson = (await newTreeRes.json()) as {
+      sha?: string;
+      message?: string;
+    };
+    if (!newTreeRes.ok || !newTreeJson.sha) {
+      return c.json(
+        { error: newTreeJson.message || 'Failed to construct commit tree.' },
+        (newTreeRes.status || 400) as 400
+      );
+    }
+
+    // Create commit
+    const newCommitRes = await githubApiFetch(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/commits`,
+      session.accessToken,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          message: message.trim(),
+          tree: newTreeJson.sha,
+          parents: [parentCommitSha],
+        }),
+      }
+    );
+    const newCommitJson = (await newCommitRes.json()) as {
+      sha?: string;
+      html_url?: string;
+      message?: string;
+    };
+    if (!newCommitRes.ok || !newCommitJson.sha) {
+      return c.json(
+        { error: newCommitJson.message || 'Failed to create Git commit.' },
+        (newCommitRes.status || 400) as 400
+      );
+    }
+
+    // Fast-forward branch ref
+    const updateRefRes = await githubApiFetch(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+        repo
+      )}/git/refs/heads/${encodeURIComponent(targetBranch)}`,
+      session.accessToken,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sha: newCommitJson.sha,
+          force: false,
+        }),
+      }
+    );
+    const updateRefJson = (await updateRefRes.json()) as { message?: string };
+    if (!updateRefRes.ok) {
+      return c.json(
+        {
+          error:
+            updateRefJson.message ||
+            'Failed to advance branch reference (concurrent push occurred).',
+        },
+        updateRefRes.status === 422 ? 409 : (updateRefRes.status as 400)
+      );
+    }
+
+    return c.json({
+      branch: targetBranch,
+      commitSha: newCommitJson.sha,
+      commitUrl:
+        newCommitJson.html_url ||
+        `https://github.com/${owner}/${repo}/commit/${newCommitJson.sha}`,
+      files: blobResults.map((b) => ({
+        path: b.path,
+        sha: b.sha,
+        htmlUrl: `https://github.com/${owner}/${repo}/blob/${encodeURIComponent(
+          targetBranch
+        )}/${b.path}`,
+      })),
+    });
+  } catch (err) {
+    return c.json(
+      {
+        error:
+          err instanceof Error
+            ? err.message
+            : 'Failed to push modular files to GitHub.',
+      },
+      502
+    );
+  }
+});

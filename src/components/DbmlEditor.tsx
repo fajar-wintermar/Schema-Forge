@@ -4,11 +4,19 @@ import {
   ArrowDown,
   ArrowUp,
   CaseSensitive,
+  Check,
   CheckCircle2,
   ChevronDown,
   ChevronRight,
   ChevronUp,
   Code2,
+  Copy,
+  Edit3,
+  FileCode2,
+  Folder,
+  FolderOpen,
+  FolderTree,
+  Layers,
   Maximize2,
   Minimize2,
   PanelLeftClose,
@@ -16,10 +24,17 @@ import {
   Replace,
   ReplaceAll,
   Search,
+  Trash2,
   WholeWord,
   X,
 } from 'lucide-react';
-import { ParseError, TableDef } from '../types/schema';
+import { ParseError, SchemaModuleFile, TableDef } from '../types/schema';
+import {
+  buildShellMergeScript,
+  createStarterModuleDbml,
+  MERGED_SCHEMA_VIEW_ID,
+  normalizeModulePath,
+} from '../utils/schemaModules';
 
 interface DbmlEditorProps {
   value: string;
@@ -32,22 +47,149 @@ interface DbmlEditorProps {
   onToggleMaximize?: () => void;
   onMinimize?: () => void;
   modKey?: string;
+  schemaFiles?: SchemaModuleFile[];
+  activeFilePath?: string;
+  schemaFolder?: string;
+  allErrorsByFile?: Record<string, ParseError[]>;
+  onSelectFile?: (path: string) => void;
+  onCreateFile?: (path: string, content: string) => void;
+  onRenameFile?: (oldPath: string, newPath: string) => void;
+  onDeleteFile?: (path: string) => void;
+  onEnableModularMode?: () => void;
+  onFlattenToSingleFile?: () => void;
+  onJumpToMergedLine?: (mergedLine: number) => void;
 }
 
-const SNIPPETS = [
-  {
-    label: '+ Table',
-    code: `\nTable new_entity [headercolor: #1e3a8a] {\n  id uuid [pk, not null]\n  name varchar(120) [not null]\n  created_at timestamptz [default: \`now()\`]\n}\n`,
-  },
-  {
-    label: '+ TableGroup',
-    code: `\nTableGroup "New Domain" [color: #2563EB] {\n  Note: 'Describe business logic for this domain'\n}\n`,
-  },
-  {
-    label: '+ Ref',
-    code: `\nRef: child_table.parent_id > parent_table.id [delete: cascade]\n`,
-  },
-];
+interface SchemaTreeFolderNode {
+  kind: 'folder';
+  name: string;
+  path: string;
+  children: SchemaTreeNode[];
+  fileCount: number;
+  errorCount: number;
+}
+
+interface SchemaTreeFileNode {
+  kind: 'file';
+  name: string;
+  path: string;
+  file: SchemaModuleFile;
+  matchedTables: string[];
+}
+
+type SchemaTreeNode = SchemaTreeFolderNode | SchemaTreeFileNode;
+
+function extractDefinedTableNames(content: string): string[] {
+  const names: string[] = [];
+  const regex = /^\s*Table\s+(?:"([^"]+)"|`([^`]+)`|([a-zA-Z0-9_.]+))/gim;
+  let m: RegExpExecArray | null;
+  while ((m = regex.exec(content)) !== null) {
+    const name = (m[1] || m[2] || m[3] || '').trim();
+    if (name) names.push(name);
+  }
+  return names;
+}
+
+function buildSchemaFileTree(
+  files: SchemaModuleFile[],
+  searchQuery: string,
+  allErrorsByFile?: Record<string, ParseError[]>
+): { nodes: SchemaTreeNode[]; matchCount: number } {
+  const q = searchQuery.trim().toLowerCase();
+
+  interface MutableFolder {
+    name: string;
+    path: string;
+    folders: Map<string, MutableFolder>;
+    files: SchemaTreeFileNode[];
+  }
+
+  const root: MutableFolder = {
+    name: '',
+    path: '',
+    folders: new Map(),
+    files: [],
+  };
+
+  let matchCount = 0;
+
+  for (const file of files) {
+    const tableNames = extractDefinedTableNames(file.content);
+    const matchingTables = q
+      ? tableNames.filter((t) => t.toLowerCase().includes(q))
+      : [];
+    const pathMatch = !q || file.path.toLowerCase().includes(q);
+    if (!pathMatch && matchingTables.length === 0) {
+      continue;
+    }
+
+    matchCount++;
+    const parts = file.path.split('/').filter(Boolean);
+    const fileName = parts.pop() || file.path;
+    let cursor = root;
+    let accumPath = '';
+
+    for (const seg of parts) {
+      accumPath = accumPath ? `${accumPath}/${seg}` : seg;
+      let next = cursor.folders.get(seg);
+      if (!next) {
+        next = {
+          name: seg,
+          path: accumPath,
+          folders: new Map(),
+          files: [],
+        };
+        cursor.folders.set(seg, next);
+      }
+      cursor = next;
+    }
+
+    cursor.files.push({
+      kind: 'file',
+      name: fileName,
+      path: file.path,
+      file,
+      matchedTables: pathMatch ? [] : matchingTables,
+    });
+  }
+
+  const finalize = (folder: MutableFolder): SchemaTreeNode[] => {
+    const folderNodes: SchemaTreeFolderNode[] = Array.from(
+      folder.folders.values()
+    )
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .map((sub) => {
+        const children = finalize(sub);
+        let fileCount = 0;
+        let errorCount = 0;
+        for (const child of children) {
+          if (child.kind === 'folder') {
+            fileCount += child.fileCount;
+            errorCount += child.errorCount;
+          } else {
+            fileCount += 1;
+            errorCount += allErrorsByFile?.[child.path]?.length || 0;
+          }
+        }
+        return {
+          kind: 'folder',
+          name: sub.name,
+          path: sub.path,
+          children,
+          fileCount,
+          errorCount,
+        };
+      });
+
+    const fileNodes = [...folder.files].sort((a, b) =>
+      a.name.localeCompare(b.name)
+    );
+
+    return [...folderNodes, ...fileNodes];
+  };
+
+  return { nodes: finalize(root), matchCount };
+}
 
 const TOP_KEYWORDS = new Set([
   'project',
@@ -658,14 +800,43 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
   onToggleMaximize,
   onMinimize,
   modKey = '⌘',
+  schemaFiles,
+  activeFilePath,
+  schemaFolder = 'schema',
+  allErrorsByFile,
+  onSelectFile,
+  onCreateFile,
+  onRenameFile,
+  onDeleteFile,
+  onEnableModularMode,
+  onFlattenToSingleFile,
+  onJumpToMergedLine,
 }) => {
+  const isModular = Boolean(schemaFiles && schemaFiles.length > 0);
+  const isMergedPreview = isModular && activeFilePath === MERGED_SCHEMA_VIEW_ID;
+
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const codeAreaRef = useRef<HTMLDivElement>(null);
   const editorWrapperRef = useRef<HTMLDivElement>(null);
   const findInputRef = useRef<HTMLInputElement>(null);
   const replaceInputRef = useRef<HTMLInputElement>(null);
   const gotoInputRef = useRef<HTMLInputElement>(null);
   const [problemsOpen, setProblemsOpen] = useState(false);
+
+  // Modular file explorer UI state
+  const [explorerOpen, setExplorerOpen] = useState(true);
+  const [fileSearch, setFileSearch] = useState('');
+  const [collapsedFolders, setCollapsedFolders] = useState<
+    Record<string, boolean>
+  >({});
+  const [newFileOpen, setNewFileOpen] = useState(false);
+  const [newFileName, setNewFileName] = useState('');
+  const [newFileIncludeStub, setNewFileIncludeStub] = useState(true);
+  const [renameTargetPath, setRenameTargetPath] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [deleteTargetPath, setDeleteTargetPath] = useState<string | null>(null);
+  const [copiedScript, setCopiedScript] = useState(false);
 
   // Find & Replace state
   const [findOpen, setFindOpen] = useState(false);
@@ -818,7 +989,7 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
   );
 
   const handleReplaceCurrent = useCallback(() => {
-    if (findMatches.length === 0) return;
+    if (isMergedPreview || findMatches.length === 0) return;
     const target = findMatches[safeMatchIdx];
     const next =
       value.slice(0, target.start) + replaceQuery + value.slice(target.end);
@@ -827,10 +998,18 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
       const nextOffset = target.start + replaceQuery.length;
       scrollToOffset(nextOffset);
     }
-  }, [findMatches, safeMatchIdx, value, replaceQuery, onChange, scrollToOffset]);
+  }, [
+    isMergedPreview,
+    findMatches,
+    safeMatchIdx,
+    value,
+    replaceQuery,
+    onChange,
+    scrollToOffset,
+  ]);
 
   const handleReplaceAll = useCallback(() => {
-    if (findMatches.length === 0) return;
+    if (isMergedPreview || findMatches.length === 0) return;
     let out = '';
     let last = 0;
     for (const m of findMatches) {
@@ -840,7 +1019,7 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
     out += value.slice(last);
     onChange(out);
     setActiveMatchIdx(0);
-  }, [findMatches, value, replaceQuery, onChange]);
+  }, [isMergedPreview, findMatches, value, replaceQuery, onChange]);
 
   const openGotoLine = useCallback(() => {
     const ta = textareaRef.current;
@@ -969,7 +1148,100 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
     const lineHeight = 20;
     const targetTop = Math.max(0, (scrollToLine - 4) * lineHeight);
     scrollContainerRef.current.scrollTo({ top: targetTop, behavior: 'smooth' });
-  }, [scrollToLine]);
+  }, [scrollToLine, activeFilePath]);
+
+  // Reset inline modular prompts & ensure active file's parent folders are expanded
+  useEffect(() => {
+    setRenameTargetPath(null);
+    setDeleteTargetPath(null);
+    if (!activeFilePath || activeFilePath === MERGED_SCHEMA_VIEW_ID) return;
+    const parts = activeFilePath.split('/').filter(Boolean);
+    if (parts.length > 1) {
+      setCollapsedFolders((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        let accum = '';
+        for (let i = 0; i < parts.length - 1; i++) {
+          accum = accum ? `${accum}/${parts[i]}` : parts[i];
+          if (next[accum]) {
+            delete next[accum];
+            changed = true;
+          }
+        }
+        return changed ? next : prev;
+      });
+    }
+  }, [activeFilePath]);
+
+  const sortedSchemaFiles = useMemo(() => {
+    if (!schemaFiles) return [];
+    return [...schemaFiles].sort((a, b) => a.path.localeCompare(b.path));
+  }, [schemaFiles]);
+
+  const schemaTree = useMemo(
+    () => buildSchemaFileTree(sortedSchemaFiles, fileSearch, allErrorsByFile),
+    [sortedSchemaFiles, fileSearch, allErrorsByFile]
+  );
+
+  const toggleFolder = (folderPath: string) => {
+    setCollapsedFolders((prev) => ({
+      ...prev,
+      [folderPath]: !prev[folderPath],
+    }));
+  };
+
+  const otherFileErrorEntries = useMemo(() => {
+    if (!isModular || !allErrorsByFile) return [];
+    return Object.entries(allErrorsByFile).filter(
+      ([path, errs]) => path !== activeFilePath && errs.length > 0
+    );
+  }, [isModular, allErrorsByFile, activeFilePath]);
+
+  const otherFileErrorsCount = useMemo(
+    () => otherFileErrorEntries.reduce((acc, [, errs]) => acc + errs.length, 0),
+    [otherFileErrorEntries]
+  );
+
+  const handleCreateModuleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!onCreateFile || !newFileName.trim()) return;
+    const normalizedPath = normalizeModulePath(newFileName, schemaFolder);
+    const content = newFileIncludeStub
+      ? createStarterModuleDbml(normalizedPath)
+      : `// ${normalizedPath}\n`;
+    onCreateFile(normalizedPath, content);
+    setNewFileName('');
+    setNewFileOpen(false);
+    setExplorerOpen(true);
+  };
+
+  const handleRenameSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!onRenameFile || !renameTargetPath || !renameValue.trim()) {
+      return;
+    }
+    const nextPath = normalizeModulePath(renameValue, schemaFolder);
+    onRenameFile(renameTargetPath, nextPath);
+    setRenameTargetPath(null);
+  };
+
+  const handleJumpFromMergedCursor = () => {
+    if (!onJumpToMergedLine) return;
+    const ta = textareaRef.current;
+    const pos = ta ? ta.selectionStart : 0;
+    const lineNum = Math.max(1, value.slice(0, pos).split('\n').length);
+    onJumpToMergedLine(lineNum);
+  };
+
+  const handleCopyMergeScript = async () => {
+    try {
+      await navigator.clipboard.writeText(buildShellMergeScript(schemaFolder));
+      setCopiedScript(true);
+      window.setTimeout(() => setCopiedScript(false), 1800);
+    } catch {
+      // Ignore clipboard failures
+    }
+  };
 
   const computePopupCoords = useCallback((text: string, cursorPos: number) => {
     const before = text.slice(0, cursorPos);
@@ -978,16 +1250,16 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
     const col = split[split.length - 1].length;
     const scrollTop = scrollContainerRef.current?.scrollTop || 0;
     const scrollLeft = scrollContainerRef.current?.scrollLeft || 0;
-    const editorRect = editorWrapperRef.current?.getBoundingClientRect();
+    const codeRect = codeAreaRef.current?.getBoundingClientRect();
 
-    // Header bar is 40px; padding top inside pre is 12px; gutter width is 44px + 12px left padding
-    const rawTop = 40 + 12 + (row + 1) * 20 - scrollTop + 2;
+    // Padding top inside pre is 12px; gutter width is 44px + 12px left padding
+    const rawTop = 12 + (row + 1) * 20 - scrollTop + 2;
     const rawLeft = 44 + 12 + col * 7.5 - scrollLeft;
 
-    const maxTop = editorRect ? editorRect.height - 220 : 320;
-    const top = rawTop > maxTop ? Math.max(44, rawTop - 220) : Math.max(44, rawTop);
-    const maxLeft = editorRect ? Math.max(16, editorRect.width - 290) : 240;
-    const left = Math.min(maxLeft, Math.max(52, rawLeft));
+    const maxTop = codeRect ? Math.max(24, codeRect.height - 210) : 280;
+    const top = rawTop > maxTop ? Math.max(8, rawTop - 210) : Math.max(8, rawTop);
+    const maxLeft = codeRect ? Math.max(16, codeRect.width - 284) : 220;
+    const left = Math.min(maxLeft, Math.max(48, rawLeft));
 
     return { top, left };
   }, []);
@@ -1048,6 +1320,7 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
   );
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    if (isMergedPreview) return;
     const nextVal = e.target.value;
     const pos = e.target.selectionStart;
     onChange(nextVal);
@@ -1055,6 +1328,14 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (isMergedPreview) {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && onJumpToMergedLine) {
+        e.preventDefault();
+        handleJumpFromMergedCursor();
+      }
+      return;
+    }
+
     // Ctrl + Space opens autocomplete explicitly
     if (e.ctrlKey && e.code === 'Space') {
       e.preventDefault();
@@ -1104,10 +1385,6 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
     }
   };
 
-  const insertSnippet = (snippet: string) => {
-    onChange(value.trimEnd() + '\n' + snippet);
-  };
-
   const kindColor = (kind: AutocompleteItem['kind']) => {
     switch (kind) {
       case 'table':
@@ -1124,35 +1401,192 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
     }
   };
 
+  const renderTreeNodes = (nodes: SchemaTreeNode[], depth = 0): React.ReactNode => {
+    const forceExpand = Boolean(fileSearch.trim());
+    return nodes.map((node) => {
+      if (node.kind === 'folder') {
+        const isOpen = forceExpand || !collapsedFolders[node.path];
+        return (
+          <div key={node.path}>
+            <button
+              type="button"
+              onClick={() => toggleFolder(node.path)}
+              style={{ paddingLeft: `${8 + depth * 12}px` }}
+              className="w-full pr-2 py-1 flex items-center gap-1.5 text-left text-[11px] font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200/60 dark:hover:bg-slate-800/70 transition-colors"
+            >
+              {isOpen ? (
+                <ChevronDown className="w-3 h-3 text-slate-400 shrink-0" />
+              ) : (
+                <ChevronRight className="w-3 h-3 text-slate-400 shrink-0" />
+              )}
+              {isOpen ? (
+                <FolderOpen className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 shrink-0" />
+              ) : (
+                <Folder className="w-3.5 h-3.5 text-amber-500 dark:text-amber-400 shrink-0" />
+              )}
+              <span className="truncate flex-1 font-mono">{node.name}</span>
+              {node.errorCount > 0 && (
+                <span
+                  title={`${node.errorCount} syntax issue(s)`}
+                  className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0"
+                />
+              )}
+              <span className="text-[10px] text-slate-400 tabular-nums shrink-0">
+                {node.fileCount}
+              </span>
+            </button>
+            {isOpen && <div>{renderTreeNodes(node.children, depth + 1)}</div>}
+          </div>
+        );
+      }
+
+      const file = node.file;
+      const active = activeFilePath === file.path;
+      const fileErrCount = allErrorsByFile?.[file.path]?.length || 0;
+      const isModified =
+        file.lastSyncedContent !== undefined &&
+        file.content !== file.lastSyncedContent;
+      const isUntrackedNew =
+        file.sha === undefined && file.lastSyncedContent === undefined;
+
+      return (
+        <div
+          key={file.path}
+          style={{ paddingLeft: `${12 + depth * 12}px` }}
+          className={`group/tree-file pr-1.5 py-1 flex items-center gap-1.5 text-[11px] transition-colors cursor-pointer ${
+            active
+              ? 'bg-blue-600/10 dark:bg-blue-500/20 text-blue-700 dark:text-blue-200 font-semibold border-l-2 border-blue-600 dark:border-blue-400'
+              : 'text-slate-700 dark:text-slate-300 hover:bg-slate-200/60 dark:hover:bg-slate-800/60 border-l-2 border-transparent'
+          }`}
+          onClick={() => onSelectFile?.(file.path)}
+          title={file.path}
+        >
+          <FileCode2
+            className={`w-3.5 h-3.5 shrink-0 ${
+              fileErrCount > 0
+                ? 'text-rose-500'
+                : active
+                ? 'text-blue-600 dark:text-blue-400'
+                : 'text-slate-400'
+            }`}
+          />
+          <div className="min-w-0 flex-1">
+            <div className="truncate font-mono">{node.name}</div>
+            {node.matchedTables.length > 0 && (
+              <div className="truncate text-[9.5px] text-slate-400 dark:text-slate-500 font-mono">
+                Table: {node.matchedTables.join(', ')}
+              </div>
+            )}
+          </div>
+
+          <div className="flex items-center gap-0.5 shrink-0">
+            {(isModified || isUntrackedNew) && fileErrCount === 0 && (
+              <span
+                title={
+                  isModified ? 'Modified since GitHub sync' : 'New local file'
+                }
+                className={`w-1.5 h-1.5 rounded-full shrink-0 mr-0.5 ${
+                  isModified ? 'bg-amber-500' : 'bg-emerald-500'
+                }`}
+              />
+            )}
+            {fileErrCount > 0 && (
+              <span className="text-[10px] font-semibold text-rose-600 dark:text-rose-400 tabular-nums mr-0.5">
+                {fileErrCount}
+              </span>
+            )}
+            {onRenameFile && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setRenameTargetPath(file.path);
+                  setRenameValue(file.path);
+                  setNewFileOpen(false);
+                  setDeleteTargetPath(null);
+                }}
+                title={`Rename ${file.path}`}
+                aria-label={`Rename ${file.path}`}
+                className="p-0.5 rounded opacity-0 group-hover/tree-file:opacity-100 text-slate-400 hover:text-slate-800 dark:hover:text-slate-100 hover:bg-slate-300/50 dark:hover:bg-slate-700/70 transition-opacity"
+              >
+                <Edit3 className="w-3 h-3" />
+              </button>
+            )}
+            {onDeleteFile && sortedSchemaFiles.length > 1 && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setDeleteTargetPath(file.path);
+                  setNewFileOpen(false);
+                  setRenameTargetPath(null);
+                }}
+                title={`Delete ${file.path}`}
+                aria-label={`Delete ${file.path}`}
+                className="p-0.5 rounded opacity-0 group-hover/tree-file:opacity-100 text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-opacity"
+              >
+                <Trash2 className="w-3 h-3" />
+              </button>
+            )}
+          </div>
+        </div>
+      );
+    });
+  };
+
   return (
     <div
       ref={editorWrapperRef}
       className="relative flex flex-col h-full bg-white dark:bg-slate-950 border-r border-slate-200 dark:border-slate-800"
     >
       {/* Editor Toolbar */}
-      <div className="h-10 shrink-0 px-3 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2 bg-slate-50/70 dark:bg-slate-900/70">
-        <div className="flex items-center gap-2 text-xs font-medium text-slate-700 dark:text-slate-300">
-          <Code2 className="w-3.5 h-3.5 text-slate-400" />
-          <span>schema.dbml</span>
-          <span className="hidden xl:inline text-[10px] text-slate-400 font-normal">
-            · Ctrl+Space autocomplete
-          </span>
-        </div>
-        <div className="flex items-center gap-1">
-          {SNIPPETS.map((s) => (
+      <div className="h-10 shrink-0 px-2.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2 bg-slate-50/70 dark:bg-slate-900/70">
+        <div className="flex items-center gap-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 min-w-0">
+          {isModular ? (
             <button
-              key={s.label}
               type="button"
-              onClick={() => insertSnippet(s.code)}
-              className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-200/70 dark:hover:bg-slate-800 transition-colors whitespace-nowrap"
+              onClick={() => setExplorerOpen((o) => !o)}
+              title={
+                explorerOpen
+                  ? 'Hide schema file explorer'
+                  : 'Show schema file explorer'
+              }
+              aria-label="Toggle schema file explorer"
+              className={`p-1 rounded transition-colors shrink-0 ${
+                explorerOpen
+                  ? 'bg-emerald-100/80 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/70 dark:hover:bg-slate-800'
+              }`}
             >
-              <Plus className="w-2.5 h-2.5" />
-              <span>{s.label.replace('+ ', '')}</span>
+              <FolderTree className="w-3.5 h-3.5" />
             </button>
-          ))}
-
-          {(onToggleMaximize || onMinimize) && (
-            <div className="w-px h-4 bg-slate-200 dark:bg-slate-700 mx-1" />
+          ) : (
+            <Code2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+          )}
+          <span className="font-mono truncate">
+            {isMergedPreview
+              ? 'schema.dbml (generated)'
+              : isModular && activeFilePath
+              ? activeFilePath
+              : 'schema.dbml'}
+          </span>
+          {!isMergedPreview && (
+            <span className="hidden xl:inline text-[10px] text-slate-400 font-normal whitespace-nowrap">
+              · Ctrl+Space autocomplete
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-1 shrink-0">
+          {!isModular && onEnableModularMode && (
+            <button
+              type="button"
+              onClick={onEnableModularMode}
+              title="Split single DBML into per-table files under schema/ and merge schema.dbml on the fly"
+              className="flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium text-emerald-700 dark:text-emerald-300 bg-emerald-50/80 dark:bg-emerald-950/40 hover:bg-emerald-100 dark:hover:bg-emerald-950/70 border border-emerald-200/80 dark:border-emerald-800/70 transition-colors whitespace-nowrap"
+            >
+              <FolderTree className="w-3 h-3" />
+              <span className="hidden sm:inline">Split to schema/</span>
+            </button>
           )}
 
           <button
@@ -1202,6 +1636,268 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
           )}
         </div>
       </div>
+
+      {/* Editor Main Workspace (Optional File Explorer Tree + Code Editor) */}
+      <div className="flex-1 flex min-h-0 overflow-hidden">
+        {isModular && explorerOpen && (
+          <aside
+            aria-label="Schema File Explorer"
+            className="w-[196px] sm:w-[216px] shrink-0 border-r border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-900/60 flex flex-col min-h-0 select-none"
+          >
+            {/* Explorer Header */}
+            <div className="px-2.5 py-1.5 border-b border-slate-200/80 dark:border-slate-800 flex items-center justify-between gap-1">
+              <div className="flex items-center gap-1.5 min-w-0">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 truncate">
+                  Explorer
+                </span>
+                <span className="text-[10px] font-mono text-slate-400 tabular-nums">
+                  {sortedSchemaFiles.length}
+                </span>
+              </div>
+              <div className="flex items-center gap-0.5 shrink-0">
+                {onCreateFile && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setNewFileOpen((o) => !o);
+                      setRenameTargetPath(null);
+                      setDeleteTargetPath(null);
+                    }}
+                    title={`New .dbml file in ${schemaFolder}/`}
+                    aria-label={`New .dbml file in ${schemaFolder}/`}
+                    className="p-1 rounded text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-slate-200/70 dark:hover:bg-slate-800"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                  </button>
+                )}
+                {onFlattenToSingleFile && (
+                  <button
+                    type="button"
+                    onClick={onFlattenToSingleFile}
+                    title="Flatten all modular files into a single schema.dbml"
+                    className="px-1.5 py-0.5 rounded text-[10px] font-medium text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/70 dark:hover:bg-slate-800"
+                  >
+                    Flatten
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Explorer Search */}
+            <div className="p-2 border-b border-slate-200/70 dark:border-slate-800/80">
+              <div className="relative">
+                <Search className="w-3 h-3 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  value={fileSearch}
+                  onChange={(e) => setFileSearch(e.target.value)}
+                  placeholder="Search files or tables..."
+                  aria-label="Search split schema files"
+                  className="w-full pl-6 pr-6 py-1 text-[11px] rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                />
+                {fileSearch && (
+                  <button
+                    type="button"
+                    onClick={() => setFileSearch('')}
+                    aria-label="Clear file search"
+                    className="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Inline Create File Form */}
+            {newFileOpen && (
+              <form
+                onSubmit={handleCreateModuleSubmit}
+                className="p-2 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 space-y-1.5 text-[11px]"
+              >
+                <input
+                  type="text"
+                  autoFocus
+                  value={newFileName}
+                  onChange={(e) => setNewFileName(e.target.value)}
+                  placeholder={`${schemaFolder}/payments.dbml`}
+                  className="w-full px-2 py-1 text-[11px] font-mono rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+                />
+                <label className="flex items-center gap-1.5 text-[10.5px] text-slate-600 dark:text-slate-300 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={newFileIncludeStub}
+                    onChange={(e) => setNewFileIncludeStub(e.target.checked)}
+                    className="rounded border-slate-300 text-blue-600"
+                  />
+                  <span>Include starter Table</span>
+                </label>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="submit"
+                    className="px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-700 text-white text-[10.5px] font-medium"
+                  >
+                    Create
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNewFileOpen(false)}
+                    className="px-2 py-0.5 rounded text-[10.5px] text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* Inline Rename File Form */}
+            {renameTargetPath && (
+              <form
+                onSubmit={handleRenameSubmit}
+                className="p-2 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 space-y-1.5 text-[11px]"
+              >
+                <div className="text-[10px] font-medium text-slate-500 truncate">
+                  Rename {renameTargetPath}
+                </div>
+                <input
+                  type="text"
+                  autoFocus
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  className="w-full px-2 py-1 text-[11px] font-mono rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+                />
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="submit"
+                    className="px-2 py-0.5 rounded bg-blue-600 hover:bg-blue-700 text-white text-[10.5px] font-medium"
+                  >
+                    Save
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRenameTargetPath(null)}
+                    className="px-2 py-0.5 rounded text-[10.5px] text-slate-500 hover:text-slate-800 dark:hover:text-slate-200"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* Inline Delete Confirm */}
+            {deleteTargetPath && (
+              <div className="p-2 border-b border-rose-200 dark:border-rose-900/60 bg-rose-50/70 dark:bg-rose-950/30 space-y-1.5 text-[11px]">
+                <div className="text-[10.5px] text-rose-800 dark:text-rose-200 break-all">
+                  Delete{' '}
+                  <code className="font-mono font-semibold">
+                    {deleteTargetPath}
+                  </code>
+                  ?
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onDeleteFile?.(deleteTargetPath);
+                      setDeleteTargetPath(null);
+                    }}
+                    className="px-2 py-0.5 rounded bg-rose-600 hover:bg-rose-700 text-white text-[10.5px] font-medium"
+                  >
+                    Delete
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDeleteTargetPath(null)}
+                    className="px-2 py-0.5 rounded text-[10.5px] text-slate-600 dark:text-slate-300"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Tree View */}
+            <div className="flex-1 overflow-y-auto py-1">
+              {schemaTree.nodes.length === 0 ? (
+                <div className="px-3 py-6 text-center space-y-1.5">
+                  <p className="text-[11px] text-slate-400">
+                    No files or tables match &ldquo;{fileSearch}&rdquo;
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setFileSearch('')}
+                    className="text-[11px] font-medium text-blue-600 dark:text-blue-400 hover:underline"
+                  >
+                    Clear search
+                  </button>
+                </div>
+              ) : (
+                renderTreeNodes(schemaTree.nodes, 0)
+              )}
+            </div>
+
+            {/* Generated Merged Schema Output */}
+            <div className="border-t border-slate-200 dark:border-slate-800 p-1.5 bg-slate-100/60 dark:bg-slate-900/80">
+              <div className="px-1.5 pb-1 text-[9.5px] font-semibold uppercase tracking-wider text-slate-400">
+                Generated Output
+              </div>
+              <button
+                type="button"
+                onClick={() => onSelectFile?.(MERGED_SCHEMA_VIEW_ID)}
+                title="Preview on-the-fly merged schema.dbml (local only, never pushed to GitHub)"
+                className={`w-full px-2 py-1.5 rounded flex items-center justify-between gap-1.5 text-[11px] font-mono transition-colors ${
+                  isMergedPreview
+                    ? 'bg-emerald-50 dark:bg-emerald-950/60 border border-emerald-500/60 text-emerald-800 dark:text-emerald-200 font-semibold'
+                    : 'border border-transparent text-slate-600 dark:text-slate-300 hover:bg-slate-200/70 dark:hover:bg-slate-800/70'
+                }`}
+              >
+                <span className="flex items-center gap-1.5 min-w-0">
+                  <Layers className="w-3.5 h-3.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                  <span className="truncate">schema.dbml</span>
+                </span>
+                <span className="text-[9.5px] font-sans text-emerald-700 dark:text-emerald-300 shrink-0">
+                  merged
+                </span>
+              </button>
+            </div>
+          </aside>
+        )}
+
+        {/* Code Column */}
+        <div className="flex-1 flex flex-col min-w-0 min-h-0 relative">
+          {/* Read-only Merged Preview Info Banner */}
+          {isMergedPreview && (
+            <div className="shrink-0 px-2.5 py-1.5 border-b border-emerald-200/80 dark:border-emerald-900/60 bg-emerald-50/70 dark:bg-emerald-950/30 flex flex-wrap items-center justify-between gap-2 text-[11px]">
+              <span className="text-emerald-900 dark:text-emerald-200">
+                Generated on the fly from {sortedSchemaFiles.length} files in{' '}
+                <code className="font-mono font-semibold">{schemaFolder}/</code> · Read-only (never pushed to GitHub)
+              </span>
+              <div className="flex items-center gap-1.5 shrink-0">
+                {onJumpToMergedLine && (
+                  <button
+                    type="button"
+                    onClick={handleJumpFromMergedCursor}
+                    className="px-2 py-0.5 rounded border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-slate-900 text-emerald-800 dark:text-emerald-200 font-medium hover:bg-emerald-50"
+                  >
+                    Jump to Source File
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={handleCopyMergeScript}
+                  className="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-slate-900 text-emerald-800 dark:text-emerald-200 font-medium hover:bg-emerald-50"
+                >
+                  {copiedScript ? (
+                    <Check className="w-3 h-3" />
+                  ) : (
+                    <Copy className="w-3 h-3" />
+                  )}
+                  <span>
+                    {copiedScript ? 'Copied build-schema.sh' : 'Copy build-schema.sh'}
+                  </span>
+                </button>
+              </div>
+            </div>
+          )}
 
       {/* Find & Replace Widget */}
       {findOpen && (
@@ -1413,6 +2109,10 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
 
       {/* Editor Body with Shared-Scroll Synchronized Syntax Highlighting */}
       <div
+        ref={codeAreaRef}
+        className="relative flex-1 flex min-h-0 overflow-hidden"
+      >
+      <div
         ref={scrollContainerRef}
         onScroll={() => {
           if (acState.open) setAcState((s) => ({ ...s, open: false }));
@@ -1557,8 +2257,14 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
           <textarea
             ref={textareaRef}
             value={value}
+            readOnly={isMergedPreview}
             onChange={handleChange}
             onClick={() => setAcState((s) => (s.open ? { ...s, open: false } : s))}
+            onDoubleClick={() => {
+              if (isMergedPreview && onJumpToMergedLine) {
+                handleJumpFromMergedCursor();
+              }
+            }}
             onBlur={() => {
               window.setTimeout(() => {
                 setAcState((s) => (s.open ? { ...s, open: false } : s));
@@ -1635,6 +2341,7 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
           </div>
         </div>
       )}
+      </div>
 
       {/* Expandable Error Checking Diagnostics Panel */}
       {errors.length > 0 && problemsOpen && (
@@ -1658,30 +2365,45 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
 
       {/* Diagnostics Footer */}
       <div className="shrink-0 border-t border-slate-200 dark:border-slate-800 px-3 py-1.5 bg-slate-50/80 dark:bg-slate-900/70 text-[11px] flex items-center justify-between gap-2">
-        {errors.length === 0 ? (
-          <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-medium">
-            <CheckCircle2 className="w-3.5 h-3.5" />
-            <span>Valid DBML syntax</span>
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setProblemsOpen((p) => !p)}
-            className="flex items-center gap-1.5 text-rose-600 dark:text-rose-400 font-medium truncate hover:underline"
-            title="Click to view all syntax & reference checks"
-          >
-            <AlertCircle className="w-3.5 h-3.5 shrink-0" />
-            <span className="truncate">
-              {errors.length} {errors.length === 1 ? 'error' : 'errors'} · Ln{' '}
-              {errors[0].line}: {errors[0].message}
-            </span>
-            {problemsOpen ? (
-              <ChevronDown className="w-3.5 h-3.5 shrink-0" />
-            ) : (
-              <ChevronUp className="w-3.5 h-3.5 shrink-0" />
-            )}
-          </button>
-        )}
+        <div className="flex items-center gap-2 min-w-0">
+          {errors.length === 0 ? (
+            <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-medium">
+              <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+              <span>
+                {isModular ? 'Valid DBML (merged check)' : 'Valid DBML syntax'}
+              </span>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setProblemsOpen((p) => !p)}
+              className="flex items-center gap-1.5 text-rose-600 dark:text-rose-400 font-medium truncate hover:underline"
+              title="Click to view all syntax & reference checks"
+            >
+              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">
+                {errors.length} {errors.length === 1 ? 'error' : 'errors'} · Ln{' '}
+                {errors[0].line}: {errors[0].message}
+              </span>
+              {problemsOpen ? (
+                <ChevronDown className="w-3.5 h-3.5 shrink-0" />
+              ) : (
+                <ChevronUp className="w-3.5 h-3.5 shrink-0" />
+              )}
+            </button>
+          )}
+
+          {otherFileErrorsCount > 0 && otherFileErrorEntries[0] && onSelectFile && (
+            <button
+              type="button"
+              onClick={() => onSelectFile(otherFileErrorEntries[0][0])}
+              className="text-[10px] font-mono font-semibold text-amber-700 dark:text-amber-300 hover:underline whitespace-nowrap shrink-0"
+              title={`Jump to ${otherFileErrorEntries[0][0]}`}
+            >
+              {otherFileErrorsCount} in {otherFileErrorEntries[0][0]} →
+            </button>
+          )}
+        </div>
         <button
           type="button"
           onClick={openGotoLine}
@@ -1690,6 +2412,8 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
         >
           {lines.length} lines · {modKey}G
         </button>
+      </div>
+        </div>
       </div>
     </div>
   );

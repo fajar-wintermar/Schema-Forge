@@ -149,6 +149,23 @@ export interface GithubFileLink {
   lastSyncedAt: string;
 }
 
+export interface GithubRepoLink {
+  owner: string;
+  repo: string;
+  branch: string;
+  schemaFolder: string; // e.g. "schema" or "db/schema"
+  lastSyncedAt: string;
+}
+
+export interface SchemaModuleFile {
+  id: string;
+  path: string; // e.g. "schema/users.dbml" or "db/schema/orders.dbml"
+  content: string;
+  sha?: string;
+  lastSyncedContent?: string;
+  lastSyncedAt?: string;
+}
+
 export interface UrlFileLink {
   url: string;
   resolvedUrl?: string;
@@ -160,12 +177,16 @@ export interface WorkspaceProject {
   name: string;
   description: string;
   dbml: string;
+  schemaFiles?: SchemaModuleFile[];
+  activeSchemaFile?: string; // file.path or "__merged__"
+  schemaFolder?: string; // default "schema" or "db/schema"
   tablePositions: Record<string, TablePosition>;
   groupMeta: Record<string, GroupCustomMeta>;
   stickyNotes: StickyNote[];
   detailLevel: DetailLevel;
   versions: SchemaVersion[];
   githubLink?: GithubFileLink;
+  githubRepoLink?: GithubRepoLink;
   urlLink?: UrlFileLink;
   createdAt: string;
   updatedAt: string;

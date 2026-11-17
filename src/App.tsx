@@ -25,6 +25,8 @@ import {
 import {
   DetailLevel,
   GithubFileLink,
+  GithubRepoLink,
+  SchemaModuleFile,
   SchemaVersion,
   StickyNote,
   TableGroupDef,
@@ -36,6 +38,7 @@ import {
 import {
   fetchDbmlFromUrl,
   GithubFileResult,
+  GithubFolderResult,
   RemoteFetchResult,
 } from './utils/remoteService';
 import {
@@ -56,8 +59,21 @@ import {
 } from './utils/dbmlParser';
 import {
   createInitialWorkspace,
+  createModularStarterWorkspace,
   createSaaSTelemetryWorkspace,
 } from './utils/sampleSchemas';
+import {
+  cleanFolderPrefix,
+  detectSchemaFolder,
+  findModuleDefiningTable,
+  findModuleDefiningTableGroup,
+  mapMergedErrorsToModules,
+  mapMergedLineToModule,
+  MERGED_SCHEMA_VIEW_ID,
+  mergeSchemaFiles,
+  normalizeModulePath,
+  splitDbmlIntoModuleFiles,
+} from './utils/schemaModules';
 
 export default function App() {
   const [workspaces, setWorkspaces] = useState<WorkspaceProject[]>([]);
@@ -66,11 +82,11 @@ export default function App() {
   const [darkMode, setDarkMode] = useState(false);
 
   // UI state
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [sidebarTab, setSidebarTab] = useState<SidebarTab>('domains');
   const [viewMode, setViewMode] = useState<ViewMode>('split');
   const [docsNavOpen, setDocsNavOpen] = useState(true);
-  const [editorWidth, setEditorWidth] = useState(410);
+  const [editorWidth, setEditorWidth] = useState(460);
   const [editorState, setEditorState] = useState<
     'normal' | 'maximized' | 'minimized'
   >('normal');
@@ -142,6 +158,7 @@ export default function App() {
         (viewParam === 'split' || viewParam === 'diagram' || viewParam === 'docs')
       ) {
         setViewMode(viewParam);
+        setSidebarOpen(viewParam === 'diagram');
       }
 
       const urlParam = params.get('url')?.trim();
@@ -375,6 +392,88 @@ export default function App() {
     [activeWorkspace?.dbml]
   );
 
+  const isModular = Boolean(
+    activeWorkspace?.schemaFiles && activeWorkspace.schemaFiles.length > 0
+  );
+
+  const activeSchemaFolder = useMemo(() => {
+    if (!activeWorkspace?.schemaFiles || activeWorkspace.schemaFiles.length === 0) {
+      return 'schema';
+    }
+    return cleanFolderPrefix(
+      activeWorkspace.schemaFolder ||
+        detectSchemaFolder(activeWorkspace.schemaFiles)
+    );
+  }, [activeWorkspace?.schemaFiles, activeWorkspace?.schemaFolder]);
+
+  const mergeResult = useMemo(() => {
+    if (!activeWorkspace?.schemaFiles || activeWorkspace.schemaFiles.length === 0) {
+      return null;
+    }
+    return mergeSchemaFiles(activeWorkspace.schemaFiles, {
+      schemaFolder: activeSchemaFolder,
+    });
+  }, [activeWorkspace?.schemaFiles, activeSchemaFolder]);
+
+  const moduleErrors = useMemo(() => {
+    if (!mergeResult) return null;
+    return mapMergedErrorsToModules(parsedSchema.errors, mergeResult.segments);
+  }, [mergeResult, parsedSchema.errors]);
+
+  const activeSchemaFilePath = useMemo(() => {
+    if (!isModular || !activeWorkspace?.schemaFiles) return '';
+    const current = activeWorkspace.activeSchemaFile;
+    if (current === MERGED_SCHEMA_VIEW_ID) return MERGED_SCHEMA_VIEW_ID;
+    if (current && activeWorkspace.schemaFiles.some((f) => f.path === current)) {
+      return current;
+    }
+    const sorted = [...activeWorkspace.schemaFiles].sort((a, b) =>
+      a.path.localeCompare(b.path)
+    );
+    return sorted[0]?.path || '';
+  }, [isModular, activeWorkspace?.schemaFiles, activeWorkspace?.activeSchemaFile]);
+
+  const editorValue = useMemo(() => {
+    if (!activeWorkspace) return '';
+    if (!isModular || !activeWorkspace.schemaFiles) return activeWorkspace.dbml;
+    if (activeSchemaFilePath === MERGED_SCHEMA_VIEW_ID) {
+      return mergeResult?.mergedDbml || activeWorkspace.dbml;
+    }
+    return (
+      activeWorkspace.schemaFiles.find((f) => f.path === activeSchemaFilePath)
+        ?.content || ''
+    );
+  }, [activeWorkspace, isModular, activeSchemaFilePath, mergeResult]);
+
+  const editorErrors = useMemo(() => {
+    if (!isModular) return parsedSchema.errors;
+    if (activeSchemaFilePath === MERGED_SCHEMA_VIEW_ID) {
+      return parsedSchema.errors;
+    }
+    return moduleErrors?.byFile[activeSchemaFilePath] || [];
+  }, [isModular, activeSchemaFilePath, parsedSchema.errors, moduleErrors]);
+
+  const jumpToMergedLine = useCallback(
+    (mergedLine?: number) => {
+      if (!mergedLine) return;
+      if (!isModular || !mergeResult) {
+        setScrollToLine(mergedLine);
+        return;
+      }
+      const mapped = mapMergedLineToModule(mergedLine, mergeResult.segments);
+      if (mapped) {
+        updateActiveWorkspace((ws) => ({
+          ...ws,
+          activeSchemaFile: mapped.path,
+        }));
+        setScrollToLine(mapped.localLine);
+      } else {
+        setScrollToLine(mergedLine);
+      }
+    },
+    [isModular, mergeResult, updateActiveWorkspace]
+  );
+
   const effectiveSelectedDomains = useMemo(() => {
     if (selectedDomains.length === 0) return [];
     const existing = new Set(parsedSchema.tableGroups.map((g) => g.name));
@@ -440,7 +539,7 @@ export default function App() {
     const startX = e.clientX;
     const origWidth = editorWidth;
     const onMove = (ev: MouseEvent) => {
-      const next = Math.min(720, Math.max(260, origWidth + (ev.clientX - startX)));
+      const next = Math.min(900, Math.max(280, origWidth + (ev.clientX - startX)));
       setEditorWidth(next);
     };
     const onUp = () => {
@@ -450,6 +549,55 @@ export default function App() {
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
   };
+
+  const updateModularFiles = useCallback(
+    (
+      updater: (
+        files: SchemaModuleFile[],
+        ws: WorkspaceProject
+      ) => {
+        files: SchemaModuleFile[];
+        activeSchemaFile?: string;
+        schemaFolder?: string;
+      }
+    ) => {
+      updateActiveWorkspace((ws) => {
+        const currentFiles = ws.schemaFiles || [];
+        const next = updater(currentFiles, ws);
+        const folder = cleanFolderPrefix(
+          next.schemaFolder ||
+            ws.schemaFolder ||
+            detectSchemaFolder(next.files)
+        );
+        const merged = mergeSchemaFiles(next.files, { schemaFolder: folder });
+        return {
+          ...ws,
+          schemaFiles: next.files,
+          schemaFolder: folder,
+          activeSchemaFile:
+            next.activeSchemaFile !== undefined
+              ? next.activeSchemaFile
+              : ws.activeSchemaFile,
+          dbml: merged.mergedDbml,
+        };
+      });
+    },
+    [updateActiveWorkspace]
+  );
+
+  const hasGithubChanges = useMemo(() => {
+    if (!activeWorkspace) return false;
+    if (activeWorkspace.githubRepoLink && activeWorkspace.schemaFiles) {
+      return activeWorkspace.schemaFiles.some(
+        (f) =>
+          f.lastSyncedContent === undefined || f.content !== f.lastSyncedContent
+      );
+    }
+    return Boolean(
+      activeWorkspace.githubLink &&
+        activeWorkspace.dbml !== activeWorkspace.githubLink.lastSyncedDbml
+    );
+  }, [activeWorkspace]);
 
   if (loading || !activeWorkspace) {
     return (
@@ -461,7 +609,116 @@ export default function App() {
 
   // Handlers
   const handleDbmlChange = (nextDbml: string) => {
+    if (isModular) {
+      if (activeSchemaFilePath === MERGED_SCHEMA_VIEW_ID) return;
+      updateModularFiles((files) => ({
+        files: files.map((f) =>
+          f.path === activeSchemaFilePath ? { ...f, content: nextDbml } : f
+        ),
+      }));
+      return;
+    }
     updateActiveWorkspace((ws) => ({ ...ws, dbml: nextDbml }));
+  };
+
+  const handleSelectSchemaFile = (path: string) => {
+    setScrollToLine(null);
+    updateActiveWorkspace((ws) => ({
+      ...ws,
+      activeSchemaFile: path,
+    }));
+  };
+
+  const handleCreateSchemaFile = (rawPath: string, content: string) => {
+    const normalizedPath = normalizeModulePath(rawPath, activeSchemaFolder);
+    const existing = activeWorkspace.schemaFiles?.find(
+      (f) => f.path === normalizedPath
+    );
+    if (existing) {
+      handleSelectSchemaFile(existing.path);
+      showToast(`${normalizedPath} already exists`);
+      return;
+    }
+    const created: SchemaModuleFile = {
+      id: `mod_${Date.now()}`,
+      path: normalizedPath,
+      content,
+    };
+    updateModularFiles((files) => ({
+      files: [...files, created],
+      activeSchemaFile: normalizedPath,
+    }));
+    showToast(`Created ${normalizedPath}`);
+  };
+
+  const handleRenameSchemaFile = (oldPath: string, rawNewPath: string) => {
+    const nextPath = normalizeModulePath(rawNewPath, activeSchemaFolder);
+    if (!nextPath || nextPath === oldPath) return;
+    if (activeWorkspace.schemaFiles?.some((f) => f.path === nextPath)) {
+      showToast(`${nextPath} already exists`);
+      return;
+    }
+    updateModularFiles((files) => ({
+      files: files.map((f) =>
+        f.path === oldPath
+          ? {
+              ...f,
+              path: nextPath,
+              sha: undefined,
+              lastSyncedContent: undefined,
+              lastSyncedAt: undefined,
+            }
+          : f
+      ),
+      activeSchemaFile: nextPath,
+    }));
+    showToast(`Renamed ${oldPath} → ${nextPath}`);
+  };
+
+  const handleDeleteSchemaFile = (path: string) => {
+    if (!activeWorkspace.schemaFiles || activeWorkspace.schemaFiles.length <= 1) {
+      return;
+    }
+    const remaining = activeWorkspace.schemaFiles
+      .filter((f) => f.path !== path)
+      .sort((a, b) => a.path.localeCompare(b.path));
+    const nextActive = remaining[0]?.path || MERGED_SCHEMA_VIEW_ID;
+    updateModularFiles(() => ({
+      files: remaining,
+      activeSchemaFile: nextActive,
+    }));
+    showToast(`Deleted ${path}`);
+  };
+
+  const handleEnableModularMode = () => {
+    const folder = activeWorkspace.schemaFolder || 'schema';
+    const splitFiles = splitDbmlIntoModuleFiles(activeWorkspace.dbml, folder);
+    const merged = mergeSchemaFiles(splitFiles, { schemaFolder: folder });
+    const defaultActive =
+      splitFiles.find((f) => !/_project\.dbml$/i.test(f.path))?.path ||
+      splitFiles[0]?.path;
+    updateActiveWorkspace((ws) => ({
+      ...ws,
+      schemaFiles: splitFiles,
+      schemaFolder: folder,
+      activeSchemaFile: defaultActive,
+      githubLink: undefined,
+      dbml: merged.mergedDbml,
+    }));
+    setEditorWidth((w) => Math.max(w, 580));
+    showToast(`Split into ${splitFiles.length} modular files in ${folder}/`);
+  };
+
+  const handleFlattenToSingleFile = () => {
+    const flattened = mergeResult?.mergedDbml || activeWorkspace.dbml;
+    updateActiveWorkspace((ws) => ({
+      ...ws,
+      dbml: flattened,
+      schemaFiles: undefined,
+      activeSchemaFile: undefined,
+      githubRepoLink: undefined,
+    }));
+    showToast('Flattened modular files back into a single schema.dbml');
   };
 
   const handleDetailLevelChange = (level: DetailLevel) => {
@@ -499,6 +756,23 @@ export default function App() {
     tableId: string,
     color: string | null
   ) => {
+    if (isModular) {
+      updateModularFiles((files) => {
+        const ownerMod = findModuleDefiningTable(files, tableId);
+        if (!ownerMod) return { files };
+        return {
+          files: files.map((f) =>
+            f.path === ownerMod.path
+              ? {
+                  ...f,
+                  content: setTableHeaderColorInDbml(f.content, tableId, color),
+                }
+              : f
+          ),
+        };
+      });
+      return;
+    }
     const nextDbml = setTableHeaderColorInDbml(
       activeWorkspace.dbml,
       tableId,
@@ -513,6 +787,96 @@ export default function App() {
     sourceGroup?: string | null,
     keepInSource?: boolean
   ) => {
+    if (isModular) {
+      updateModularFiles((files) => {
+        let nextFiles = [...files];
+        if (targetGroup && keepInSource) {
+          const targetMod = findModuleDefiningTableGroup(nextFiles, targetGroup);
+          if (targetMod) {
+            nextFiles = nextFiles.map((f) =>
+              f.path === targetMod.path
+                ? {
+                    ...f,
+                    content: assignTableToGroupInDbml(
+                      f.content,
+                      tableId,
+                      targetGroup,
+                      parsedSchema
+                    ),
+                  }
+                : f
+            );
+          }
+        } else if (targetGroup) {
+          if (sourceGroup !== undefined) {
+            if (sourceGroup && sourceGroup !== targetGroup) {
+              const srcMod = findModuleDefiningTableGroup(nextFiles, sourceGroup);
+              if (srcMod) {
+                nextFiles = nextFiles.map((f) =>
+                  f.path === srcMod.path
+                    ? {
+                        ...f,
+                        content: removeTableFromGroupInDbml(
+                          f.content,
+                          tableId,
+                          sourceGroup,
+                          parsedSchema
+                        ),
+                      }
+                    : f
+                );
+              }
+            }
+          } else {
+            nextFiles = nextFiles.map((f) => ({
+              ...f,
+              content: removeTableFromGroupInDbml(
+                f.content,
+                tableId,
+                null,
+                parsedSchema
+              ),
+            }));
+          }
+          const targetMod = findModuleDefiningTableGroup(nextFiles, targetGroup);
+          if (targetMod) {
+            nextFiles = nextFiles.map((f) =>
+              f.path === targetMod.path
+                ? {
+                    ...f,
+                    content: assignTableToGroupInDbml(
+                      f.content,
+                      tableId,
+                      targetGroup,
+                      parsedSchema
+                    ),
+                  }
+                : f
+            );
+          }
+        } else {
+          nextFiles = nextFiles.map((f) => ({
+            ...f,
+            content: removeTableFromGroupInDbml(
+              f.content,
+              tableId,
+              sourceGroup ?? null,
+              parsedSchema
+            ),
+          }));
+        }
+        return { files: nextFiles };
+      });
+      if (targetGroup && keepInSource) {
+        showToast(`Shared ${tableId} into "${targetGroup}"`);
+      } else if (targetGroup) {
+        showToast(`Moved ${tableId} to "${targetGroup}"`);
+      } else {
+        showToast(`Removed ${tableId} from domain`);
+      }
+      return;
+    }
+
     let nextDbml: string;
     if (targetGroup && keepInSource) {
       nextDbml = assignTableToGroupInDbml(
@@ -544,6 +908,30 @@ export default function App() {
   };
 
   const handleRemoveTableFromGroup = (tableId: string, groupName: string) => {
+    if (isModular) {
+      updateModularFiles((files) => {
+        const mod = findModuleDefiningTableGroup(files, groupName);
+        if (!mod) return { files };
+        return {
+          files: files.map((f) =>
+            f.path === mod.path
+              ? {
+                  ...f,
+                  content: removeTableFromGroupInDbml(
+                    f.content,
+                    tableId,
+                    groupName,
+                    parsedSchema
+                  ),
+                }
+              : f
+          ),
+        };
+      });
+      showToast(`Removed ${tableId} from "${groupName}"`);
+      return;
+    }
+
     const nextDbml = removeTableFromGroupInDbml(
       activeWorkspace.dbml,
       tableId,
@@ -555,6 +943,39 @@ export default function App() {
   };
 
   const handleSetTableGroups = (tableId: string, groupNames: string[]) => {
+    if (isModular) {
+      const targetSet = new Set(groupNames);
+      updateModularFiles((files) => {
+        let nextFiles = [...files];
+        for (const g of parsedSchema.tableGroups) {
+          const hasTable = g.tables.includes(tableId);
+          const shouldHave = targetSet.has(g.name);
+          if (hasTable === shouldHave) continue;
+          const mod = findModuleDefiningTableGroup(nextFiles, g.name);
+          if (!mod) continue;
+          const nextTables = shouldHave
+            ? [...g.tables, tableId]
+            : g.tables.filter((t) => t !== tableId);
+          nextFiles = nextFiles.map((f) =>
+            f.path === mod.path
+              ? {
+                  ...f,
+                  content: upsertTableGroupInDbml(
+                    f.content,
+                    g.name,
+                    nextTables,
+                    g.color,
+                    g.note
+                  ),
+                }
+              : f
+          );
+        }
+        return { files: nextFiles };
+      });
+      return;
+    }
+
     const nextDbml = setTableGroupsForTableInDbml(
       activeWorkspace.dbml,
       tableId,
@@ -565,6 +986,34 @@ export default function App() {
   };
 
   const handleReorderGroups = (orderedNames: string[]) => {
+    if (isModular) {
+      updateModularFiles((files) => {
+        const groupMap = new Map(parsedSchema.tableGroups.map((g) => [g.name, g]));
+        const cleaned = files.map((f) => {
+          let c = f.content;
+          for (const g of parsedSchema.tableGroups) {
+            c = deleteTableGroupInDbml(c, g.name);
+          }
+          return { ...f, content: c };
+        });
+        const targetMod =
+          cleaned.find((f) => /_project\.dbml$/i.test(f.path)) || cleaned[0];
+        if (!targetMod) return { files: cleaned };
+        let c = targetMod.content;
+        for (const name of orderedNames) {
+          const g = groupMap.get(name);
+          if (!g) continue;
+          c = upsertTableGroupInDbml(c, g.name, g.tables, g.color, g.note);
+        }
+        return {
+          files: cleaned.map((f) =>
+            f.path === targetMod.path ? { ...f, content: c } : f
+          ),
+        };
+      });
+      return;
+    }
+
     const nextDbml = reorderTableGroupsInDbml(
       activeWorkspace.dbml,
       orderedNames,
@@ -579,6 +1028,29 @@ export default function App() {
   ) => {
     const g = parsedSchema.tableGroups.find((gr) => gr.name === groupName);
     if (!g) return;
+    if (isModular) {
+      updateModularFiles((files) => {
+        const mod = findModuleDefiningTableGroup(files, groupName);
+        if (!mod) return { files };
+        return {
+          files: files.map((f) =>
+            f.path === mod.path
+              ? {
+                  ...f,
+                  content: upsertTableGroupInDbml(
+                    f.content,
+                    g.name,
+                    orderedTables,
+                    g.color,
+                    g.note
+                  ),
+                }
+              : f
+          ),
+        };
+      });
+      return;
+    }
     const nextDbml = upsertTableGroupInDbml(
       activeWorkspace.dbml,
       g.name,
@@ -596,6 +1068,40 @@ export default function App() {
     tables: string[];
     oldName?: string;
   }) => {
+    if (isModular) {
+      updateModularFiles((files) => {
+        const mod = findModuleDefiningTableGroup(
+          files,
+          data.oldName || data.name
+        );
+        if (!mod) return { files };
+        return {
+          files: files.map((f) =>
+            f.path === mod.path
+              ? {
+                  ...f,
+                  content: upsertTableGroupInDbml(
+                    f.content,
+                    data.name,
+                    data.tables,
+                    data.color,
+                    data.note,
+                    data.oldName
+                  ),
+                }
+              : f
+          ),
+        };
+      });
+      setGroupModalState({ open: false, group: null });
+      showToast(
+        data.oldName
+          ? `Updated domain "${data.name}"`
+          : `Created domain "${data.name}"`
+      );
+      return;
+    }
+
     // Preserve memberships in all other groups so tables can belong to multiple domains
     const nextDbml = upsertTableGroupInDbml(
       activeWorkspace.dbml,
@@ -615,8 +1121,23 @@ export default function App() {
   };
 
   const handleDeleteGroup = (groupName: string) => {
-    const nextDbml = deleteTableGroupInDbml(activeWorkspace.dbml, groupName);
     setSelectedDomains((prev) => prev.filter((d) => d !== groupName));
+    if (isModular) {
+      updateModularFiles((files) => {
+        const mod = findModuleDefiningTableGroup(files, groupName);
+        if (!mod) return { files };
+        return {
+          files: files.map((f) =>
+            f.path === mod.path
+              ? { ...f, content: deleteTableGroupInDbml(f.content, groupName) }
+              : f
+          ),
+        };
+      });
+      showToast(`Removed domain grouping "${groupName}"`);
+      return;
+    }
+    const nextDbml = deleteTableGroupInDbml(activeWorkspace.dbml, groupName);
     updateActiveWorkspace((ws) => ({ ...ws, dbml: nextDbml }));
     showToast(`Removed domain grouping "${groupName}"`);
   };
@@ -699,16 +1220,27 @@ export default function App() {
       createdAt: new Date().toISOString(),
       isPublished: false,
     };
-    updateActiveWorkspace((ws) => ({
-      ...ws,
-      dbml: ver.dbml,
-      tablePositions:
-        Object.keys(ver.tablePositions).length > 0
-          ? ver.tablePositions
-          : computeAutoLayout(parseDbml(ver.dbml), ws.detailLevel),
-      stickyNotes: ver.stickyNotes || ws.stickyNotes,
-      versions: [backup, ...ws.versions],
-    }));
+    updateActiveWorkspace((ws) => {
+      const nextSchemaFiles =
+        ws.schemaFiles && ws.schemaFiles.length > 0
+          ? splitDbmlIntoModuleFiles(ver.dbml, ws.schemaFolder || 'schema')
+          : undefined;
+      return {
+        ...ws,
+        dbml: ver.dbml,
+        schemaFiles: nextSchemaFiles,
+        activeSchemaFile:
+          nextSchemaFiles && nextSchemaFiles.length > 0
+            ? nextSchemaFiles[0].path
+            : undefined,
+        tablePositions:
+          Object.keys(ver.tablePositions).length > 0
+            ? ver.tablePositions
+            : computeAutoLayout(parseDbml(ver.dbml), ws.detailLevel),
+        stickyNotes: ver.stickyNotes || ws.stickyNotes,
+        versions: [backup, ...ws.versions],
+      };
+    });
     setFocusRequest({ type: 'fit', nonce: Date.now() });
     showToast(`Reverted schema to ${ver.tag}`);
   };
@@ -725,11 +1257,25 @@ export default function App() {
   const handleImportDbml = (nextDbml: string) => {
     const nextParsed = parseDbml(nextDbml);
     const nextPos = computeAutoLayout(nextParsed, activeWorkspace.detailLevel);
-    updateActiveWorkspace((ws) => ({
-      ...ws,
-      dbml: nextDbml,
-      tablePositions: nextPos,
-    }));
+    updateActiveWorkspace((ws) => {
+      if (ws.schemaFiles && ws.schemaFiles.length > 0) {
+        const folder = ws.schemaFolder || 'schema';
+        const nextFiles = splitDbmlIntoModuleFiles(nextDbml, folder);
+        const merged = mergeSchemaFiles(nextFiles, { schemaFolder: folder });
+        return {
+          ...ws,
+          schemaFiles: nextFiles,
+          activeSchemaFile: nextFiles[0]?.path,
+          dbml: merged.mergedDbml,
+          tablePositions: nextPos,
+        };
+      }
+      return {
+        ...ws,
+        dbml: nextDbml,
+        tablePositions: nextPos,
+      };
+    });
     setFocusRequest({ type: 'fit', nonce: Date.now() });
     showToast(
       `Imported ${nextParsed.tables.length} tables and ${nextParsed.refs.length} relationships`
@@ -801,6 +1347,9 @@ export default function App() {
       updateActiveWorkspace((ws) => ({
         ...ws,
         dbml: result.content,
+        schemaFiles: undefined,
+        activeSchemaFile: undefined,
+        githubRepoLink: undefined,
         tablePositions: nextPos,
         urlLink,
         githubLink,
@@ -865,6 +1414,9 @@ export default function App() {
       updateActiveWorkspace((ws) => ({
         ...ws,
         dbml: file.content,
+        schemaFiles: undefined,
+        activeSchemaFile: undefined,
+        githubRepoLink: undefined,
         tablePositions: nextPos,
         githubLink,
       }));
@@ -897,6 +1449,124 @@ export default function App() {
       showToast(`Pulled latest ${link.path} from ${link.branch}`);
     } else {
       showToast(`Pushed ${link.path} to ${link.owner}/${link.repo} (${link.branch})`);
+    }
+  };
+
+  const handleLoadGithubFolder = async (
+    result: GithubFolderResult,
+    openInNewWorkspace: boolean
+  ) => {
+    const now = new Date().toISOString();
+    const schemaFiles: SchemaModuleFile[] = result.files.map((f, idx) => ({
+      id: `mod_gh_${Date.now()}_${idx}`,
+      path: f.path,
+      content: f.content,
+      sha: f.sha,
+      lastSyncedContent: f.content,
+      lastSyncedAt: now,
+    }));
+    const merged = mergeSchemaFiles(schemaFiles, { schemaFolder: result.folder });
+    const nextParsed = parseDbml(merged.mergedDbml);
+    const nextPos = computeAutoLayout(nextParsed, activeWorkspace.detailLevel);
+    const repoLink: GithubRepoLink = {
+      owner: result.owner,
+      repo: result.repo,
+      branch: result.branch,
+      schemaFolder: result.folder,
+      lastSyncedAt: now,
+    };
+    const defaultActive =
+      schemaFiles.find((f) => !/_project\.dbml$/i.test(f.path))?.path ||
+      schemaFiles[0]?.path;
+
+    if (openInNewWorkspace) {
+      const newWs: WorkspaceProject = {
+        id: `ws_gh_folder_${Date.now()}`,
+        name: `${result.repo} · ${result.folder}/`,
+        description: `Modular GitHub folder: ${result.owner}/${result.repo}/${result.folder}/ (${result.branch})`,
+        dbml: merged.mergedDbml,
+        schemaFiles,
+        activeSchemaFile: defaultActive,
+        schemaFolder: result.folder,
+        tablePositions: nextPos,
+        groupMeta: {},
+        stickyNotes: [],
+        detailLevel: activeWorkspace.detailLevel,
+        versions: [
+          {
+            id: `ver_${Date.now()}`,
+            tag: 'v1.0.0',
+            title: `Loaded ${result.folder}/ (${schemaFiles.length} files)`,
+            description: `${result.owner}/${result.repo}@${result.branch}`,
+            dbml: merged.mergedDbml,
+            tablePositions: nextPos,
+            stickyNotes: [],
+            createdAt: now,
+            isPublished: true,
+          },
+        ],
+        githubRepoLink: repoLink,
+        createdAt: now,
+        updatedAt: now,
+      };
+      await saveWorkspace(newWs);
+      setWorkspaces((prev) => [newWs, ...prev]);
+      handleSelectWorkspace(newWs.id);
+    } else {
+      updateActiveWorkspace((ws) => ({
+        ...ws,
+        dbml: merged.mergedDbml,
+        schemaFiles,
+        activeSchemaFile: defaultActive,
+        schemaFolder: result.folder,
+        tablePositions: nextPos,
+        githubLink: undefined,
+        githubRepoLink: repoLink,
+      }));
+      setFocusRequest({ type: 'fit', nonce: Date.now() });
+    }
+    showToast(
+      `Loaded ${schemaFiles.length} modular files from ${result.owner}/${result.repo}/${result.folder}/`
+    );
+  };
+
+  const handleSyncedGithubFolder = (
+    repoLink: GithubRepoLink,
+    updatedFiles: SchemaModuleFile[],
+    replaceAll = false
+  ) => {
+    const merged = mergeSchemaFiles(updatedFiles, {
+      schemaFolder: repoLink.schemaFolder,
+    });
+    updateActiveWorkspace((ws) => {
+      const nextParsed = parseDbml(merged.mergedDbml);
+      const nextActive =
+        ws.activeSchemaFile === MERGED_SCHEMA_VIEW_ID ||
+        updatedFiles.some((f) => f.path === ws.activeSchemaFile)
+          ? ws.activeSchemaFile
+          : updatedFiles[0]?.path;
+      return {
+        ...ws,
+        schemaFiles: updatedFiles,
+        schemaFolder: repoLink.schemaFolder,
+        activeSchemaFile: nextActive,
+        dbml: merged.mergedDbml,
+        githubLink: undefined,
+        githubRepoLink: repoLink,
+        tablePositions: replaceAll
+          ? computeAutoLayout(nextParsed, ws.detailLevel)
+          : ws.tablePositions,
+      };
+    });
+    if (replaceAll) {
+      setFocusRequest({ type: 'fit', nonce: Date.now() });
+      showToast(
+        `Pulled ${updatedFiles.length} latest files from ${repoLink.schemaFolder}/ (${repoLink.branch})`
+      );
+    } else {
+      showToast(
+        `Pushed ${repoLink.schemaFolder}/ modules to ${repoLink.owner}/${repoLink.repo} (${repoLink.branch})`
+      );
     }
   };
 
@@ -952,6 +1622,16 @@ export default function App() {
     showToast('Loaded Multi-Tenant SaaS Telemetry template');
   };
 
+  const handleCreateModularWorkspace = async () => {
+    const ws = createModularStarterWorkspace();
+    await saveWorkspace(ws);
+    setWorkspaces((prev) => [ws, ...prev]);
+    handleSelectWorkspace(ws.id);
+    setEditorWidth((w) => Math.max(w, 580));
+    setWorkspacesModalOpen(false);
+    showToast('Created modular workspace with schema/*.dbml');
+  };
+
   const handleDeleteWorkspace = async (id: string) => {
     await deleteWorkspace(id);
     setWorkspaces((prev) => {
@@ -976,8 +1656,13 @@ export default function App() {
 
   const handleChangeViewMode = (mode: ViewMode) => {
     setViewMode(mode);
-    if (mode === 'split' && editorState !== 'normal') {
-      setEditorState('normal');
+    if (mode === 'split') {
+      setSidebarOpen(false);
+      if (editorState !== 'normal') {
+        setEditorState('normal');
+      }
+    } else if (mode === 'diagram') {
+      setSidebarOpen(true);
     }
   };
 
@@ -997,7 +1682,7 @@ export default function App() {
       if (viewMode === 'docs') setViewMode('split');
       if (editorState === 'maximized') setEditorState('normal');
       setSelectedDomains([res.groupName]);
-      if (res.line) setScrollToLine(res.line);
+      if (res.line) jumpToMergedLine(res.line);
       setFocusRequest({ type: 'group', id: res.groupName, nonce: Date.now() });
       showToast(`Showing domain "${res.groupName}"`);
       return;
@@ -1032,7 +1717,7 @@ export default function App() {
         showToast(`Focused table ${res.tableId}`);
       }
 
-      if (res.line) setScrollToLine(res.line);
+      if (res.line) jumpToMergedLine(res.line);
       setFocusRequest({ type: 'table', id: res.tableId, nonce: Date.now() });
     }
   };
@@ -1058,10 +1743,8 @@ export default function App() {
         onOpenSaveVersion={() => setSaveVersionOpen(true)}
         onOpenShortcuts={() => setShortcutsOpen(true)}
         githubLink={activeWorkspace.githubLink}
-        hasGithubChanges={Boolean(
-          activeWorkspace.githubLink &&
-            activeWorkspace.dbml !== activeWorkspace.githubLink.lastSyncedDbml
-        )}
+        githubRepoLink={activeWorkspace.githubRepoLink}
+        hasGithubChanges={hasGithubChanges}
         modKey={modKey}
         darkMode={darkMode}
         onToggleDarkMode={() => setDarkMode((d) => !d)}
@@ -1103,7 +1786,7 @@ export default function App() {
             onSelectTable={(id) => {
               setSelectedTableId(id);
               const t = parsedSchema.tables.find((tb) => tb.id === id);
-              if (t?.line) setScrollToLine(t.line);
+              if (t?.line) jumpToMergedLine(t.line);
               setFocusRequest({ type: 'table', id, nonce: Date.now() });
             }}
             onFocusGroupOnCanvas={(g) => {
@@ -1146,9 +1829,9 @@ export default function App() {
           ) : viewMode === 'split' && editorState === 'maximized' ? (
             <div className="flex-1 h-full min-w-0">
               <DbmlEditor
-                value={activeWorkspace.dbml}
+                value={editorValue}
                 onChange={handleDbmlChange}
-                errors={parsedSchema.errors}
+                errors={editorErrors}
                 scrollToLine={scrollToLine}
                 enumNames={parsedSchema.enums.map((e) => e.name)}
                 tables={parsedSchema.tables}
@@ -1156,6 +1839,17 @@ export default function App() {
                 onToggleMaximize={() => setEditorState('normal')}
                 onMinimize={() => setEditorState('minimized')}
                 modKey={modKey}
+                schemaFiles={activeWorkspace.schemaFiles}
+                activeFilePath={activeSchemaFilePath}
+                schemaFolder={activeSchemaFolder}
+                allErrorsByFile={moduleErrors?.byFile}
+                onSelectFile={handleSelectSchemaFile}
+                onCreateFile={handleCreateSchemaFile}
+                onRenameFile={handleRenameSchemaFile}
+                onDeleteFile={handleDeleteSchemaFile}
+                onEnableModularMode={handleEnableModularMode}
+                onFlattenToSingleFile={handleFlattenToSingleFile}
+                onJumpToMergedLine={jumpToMergedLine}
               />
             </div>
           ) : (
@@ -1187,7 +1881,11 @@ export default function App() {
                     title={`Click to expand DBML editor (${modKey}\\)`}
                     className="flex-1 flex items-center justify-center text-[11px] font-mono font-medium tracking-widest text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 [writing-mode:vertical-rl] rotate-180"
                   >
-                    schema.dbml
+                    {isModular
+                      ? activeSchemaFilePath === MERGED_SCHEMA_VIEW_ID
+                        ? 'schema.dbml (merged)'
+                        : activeSchemaFilePath
+                      : 'schema.dbml'}
                   </button>
                   {parsedSchema.errors.length > 0 && (
                     <span
@@ -1207,9 +1905,9 @@ export default function App() {
                     className="shrink-0 h-full hidden md:block"
                   >
                     <DbmlEditor
-                      value={activeWorkspace.dbml}
+                      value={editorValue}
                       onChange={handleDbmlChange}
-                      errors={parsedSchema.errors}
+                      errors={editorErrors}
                       scrollToLine={scrollToLine}
                       enumNames={parsedSchema.enums.map((e) => e.name)}
                       tables={parsedSchema.tables}
@@ -1217,6 +1915,17 @@ export default function App() {
                       onToggleMaximize={() => setEditorState('maximized')}
                       onMinimize={() => setEditorState('minimized')}
                       modKey={modKey}
+                      schemaFiles={activeWorkspace.schemaFiles}
+                      activeFilePath={activeSchemaFilePath}
+                      schemaFolder={activeSchemaFolder}
+                      allErrorsByFile={moduleErrors?.byFile}
+                      onSelectFile={handleSelectSchemaFile}
+                      onCreateFile={handleCreateSchemaFile}
+                      onRenameFile={handleRenameSchemaFile}
+                      onDeleteFile={handleDeleteSchemaFile}
+                      onEnableModularMode={handleEnableModularMode}
+                      onFlattenToSingleFile={handleFlattenToSingleFile}
+                      onJumpToMergedLine={jumpToMergedLine}
                     />
                   </div>
                   <div
@@ -1249,7 +1958,7 @@ export default function App() {
                   }
                   if (id) {
                     const t = parsedSchema.tables.find((tb) => tb.id === id);
-                    if (t?.line) setScrollToLine(t.line);
+                    if (t?.line) jumpToMergedLine(t.line);
                   }
                 }}
                 onChangeTableHeaderColor={handleChangeTableHeaderColor}
@@ -1289,7 +1998,7 @@ export default function App() {
               onJumpToCode={(line) => {
                 if (viewMode !== 'split') setViewMode('split');
                 if (editorState === 'minimized') setEditorState('normal');
-                if (line) setScrollToLine(line);
+                if (line) jumpToMergedLine(line);
               }}
               onAddLinkedStickyNote={(tId) => {
                 const pos = activeWorkspace.tablePositions[tId] || {
@@ -1356,6 +2065,8 @@ export default function App() {
           workspace={activeWorkspace}
           onLoadGithubFile={handleLoadGithubFile}
           onSyncedGithubFile={handleSyncedGithubFile}
+          onLoadGithubFolder={handleLoadGithubFolder}
+          onSyncedGithubFolder={handleSyncedGithubFolder}
           onClose={() => setGithubModalOpen(false)}
         />
       )}
@@ -1367,6 +2078,7 @@ export default function App() {
           onSelectWorkspace={handleSelectWorkspace}
           onCreateBlank={handleCreateBlankWorkspace}
           onLoadSampleTelemetry={handleLoadSampleTelemetry}
+          onCreateModularProject={handleCreateModularWorkspace}
           onDeleteWorkspace={handleDeleteWorkspace}
           onClose={() => setWorkspacesModalOpen(false)}
         />
