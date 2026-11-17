@@ -24,7 +24,7 @@ import {
   Table2,
   X,
 } from 'lucide-react';
-import { ParsedSchema, RefRelation, TableDef } from '../types/schema';
+import { ParsedSchema, RefRelation, StickyNote, TableDef } from '../types/schema';
 import {
   MarkdownContent,
   extractMarkdownHeadings,
@@ -34,6 +34,7 @@ import {
 
 interface DocsViewProps {
   schema: ParsedSchema;
+  stickyNotes?: StickyNote[];
   navOpen: boolean;
   onToggleNav: () => void;
   modKey?: string;
@@ -43,8 +44,37 @@ interface DocsViewProps {
 }
 
 type TreeFilterMode = 'all' | 'domain';
+type NoteCategory =
+  | 'all'
+  | 'project'
+  | 'group'
+  | 'standalone'
+  | 'table'
+  | 'column'
+  | 'enum'
+  | 'sticky';
+
+interface DocsNoteEntry {
+  id: string;
+  category: Exclude<NoteCategory, 'all'>;
+  categoryLabel: string;
+  title: string;
+  subtitle?: string;
+  content: string;
+  accentColor?: string;
+  line?: number;
+  target?:
+    | { kind: 'overview' }
+    | { kind: 'group'; groupName: string }
+    | { kind: 'note'; noteId: string }
+    | { kind: 'table'; tableId: string }
+    | { kind: 'enums' };
+}
+
 type DocsSection =
   | { kind: 'overview' }
+  | { kind: 'groups' }
+  | { kind: 'notes' }
   | { kind: 'enums' }
   | { kind: 'relationships' }
   | { kind: 'note'; noteId: string }
@@ -225,6 +255,7 @@ const ReadmeNoteCard: React.FC<ReadmeNoteCardProps> = ({
 
 export const DocsView: React.FC<DocsViewProps> = ({
   schema,
+  stickyNotes = [],
   navOpen,
   onToggleNav,
   modKey = '⌘',
@@ -241,13 +272,16 @@ export const DocsView: React.FC<DocsViewProps> = ({
   const [expandedTreeTables, setExpandedTreeTables] = useState<Record<string, boolean>>({});
   const mainPaneRef = useRef<HTMLDivElement | null>(null);
 
-  // Pagination states for Overview & Relationships
+  // Pagination & search states
   const [overviewPage, setOverviewPage] = useState(1);
   const [overviewPageSize, setOverviewPageSize] = useState(20);
   const [relPage, setRelPage] = useState(1);
   const [relPageSize, setRelPageSize] = useState(25);
   const [relSearch, setRelSearch] = useState('');
   const [enumSearch, setEnumSearch] = useState('');
+  const [notesSearch, setNotesSearch] = useState('');
+  const [noteCategory, setNoteCategory] = useState<NoteCategory>('all');
+  const [groupsSearch, setGroupsSearch] = useState('');
 
   // Reset to overview if active table, note, or group no longer exists after workspace switch
   useEffect(() => {
@@ -464,6 +498,163 @@ export const DocsView: React.FC<DocsViewProps> = ({
     [schema.tables]
   );
 
+  const allNoteEntries = useMemo<DocsNoteEntry[]>(() => {
+    const entries: DocsNoteEntry[] = [];
+
+    if (schema.project.note?.trim()) {
+      entries.push({
+        id: 'note_project',
+        category: 'project',
+        categoryLabel: 'Project README',
+        title: schema.project.name || 'Project Note',
+        subtitle: schema.project.databaseType || 'Database Project',
+        content: schema.project.note,
+        target: { kind: 'overview' },
+      });
+    }
+
+    for (const g of schema.tableGroups) {
+      if (!g.note?.trim()) continue;
+      entries.push({
+        id: `note_group_${g.name}`,
+        category: 'group',
+        categoryLabel: 'TableGroup',
+        title: g.name,
+        subtitle: `${g.tables.length} ${g.tables.length === 1 ? 'table' : 'tables'}`,
+        content: g.note,
+        accentColor: g.color || '#2563EB',
+        line: g.line,
+        target: { kind: 'group', groupName: g.name },
+      });
+    }
+
+    for (const n of schema.notes) {
+      if (!n.content?.trim()) continue;
+      entries.push({
+        id: `note_standalone_${n.id}`,
+        category: 'standalone',
+        categoryLabel: 'Project Note',
+        title: n.name,
+        content: n.content,
+        line: n.line,
+        target: { kind: 'note', noteId: n.id },
+      });
+    }
+
+    for (const t of schema.tables) {
+      const doms = domainsByTable.get(t.id) || [];
+      if (t.note?.trim()) {
+        entries.push({
+          id: `note_table_${t.id}`,
+          category: 'table',
+          categoryLabel: 'Table',
+          title: t.id,
+          subtitle: doms.length > 0 ? doms.join(', ') : undefined,
+          content: t.note,
+          accentColor: t.headerColor,
+          line: t.line,
+          target: { kind: 'table', tableId: t.id },
+        });
+      }
+      for (const c of t.columns) {
+        if (!c.note?.trim()) continue;
+        entries.push({
+          id: `note_col_${t.id}_${c.name}`,
+          category: 'column',
+          categoryLabel: 'Column',
+          title: `${t.id}.${c.name}`,
+          subtitle: c.type,
+          content: c.note,
+          accentColor: t.headerColor,
+          line: c.line,
+          target: { kind: 'table', tableId: t.id },
+        });
+      }
+    }
+
+    for (const en of schema.enums) {
+      for (const v of en.values) {
+        if (!v.note?.trim()) continue;
+        entries.push({
+          id: `note_enum_${en.id}_${v.name}`,
+          category: 'enum',
+          categoryLabel: 'Enum Value',
+          title: `${en.id}.${v.name}`,
+          content: v.note,
+          target: { kind: 'enums' },
+        });
+      }
+    }
+
+    for (const sn of stickyNotes) {
+      if (!sn.content?.trim() && !sn.title?.trim()) continue;
+      let target: DocsNoteEntry['target'];
+      let subtitle = sn.author || 'Canvas sticky note';
+      if (sn.linkedTarget?.startsWith('table:')) {
+        const tableId = sn.linkedTarget.slice(6);
+        target = { kind: 'table', tableId };
+        subtitle = `Linked to table ${tableId}`;
+      } else if (sn.linkedTarget?.startsWith('group:')) {
+        const groupName = sn.linkedTarget.slice(6);
+        target = { kind: 'group', groupName };
+        subtitle = `Linked to domain ${groupName}`;
+      }
+      entries.push({
+        id: `note_sticky_${sn.id}`,
+        category: 'sticky',
+        categoryLabel: 'Sticky Note',
+        title: sn.title || 'Sticky Note',
+        subtitle,
+        content: sn.content || sn.title,
+        target,
+      });
+    }
+
+    return entries;
+  }, [schema, domainsByTable, stickyNotes]);
+
+  const noteCategoryCounts = useMemo(() => {
+    const counts: Record<NoteCategory, number> = {
+      all: allNoteEntries.length,
+      project: 0,
+      group: 0,
+      standalone: 0,
+      table: 0,
+      column: 0,
+      enum: 0,
+      sticky: 0,
+    };
+    for (const e of allNoteEntries) {
+      counts[e.category]++;
+    }
+    return counts;
+  }, [allNoteEntries]);
+
+  const filteredNoteEntries = useMemo(() => {
+    const nqStr = notesSearch.trim().toLowerCase();
+    return allNoteEntries.filter((entry) => {
+      if (noteCategory !== 'all' && entry.category !== noteCategory) return false;
+      if (!nqStr) return true;
+      return (
+        entry.title.toLowerCase().includes(nqStr) ||
+        (entry.subtitle || '').toLowerCase().includes(nqStr) ||
+        entry.content.toLowerCase().includes(nqStr) ||
+        entry.categoryLabel.toLowerCase().includes(nqStr)
+      );
+    });
+  }, [allNoteEntries, noteCategory, notesSearch]);
+
+  const filteredTableGroups = useMemo(() => {
+    const gq = groupsSearch.trim().toLowerCase();
+    if (!gq) return visibleGroups;
+    return visibleGroups.filter(
+      (g) =>
+        g.name.toLowerCase().includes(gq) ||
+        (g.note || '').toLowerCase().includes(gq) ||
+        g.tables.some((t) => t.toLowerCase().includes(gq))
+    );
+  }, [visibleGroups, groupsSearch]);
+
   const activeTableId = section.kind === 'table' ? section.tableId : null;
   const activeTable = activeTableId ? tableMap.get(activeTableId) || null : null;
   const activeNote =
@@ -652,6 +843,42 @@ export const DocsView: React.FC<DocsViewProps> = ({
               </span>
               <span className="text-[11px] text-slate-400 tabular-nums">
                 {orderedAllTables.length}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSection({ kind: 'groups' })}
+              className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs transition-colors ${
+                section.kind === 'groups'
+                  ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 font-semibold'
+                  : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/70'
+              }`}
+            >
+              <span className="flex items-center gap-2 truncate">
+                <Layers className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">Table Groups</span>
+              </span>
+              <span className="text-[11px] text-slate-400 tabular-nums">
+                {schema.tableGroups.length}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setSection({ kind: 'notes' })}
+              className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs transition-colors ${
+                section.kind === 'notes'
+                  ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 font-semibold'
+                  : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/70'
+              }`}
+            >
+              <span className="flex items-center gap-2 truncate">
+                <BookOpen className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">All Notes</span>
+              </span>
+              <span className="text-[11px] text-slate-400 tabular-nums">
+                {allNoteEntries.length}
               </span>
             </button>
 
@@ -854,24 +1081,28 @@ export const DocsView: React.FC<DocsViewProps> = ({
                             {matchingTables.length}
                           </span>
                         </button>
-                        {group.note && (
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setSection({ kind: 'group', groupName: group.name });
-                              mainPaneRef.current?.scrollTo({ top: 0 });
-                            }}
-                            title={`Open "${group.name}" documentation`}
-                            className={`p-1 rounded-md transition-colors shrink-0 ${
-                              section.kind === 'group' &&
-                              section.groupName === group.name
-                                ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400'
-                                : 'text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
-                            }`}
-                          >
-                            <FileText className="w-3 h-3" />
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSection({ kind: 'group', groupName: group.name });
+                            mainPaneRef.current?.scrollTo({ top: 0 });
+                          }}
+                          title={
+                            group.note
+                              ? `Open "${group.name}" documentation & note`
+                              : `Open "${group.name}" domain page`
+                          }
+                          className={`p-1 rounded-md transition-colors shrink-0 ${
+                            section.kind === 'group' &&
+                            section.groupName === group.name
+                              ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-600 dark:text-blue-400'
+                              : group.note
+                              ? 'text-blue-500 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40'
+                              : 'text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+                          }`}
+                        >
+                          <FileText className="w-3 h-3" />
+                        </button>
                       </div>
 
                       {isOpen && (
@@ -998,31 +1229,96 @@ export const DocsView: React.FC<DocsViewProps> = ({
               </button>
             </div>
 
-            {/* Domain Tags */}
-            {(domainsByTable.get(activeTable.id) || []).length > 0 && (
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                <span className="text-slate-400">Business Domains:</span>
-                {(domainsByTable.get(activeTable.id) || []).map((dom) => (
-                  <button
-                    key={dom}
-                    type="button"
-                    onClick={() => {
-                      setSection({ kind: 'group', groupName: dom });
-                      mainPaneRef.current?.scrollTo({ top: 0 });
-                    }}
-                    className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:border-blue-400"
-                  >
-                    <span
-                      className="w-2 h-2 rounded-xs"
-                      style={{
-                        backgroundColor: groupColorMap.get(dom) || '#2563EB',
-                      }}
-                    />
-                    <span>{dom}</span>
-                  </button>
-                ))}
-              </div>
-            )}
+            {/* Domain Tags & TableGroup Notes */}
+            {(domainsByTable.get(activeTable.id) || []).length > 0 && (() => {
+              const parentGroups = (domainsByTable.get(activeTable.id) || [])
+                .map((dom) => schema.tableGroups.find((g) => g.name === dom))
+                .filter((g): g is NonNullable<typeof g> => Boolean(g));
+              const groupsWithNotes = parentGroups.filter((g) => Boolean(g.note?.trim()));
+
+              return (
+                <div className="space-y-3">
+                  <div className="flex flex-wrap items-center gap-2 text-xs">
+                    <span className="text-slate-400">Business Domains:</span>
+                    {parentGroups.map((grp) => (
+                      <button
+                        key={grp.name}
+                        type="button"
+                        onClick={() => {
+                          setSection({ kind: 'group', groupName: grp.name });
+                          mainPaneRef.current?.scrollTo({ top: 0 });
+                        }}
+                        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:border-blue-400"
+                      >
+                        <span
+                          className="w-2 h-2 rounded-xs"
+                          style={{
+                            backgroundColor: grp.color || '#2563EB',
+                          }}
+                        />
+                        <span>{grp.name}</span>
+                      </button>
+                    ))}
+                  </div>
+
+                  {groupsWithNotes.map((grp) => (
+                    <div
+                      key={grp.name}
+                      className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-5 py-3.5 space-y-2"
+                    >
+                      <div className="flex items-center justify-between gap-2 text-xs">
+                        <span className="inline-flex items-center gap-2 font-semibold text-slate-800 dark:text-slate-100">
+                          <span
+                            className="w-2.5 h-2.5 rounded-xs shrink-0"
+                            style={{ backgroundColor: grp.color || '#2563EB' }}
+                          />
+                          <span>TableGroup Note · {grp.name}</span>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSection({ kind: 'group', groupName: grp.name });
+                            mainPaneRef.current?.scrollTo({ top: 0 });
+                          }}
+                          className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
+                        >
+                          Open Group Docs →
+                        </button>
+                      </div>
+                      <MarkdownContent content={grp.note!} compact />
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
+
+            {/* Linked Canvas Sticky Notes for this Table */}
+            {(() => {
+              const tableStickyNotes = stickyNotes.filter(
+                (sn) => sn.linkedTarget === `table:${activeTable.id}`
+              );
+              if (tableStickyNotes.length === 0) return null;
+              return (
+                <div className="space-y-2">
+                  {tableStickyNotes.map((sn) => (
+                    <div
+                      key={sn.id}
+                      className="rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/60 dark:bg-amber-950/20 px-5 py-3 space-y-1.5"
+                    >
+                      <div className="flex items-center justify-between gap-2 text-xs font-semibold text-amber-900 dark:text-amber-200">
+                        <span>{sn.title || 'Sticky Note'}</span>
+                        {sn.author && (
+                          <span className="text-[11px] font-normal opacity-75">
+                            {sn.author}
+                          </span>
+                        )}
+                      </div>
+                      {sn.content && <MarkdownContent content={sn.content} compact />}
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
 
             {/* Rich / Long Table README Documentation */}
             {activeTable.note && isRichMarkdownNote(activeTable.note) && (
@@ -1379,15 +1675,39 @@ export const DocsView: React.FC<DocsViewProps> = ({
               </span>
             </div>
 
-            {activeGroup.note && (
+            {activeGroup.note ? (
               <ReadmeNoteCard
-                title="Domain Documentation"
+                title="TableGroup Documentation"
                 subtitle={activeGroup.name}
                 content={activeGroup.note}
                 accentColor={activeGroup.color || '#2563EB'}
                 scrollContainerRef={mainPaneRef}
               />
+            ) : (
+              <div className="rounded-xl border border-dashed border-slate-200 dark:border-slate-800 px-5 py-4 text-xs text-slate-400">
+                No TableGroup note defined yet. Add <code className="font-mono">Note: &apos;...&apos;</code> inside{' '}
+                <code className="font-mono">TableGroup &quot;{activeGroup.name}&quot;</code> to document this domain.
+              </div>
             )}
+
+            {stickyNotes
+              .filter((sn) => sn.linkedTarget === `group:${activeGroup.name}`)
+              .map((sn) => (
+                <div
+                  key={sn.id}
+                  className="rounded-xl border border-amber-200 dark:border-amber-900/60 bg-amber-50/60 dark:bg-amber-950/20 px-5 py-3 space-y-1.5"
+                >
+                  <div className="flex items-center justify-between gap-2 text-xs font-semibold text-amber-900 dark:text-amber-200">
+                    <span>{sn.title || 'Sticky Note'}</span>
+                    {sn.author && (
+                      <span className="text-[11px] font-normal opacity-75">
+                        {sn.author}
+                      </span>
+                    )}
+                  </div>
+                  {sn.content && <MarkdownContent content={sn.content} compact />}
+                </div>
+              ))}
 
             <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
               <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-800 text-xs font-semibold text-slate-700 dark:text-slate-200">
@@ -1765,6 +2085,298 @@ export const DocsView: React.FC<DocsViewProps> = ({
           </div>
         )}
 
+        {/* ---------- 3B. TABLE GROUPS (DOMAINS & NOTES) VIEW ---------- */}
+        {section.kind === 'groups' && (
+          <div className="w-full px-6 lg:px-10 py-6 space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-200 dark:border-slate-800">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-xs">
+                  {!navOpen && (
+                    <button
+                      type="button"
+                      onClick={onToggleNav}
+                      title={`Show Docs navigation (${modKey}J)`}
+                      className="p-1.5 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                    >
+                      <PanelLeft className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setSection({ kind: 'overview' })}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 font-medium"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                    <span>Schema Overview</span>
+                  </button>
+                  <span className="text-slate-400">/</span>
+                  <span className="font-semibold text-slate-900 dark:text-slate-100">
+                    Table Groups
+                  </span>
+                </div>
+                <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-slate-50 pt-1">
+                  Table Groups &amp; Domain Notes ({filteredTableGroups.length})
+                </h1>
+              </div>
+
+              <div className="relative w-full sm:w-72 shrink-0">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={groupsSearch}
+                  onChange={(e) => setGroupsSearch(e.target.value)}
+                  placeholder="Filter groups, notes, tables..."
+                  className="w-full pl-9 pr-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                />
+              </div>
+            </div>
+
+            {filteredTableGroups.length === 0 ? (
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-10 text-center text-xs text-slate-400">
+                {schema.tableGroups.length === 0
+                  ? 'No TableGroup definitions found in this schema.'
+                  : `No table groups matching "${groupsSearch}"`}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {filteredTableGroups.map((g) => (
+                  <section
+                    key={g.name}
+                    className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden"
+                  >
+                    <div className="px-5 py-3.5 border-b border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900 flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <span
+                          className="w-3 h-3 rounded-xs shrink-0"
+                          style={{ backgroundColor: g.color || '#2563EB' }}
+                        />
+                        <h2 className="text-sm font-bold text-slate-900 dark:text-slate-50 truncate">
+                          {g.name}
+                        </h2>
+                        <span className="text-xs text-slate-400 tabular-nums">
+                          {g.tables.length} {g.tables.length === 1 ? 'table' : 'tables'}
+                        </span>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSection({ kind: 'group', groupName: g.name });
+                          mainPaneRef.current?.scrollTo({ top: 0 });
+                        }}
+                        className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline shrink-0"
+                      >
+                        <span>Open Domain Page</span>
+                        <ArrowRight className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
+                    <div className="px-5 py-4 space-y-4">
+                      {g.note ? (
+                        <div className="max-w-4xl">
+                          <MarkdownContent content={g.note} />
+                        </div>
+                      ) : (
+                        <p className="text-xs text-slate-400 italic">
+                          No TableGroup note defined.
+                        </p>
+                      )}
+
+                      {g.tables.length > 0 && (
+                        <div className="pt-2 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center gap-1.5">
+                          <span className="text-[11px] font-medium text-slate-400 mr-1">
+                            Tables:
+                          </span>
+                          {g.tables.map((tId) => (
+                            <button
+                              key={tId}
+                              type="button"
+                              onClick={() => openTableDetail(tId)}
+                              className="px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono text-[11px] text-blue-600 dark:text-blue-400 hover:border-blue-400"
+                            >
+                              {tId}
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ---------- 3C. ALL NOTES DIRECTORY VIEW ---------- */}
+        {section.kind === 'notes' && (
+          <div className="w-full px-6 lg:px-10 py-6 space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-200 dark:border-slate-800">
+              <div className="space-y-1">
+                <div className="flex items-center gap-2 text-xs">
+                  {!navOpen && (
+                    <button
+                      type="button"
+                      onClick={onToggleNav}
+                      title={`Show Docs navigation (${modKey}J)`}
+                      className="p-1.5 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                    >
+                      <PanelLeft className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setSection({ kind: 'overview' })}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 font-medium"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                    <span>Schema Overview</span>
+                  </button>
+                  <span className="text-slate-400">/</span>
+                  <span className="font-semibold text-slate-900 dark:text-slate-100">
+                    All Notes
+                  </span>
+                </div>
+                <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-slate-50 pt-1">
+                  All Schema &amp; Documentation Notes ({filteredNoteEntries.length})
+                </h1>
+              </div>
+
+              <div className="relative w-full sm:w-72 shrink-0">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={notesSearch}
+                  onChange={(e) => setNotesSearch(e.target.value)}
+                  placeholder="Search all notes..."
+                  className="w-full pl-9 pr-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+                />
+              </div>
+            </div>
+
+            {/* Category Filter Tabs */}
+            <div className="flex flex-wrap items-center gap-1.5 text-xs">
+              {(
+                [
+                  { id: 'all', label: 'All' },
+                  { id: 'project', label: 'Project' },
+                  { id: 'group', label: 'Table Groups' },
+                  { id: 'standalone', label: 'Note Blocks' },
+                  { id: 'table', label: 'Tables' },
+                  { id: 'column', label: 'Columns' },
+                  { id: 'enum', label: 'Enums' },
+                  { id: 'sticky', label: 'Sticky Notes' },
+                ] as Array<{ id: NoteCategory; label: string }>
+              )
+                .filter((cat) => cat.id === 'all' || noteCategoryCounts[cat.id] > 0)
+                .map((cat) => {
+                  const active = noteCategory === cat.id;
+                  return (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => setNoteCategory(cat.id)}
+                      className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                        active
+                          ? 'border-blue-600 bg-blue-600 text-white'
+                          : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+                      }`}
+                    >
+                      <span>{cat.label}</span>
+                      <span
+                        className={`text-[10px] tabular-nums ${
+                          active ? 'text-blue-100' : 'text-slate-400'
+                        }`}
+                      >
+                        {noteCategoryCounts[cat.id]}
+                      </span>
+                    </button>
+                  );
+                })}
+            </div>
+
+            {filteredNoteEntries.length === 0 ? (
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-10 text-center text-xs text-slate-400 space-y-1.5">
+                <div>
+                  {allNoteEntries.length === 0
+                    ? 'No notes found in this schema yet.'
+                    : `No notes matching "${notesSearch}"`}
+                </div>
+                {allNoteEntries.length === 0 && (
+                  <div>
+                    Add <code className="font-mono">Note: &apos;...&apos;</code> to Project, TableGroup, Table, Column, or standalone <code className="font-mono">Note</code> blocks in DBML.
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {filteredNoteEntries.map((entry) => (
+                  <section
+                    key={entry.id}
+                    className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden"
+                  >
+                    <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900 flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex flex-wrap items-center gap-2 min-w-0">
+                        <span className="px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 shrink-0">
+                          {entry.categoryLabel}
+                        </span>
+                        {entry.accentColor && (
+                          <span
+                            className="w-2.5 h-2.5 rounded-xs shrink-0"
+                            style={{ backgroundColor: entry.accentColor }}
+                          />
+                        )}
+                        <span className="text-xs font-mono font-bold text-slate-900 dark:text-slate-100 truncate">
+                          {entry.title}
+                        </span>
+                        {entry.subtitle && (
+                          <span className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                            · {entry.subtitle}
+                          </span>
+                        )}
+                      </div>
+
+                      {entry.target && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const tgt = entry.target!;
+                            if (tgt.kind === 'table') {
+                              openTableDetail(tgt.tableId);
+                            } else {
+                              setSection(tgt);
+                              mainPaneRef.current?.scrollTo({ top: 0 });
+                            }
+                          }}
+                          className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline shrink-0"
+                        >
+                          <span>
+                            {entry.target.kind === 'table'
+                              ? 'Open Table'
+                              : entry.target.kind === 'group'
+                              ? 'Open TableGroup'
+                              : entry.target.kind === 'note'
+                              ? 'Open Note'
+                              : entry.target.kind === 'enums'
+                              ? 'View Enums'
+                              : 'Overview'}
+                          </span>
+                          <ArrowRight className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="px-5 py-4">
+                      <div className="max-w-4xl">
+                        <MarkdownContent content={entry.content} />
+                      </div>
+                    </div>
+                  </section>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* ---------- 4. DOCS SCHEMA OVERVIEW (THIN, UNGROUPED & PAGINATED) ---------- */}
         {section.kind === 'overview' && (
           <div className="w-full px-6 lg:px-10 py-8 space-y-6">
@@ -1791,6 +2403,14 @@ export const DocsView: React.FC<DocsViewProps> = ({
                   <span>·</span>
                   <button
                     type="button"
+                    onClick={() => setSection({ kind: 'groups' })}
+                    className="tabular-nums hover:underline"
+                  >
+                    {schema.tableGroups.length} Table Groups
+                  </button>
+                  <span>·</span>
+                  <button
+                    type="button"
                     onClick={() => setSection({ kind: 'enums' })}
                     className="tabular-nums hover:underline"
                   >
@@ -1803,6 +2423,14 @@ export const DocsView: React.FC<DocsViewProps> = ({
                     className="tabular-nums hover:underline"
                   >
                     {schema.refs.length} Relationships
+                  </button>
+                  <span>·</span>
+                  <button
+                    type="button"
+                    onClick={() => setSection({ kind: 'notes' })}
+                    className="tabular-nums hover:underline"
+                  >
+                    {allNoteEntries.length} Notes
                   </button>
                 </div>
                 <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-50">
@@ -1845,6 +2473,16 @@ export const DocsView: React.FC<DocsViewProps> = ({
                     <FileText className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
                     <span>Documentation Notes ({schema.notes.length})</span>
                   </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSection({ kind: 'notes' });
+                      mainPaneRef.current?.scrollTo({ top: 0 });
+                    }}
+                    className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
+                  >
+                    View all {allNoteEntries.length} notes →
+                  </button>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
                   {schema.notes.map((n) => (
@@ -1872,50 +2510,84 @@ export const DocsView: React.FC<DocsViewProps> = ({
               </div>
             )}
 
-            {/* Business Domains Guide Strip (when TableGroups have notes) */}
-            {visibleGroups.some((g) => Boolean(g.note)) && (
+            {/* Business Domains / TableGroup Notes Strip */}
+            {visibleGroups.length > 0 && (
               <div className="space-y-2.5">
-                <div className="flex items-center justify-between text-xs font-semibold text-slate-700 dark:text-slate-200">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
                   <span className="flex items-center gap-2">
                     <Layers className="w-3.5 h-3.5 text-slate-500" />
-                    <span>Business Domains ({visibleGroups.length})</span>
+                    <span>Table Groups &amp; Domain Notes ({visibleGroups.length})</span>
                   </span>
-                </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-3">
-                  {visibleGroups.map((g) => (
+                  <div className="flex items-center gap-3 font-medium">
                     <button
-                      key={g.name}
                       type="button"
+                      onClick={() => {
+                        setSection({ kind: 'groups' });
+                        mainPaneRef.current?.scrollTo({ top: 0 });
+                      }}
+                      className="text-blue-600 dark:text-blue-400 hover:underline"
+                    >
+                      View all TableGroup notes →
+                    </button>
+                    {allNoteEntries.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSection({ kind: 'notes' });
+                          mainPaneRef.current?.scrollTo({ top: 0 });
+                        }}
+                        className="text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:underline"
+                      >
+                        All Notes ({allNoteEntries.length}) →
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {visibleGroups.map((g) => (
+                    <div
+                      key={g.name}
+                      role="button"
+                      tabIndex={0}
                       onClick={() => {
                         setSection({ kind: 'group', groupName: g.name });
                         mainPaneRef.current?.scrollTo({ top: 0 });
                       }}
-                      className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-blue-400 dark:hover:border-blue-600 text-left space-y-1.5 transition-colors"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setSection({ kind: 'group', groupName: g.name });
+                          mainPaneRef.current?.scrollTo({ top: 0 });
+                        }
+                      }}
+                      className="cursor-pointer p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-blue-400 dark:hover:border-blue-600 text-left space-y-2 transition-colors flex flex-col justify-between"
                     >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="inline-flex items-center gap-2 min-w-0">
-                          <span
-                            className="w-2.5 h-2.5 rounded-xs shrink-0"
-                            style={{ backgroundColor: g.color || '#2563EB' }}
-                          />
-                          <span className="text-xs font-semibold text-slate-900 dark:text-slate-100 truncate">
-                            {g.name}
+                      <div className="space-y-2 w-full">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="inline-flex items-center gap-2 min-w-0">
+                            <span
+                              className="w-2.5 h-2.5 rounded-xs shrink-0"
+                              style={{ backgroundColor: g.color || '#2563EB' }}
+                            />
+                            <span className="text-xs font-semibold text-slate-900 dark:text-slate-100 truncate">
+                              {g.name}
+                            </span>
                           </span>
-                        </span>
-                        <span className="text-[10px] text-slate-400 tabular-nums shrink-0">
-                          {g.tables.length}t
-                        </span>
+                          <span className="text-[10px] text-slate-400 tabular-nums shrink-0">
+                            {g.tables.length}t
+                          </span>
+                        </div>
+                        {g.note ? (
+                          <div className="text-xs text-slate-600 dark:text-slate-300 max-h-36 overflow-hidden">
+                            <MarkdownContent content={g.note} compact />
+                          </div>
+                        ) : (
+                          <p className="text-[11.5px] text-slate-400 italic">
+                            No TableGroup note defined
+                          </p>
+                        )}
                       </div>
-                      {g.note ? (
-                        <p className="text-[11.5px] text-slate-500 dark:text-slate-400 line-clamp-2">
-                          {stripMarkdownToPlainText(g.note)}
-                        </p>
-                      ) : (
-                        <p className="text-[11.5px] text-slate-400 italic">
-                          No domain notes
-                        </p>
-                      )}
-                    </button>
+                    </div>
                   ))}
                 </div>
               </div>

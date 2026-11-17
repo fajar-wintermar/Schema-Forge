@@ -1815,6 +1815,7 @@ export default function App() {
           {viewMode === 'docs' ? (
             <DocsView
               schema={parsedSchema}
+              stickyNotes={activeWorkspace.stickyNotes}
               navOpen={docsNavOpen}
               onToggleNav={() => setDocsNavOpen((o) => !o)}
               modKey={modKey}
