@@ -4,11 +4,13 @@ import {
   ChevronDown,
   Columns2,
   Download,
+  FolderGit2,
   GitCommitHorizontal,
   KeyRound,
   Keyboard,
   Layers,
   LayoutGrid,
+  Link2,
   Moon,
   PanelLeft,
   Search,
@@ -16,7 +18,7 @@ import {
   Table2,
   X,
 } from 'lucide-react';
-import { ParsedSchema, ViewMode } from '../types/schema';
+import { GithubFileLink, ParsedSchema, ViewMode } from '../types/schema';
 import { BrandLogo } from './BrandLogo';
 
 export interface GlobalSearchResult {
@@ -41,9 +43,13 @@ interface TopBarProps {
   onChangeViewMode: (mode: ViewMode) => void;
   onSelectSearchResult: (result: GlobalSearchResult) => void;
   onOpenWorkspaces: () => void;
+  onOpenUrlModal: () => void;
+  onOpenGithubModal: () => void;
   onOpenImportExport: () => void;
   onOpenSaveVersion: () => void;
   onOpenShortcuts: () => void;
+  githubLink?: GithubFileLink;
+  hasGithubChanges?: boolean;
   modKey: string;
   darkMode: boolean;
   onToggleDarkMode: () => void;
@@ -69,9 +75,13 @@ export const TopBar: React.FC<TopBarProps> = ({
   onChangeViewMode,
   onSelectSearchResult,
   onOpenWorkspaces,
+  onOpenUrlModal,
+  onOpenGithubModal,
   onOpenImportExport,
   onOpenSaveVersion,
   onOpenShortcuts,
+  githubLink,
+  hasGithubChanges = false,
   modKey,
   darkMode,
   onToggleDarkMode,
@@ -448,7 +458,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         </div>
       </div>
 
-      {/* Right: Shortcuts, Theme, Import/Export, Primary Save Version CTA */}
+      {/* Right: Shortcuts, Theme, Open URL, GitHub, Import/Export, Primary Save Version CTA */}
       <div className="flex items-center gap-2 shrink-0">
         <button
           type="button"
@@ -467,6 +477,47 @@ export const TopBar: React.FC<TopBarProps> = ({
           className="p-2 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
         >
           {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+        </button>
+
+        <button
+          type="button"
+          onClick={onOpenUrlModal}
+          title="Open DBML from URL"
+          aria-label="Open DBML from URL"
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0"
+        >
+          <Link2 className="w-3.5 h-3.5" />
+          <span className="hidden xl:inline">Open URL</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={onOpenGithubModal}
+          title={
+            githubLink
+              ? `GitHub: ${githubLink.owner}/${githubLink.repo} (${githubLink.branch}) · ${
+                  hasGithubChanges ? 'Unpushed changes' : 'In sync'
+                }`
+              : 'Load from or push DBML to GitHub'
+          }
+          aria-label="GitHub repository sync"
+          className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-colors whitespace-nowrap shrink-0 ${
+            githubLink && hasGithubChanges
+              ? 'border-amber-300 dark:border-amber-700 bg-amber-50/70 dark:bg-amber-950/30 text-amber-800 dark:text-amber-200 hover:bg-amber-100/70 dark:hover:bg-amber-950/50'
+              : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800'
+          }`}
+        >
+          <FolderGit2 className="w-3.5 h-3.5" />
+          <span className="hidden xl:inline">
+            {githubLink ? (hasGithubChanges ? 'Push GitHub' : 'GitHub') : 'GitHub'}
+          </span>
+          {githubLink && (
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                hasGithubChanges ? 'bg-amber-500' : 'bg-emerald-500'
+              }`}
+            />
+          )}
         </button>
 
         <button

@@ -30,6 +30,7 @@ import {
   importCsvToDbml,
   importSqlToDbml,
 } from '../utils/importExport';
+import { fetchDbmlFromUrl, RemoteFetchResult } from '../utils/remoteService';
 
 // ---------- 1. TableGroup Editor Modal ----------
 
@@ -365,6 +366,7 @@ interface ImportExportModalProps {
   stickyNotes: StickyNote[];
   darkMode: boolean;
   onImportDbml: (nextDbml: string) => void;
+  onImportUrlResult?: (result: RemoteFetchResult) => void;
   onClose: () => void;
 }
 
@@ -377,13 +379,16 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
   stickyNotes,
   darkMode,
   onImportDbml,
+  onImportUrlResult,
   onClose,
 }) => {
   const [tab, setTab] = useState<'export' | 'import'>('export');
   const [pngScale, setPngScale] = useState<number>(2);
   const [exportingPng, setExportingPng] = useState(false);
-  const [importFormat, setImportFormat] = useState<'dbml' | 'sql' | 'csv'>('sql');
+  const [importFormat, setImportFormat] = useState<'sql' | 'csv' | 'dbml' | 'url'>('sql');
   const [importText, setImportText] = useState('');
+  const [importUrl, setImportUrl] = useState('');
+  const [importingUrl, setImportingUrl] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
 
@@ -441,8 +446,33 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
     reader.readAsText(file);
   };
 
-  const handleImportSubmit = () => {
+  const handleImportSubmit = async () => {
     setImportError(null);
+    if (importFormat === 'url') {
+      const target = importUrl.trim();
+      if (!target) {
+        setImportError('Enter a DBML URL to load.');
+        return;
+      }
+      setImportingUrl(true);
+      try {
+        const res = await fetchDbmlFromUrl(target);
+        if (onImportUrlResult) {
+          onImportUrlResult(res);
+        } else {
+          onImportDbml(res.content);
+        }
+        onClose();
+      } catch (err) {
+        setImportError(
+          err instanceof Error ? err.message : 'Failed to load DBML from URL.'
+        );
+      } finally {
+        setImportingUrl(false);
+      }
+      return;
+    }
+
     if (!importText.trim()) {
       setImportError('Paste schema content or upload a file first.');
       return;
@@ -651,7 +681,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
           <div className="p-5 space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-center gap-1 p-1 rounded-lg bg-slate-100 dark:bg-slate-800">
-                {(['sql', 'csv', 'dbml'] as const).map((fmt) => (
+                {(['sql', 'csv', 'dbml', 'url'] as const).map((fmt) => (
                   <button
                     key={fmt}
                     type="button"
@@ -670,16 +700,18 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
                 ))}
               </div>
 
-              <label className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer">
-                <Upload className="w-3.5 h-3.5" />
-                <span>Load File</span>
-                <input
-                  type="file"
-                  accept=".sql,.csv,.dbml,.txt"
-                  onChange={handleFileUpload}
-                  className="hidden"
-                />
-              </label>
+              {importFormat !== 'url' && (
+                <label className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 cursor-pointer">
+                  <Upload className="w-3.5 h-3.5" />
+                  <span>Load File</span>
+                  <input
+                    type="file"
+                    accept=".sql,.csv,.dbml,.txt"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                  />
+                </label>
+              )}
             </div>
 
             <div className="text-[11px] text-slate-500 dark:text-slate-400">
@@ -689,21 +721,33 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
                 'Expected CSV headers: table_name, table_group, column_name, data_type, primary_key, unique, not_null, default_value, reference, column_note'}
               {importFormat === 'dbml' &&
                 'Paste standard DBML code including Table, TableGroup, Ref, Enum, and Note blocks.'}
+              {importFormat === 'url' &&
+                'Enter any raw .dbml file URL, GitHub blob URL, or GitHub Gist URL to load into the current workspace.'}
             </div>
 
-            <textarea
-              rows={10}
-              value={importText}
-              onChange={(e) => setImportText(e.target.value)}
-              placeholder={
-                importFormat === 'sql'
-                  ? 'CREATE TABLE accounts (\n  id uuid PRIMARY KEY,\n  email varchar(255) UNIQUE NOT NULL\n);'
-                  : importFormat === 'csv'
-                  ? 'table_name,table_group,column_name,data_type,primary_key,reference\nusers,Identity,id,uuid,true,\norders,Commerce,user_id,uuid,false,> users.id'
-                  : 'Table users {\n  id uuid [pk]\n}'
-              }
-              className="w-full p-3 font-mono text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+            {importFormat === 'url' ? (
+              <input
+                type="url"
+                value={importUrl}
+                onChange={(e) => setImportUrl(e.target.value)}
+                placeholder="https://github.com/owner/repo/blob/main/schema.dbml"
+                className="w-full px-3 py-2.5 font-mono text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            ) : (
+              <textarea
+                rows={10}
+                value={importText}
+                onChange={(e) => setImportText(e.target.value)}
+                placeholder={
+                  importFormat === 'sql'
+                    ? 'CREATE TABLE accounts (\n  id uuid PRIMARY KEY,\n  email varchar(255) UNIQUE NOT NULL\n);'
+                    : importFormat === 'csv'
+                    ? 'table_name,table_group,column_name,data_type,primary_key,reference\nusers,Identity,id,uuid,true,\norders,Commerce,user_id,uuid,false,> users.id'
+                    : 'Table users {\n  id uuid [pk]\n}'
+                }
+                className="w-full p-3 font-mono text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            )}
 
             {importError && (
               <div className="px-3 py-2 rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-xs text-rose-700 dark:text-rose-300">
@@ -721,10 +765,15 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
               </button>
               <button
                 type="button"
+                disabled={importingUrl}
                 onClick={handleImportSubmit}
-                className="px-4 py-2 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white"
+                className="px-4 py-2 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white"
               >
-                Convert &amp; Load Schema
+                {importingUrl
+                  ? 'Fetching URL...'
+                  : importFormat === 'url'
+                  ? 'Fetch & Load Schema'
+                  : 'Convert & Load Schema'}
               </button>
             </div>
           </div>

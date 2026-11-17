@@ -3,6 +3,7 @@ import { Maximize2, PanelLeftOpen } from 'lucide-react';
 import { DbmlEditor } from './components/DbmlEditor';
 import { DiagramCanvas } from './components/DiagramCanvas';
 import { DocsView } from './components/DocsView';
+import { GitHubModal } from './components/GitHubModal';
 import { InspectorDrawer } from './components/InspectorDrawer';
 import {
   ImportExportModal,
@@ -11,6 +12,7 @@ import {
   TableGroupModal,
   WorkspacesModal,
 } from './components/Modals';
+import { OpenUrlModal } from './components/OpenUrlModal';
 import { Sidebar, SidebarTab } from './components/Sidebar';
 import { GlobalSearchResult, TopBar } from './components/TopBar';
 import {
@@ -22,13 +24,20 @@ import {
 } from './db/localDb';
 import {
   DetailLevel,
+  GithubFileLink,
   SchemaVersion,
   StickyNote,
   TableGroupDef,
   TablePosition,
+  UrlFileLink,
   ViewMode,
   WorkspaceProject,
 } from './types/schema';
+import {
+  fetchDbmlFromUrl,
+  GithubFileResult,
+  RemoteFetchResult,
+} from './utils/remoteService';
 import {
   autoLayoutSingleGroup,
   buildTableInstances,
@@ -87,6 +96,8 @@ export default function App() {
   const [importExportOpen, setImportExportOpen] = useState(false);
   const [workspacesModalOpen, setWorkspacesModalOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [openUrlOpen, setOpenUrlOpen] = useState(false);
+  const [githubModalOpen, setGithubModalOpen] = useState(false);
 
   const modKey = useMemo(() => {
     if (typeof navigator === 'undefined') return '⌘';
@@ -120,8 +131,90 @@ export default function App() {
       }
 
       const lastActive = await getMetaValue<string>('activeWorkspaceId');
-      const target =
+      let target =
         list.find((w) => w.id === lastActive)?.id || list[0].id;
+
+      // Support viewing a DBML file directly from ?url=... query parameter
+      const params = new URLSearchParams(window.location.search);
+      const viewParam = params.get('view');
+      if (
+        mounted &&
+        (viewParam === 'split' || viewParam === 'diagram' || viewParam === 'docs')
+      ) {
+        setViewMode(viewParam);
+      }
+
+      const urlParam = params.get('url')?.trim();
+      if (urlParam) {
+        try {
+          const remote = await fetchDbmlFromUrl(urlParam);
+          const parsedRemote = parseDbml(remote.content);
+          const positions = computeAutoLayout(parsedRemote, 'full');
+          const now = new Date().toISOString();
+          const baseName =
+            parsedRemote.project.name ||
+            remote.filename.replace(/\.dbml$/i, '') ||
+            'Remote DBML';
+          const remoteWs: WorkspaceProject = {
+            id: `ws_url_${Date.now()}`,
+            name: baseName,
+            description: `Loaded from ${remote.originalUrl}`,
+            dbml: remote.content,
+            tablePositions: positions,
+            groupMeta: {},
+            stickyNotes: [],
+            detailLevel: 'full',
+            versions: [
+              {
+                id: `ver_${Date.now()}`,
+                tag: 'v1.0.0',
+                title: 'Loaded from URL',
+                description: remote.originalUrl,
+                dbml: remote.content,
+                tablePositions: positions,
+                stickyNotes: [],
+                createdAt: now,
+                isPublished: true,
+              },
+            ],
+            urlLink: {
+              url: remote.originalUrl,
+              resolvedUrl: remote.resolvedUrl,
+              loadedAt: now,
+            },
+            githubLink:
+              remote.githubMeta && remote.githubMeta.sha
+                ? {
+                    owner: remote.githubMeta.owner,
+                    repo: remote.githubMeta.repo,
+                    branch: remote.githubMeta.branch,
+                    path: remote.githubMeta.path,
+                    sha: remote.githubMeta.sha,
+                    htmlUrl: remote.githubMeta.htmlUrl,
+                    lastSyncedDbml: remote.content,
+                    lastSyncedAt: now,
+                  }
+                : undefined,
+            createdAt: now,
+            updatedAt: now,
+          };
+          await saveWorkspace(remoteWs);
+          await setMetaValue('activeWorkspaceId', remoteWs.id);
+          list = [remoteWs, ...list];
+          target = remoteWs.id;
+          if (mounted) {
+            showToast(`Loaded ${remote.filename} from URL`);
+          }
+        } catch (err) {
+          if (mounted) {
+            showToast(
+              err instanceof Error
+                ? `Failed to load URL: ${err.message}`
+                : 'Failed to load DBML from URL'
+            );
+          }
+        }
+      }
 
       if (mounted) {
         setWorkspaces(list);
@@ -133,7 +226,7 @@ export default function App() {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [showToast]);
 
   // Apply dark mode class on <html>
   useEffect(() => {
@@ -148,6 +241,8 @@ export default function App() {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         if (shortcutsOpen) setShortcutsOpen(false);
+        else if (openUrlOpen) setOpenUrlOpen(false);
+        else if (githubModalOpen) setGithubModalOpen(false);
         else if (groupModalState.open)
           setGroupModalState({ open: false, group: null });
         else if (saveVersionOpen) setSaveVersionOpen(false);
@@ -160,6 +255,8 @@ export default function App() {
 
       const anyModalOpen =
         shortcutsOpen ||
+        openUrlOpen ||
+        githubModalOpen ||
         groupModalState.open ||
         saveVersionOpen ||
         importExportOpen ||
@@ -238,6 +335,8 @@ export default function App() {
   }, [
     viewMode,
     shortcutsOpen,
+    openUrlOpen,
+    githubModalOpen,
     groupModalState.open,
     saveVersionOpen,
     importExportOpen,
@@ -637,6 +736,170 @@ export default function App() {
     );
   };
 
+  const handleLoadUrlResult = async (
+    result: RemoteFetchResult,
+    openInNewWorkspace: boolean
+  ) => {
+    const nextParsed = parseDbml(result.content);
+    const nextPos = computeAutoLayout(nextParsed, activeWorkspace.detailLevel);
+    const now = new Date().toISOString();
+    const urlLink: UrlFileLink = {
+      url: result.originalUrl,
+      resolvedUrl: result.resolvedUrl,
+      loadedAt: now,
+    };
+    const githubLink: GithubFileLink | undefined =
+      result.githubMeta && result.githubMeta.sha
+        ? {
+            owner: result.githubMeta.owner,
+            repo: result.githubMeta.repo,
+            branch: result.githubMeta.branch,
+            path: result.githubMeta.path,
+            sha: result.githubMeta.sha,
+            htmlUrl: result.githubMeta.htmlUrl,
+            lastSyncedDbml: result.content,
+            lastSyncedAt: now,
+          }
+        : undefined;
+
+    if (openInNewWorkspace) {
+      const wsName =
+        nextParsed.project.name ||
+        result.filename.replace(/\.dbml$/i, '') ||
+        'Remote DBML';
+      const newWs: WorkspaceProject = {
+        id: `ws_url_${Date.now()}`,
+        name: wsName,
+        description: `Loaded from ${result.originalUrl}`,
+        dbml: result.content,
+        tablePositions: nextPos,
+        groupMeta: {},
+        stickyNotes: [],
+        detailLevel: activeWorkspace.detailLevel,
+        versions: [
+          {
+            id: `ver_${Date.now()}`,
+            tag: 'v1.0.0',
+            title: 'Loaded from URL',
+            description: result.originalUrl,
+            dbml: result.content,
+            tablePositions: nextPos,
+            stickyNotes: [],
+            createdAt: now,
+            isPublished: true,
+          },
+        ],
+        urlLink,
+        githubLink,
+        createdAt: now,
+        updatedAt: now,
+      };
+      await saveWorkspace(newWs);
+      setWorkspaces((prev) => [newWs, ...prev]);
+      handleSelectWorkspace(newWs.id);
+    } else {
+      updateActiveWorkspace((ws) => ({
+        ...ws,
+        dbml: result.content,
+        tablePositions: nextPos,
+        urlLink,
+        githubLink,
+      }));
+      setFocusRequest({ type: 'fit', nonce: Date.now() });
+    }
+    showToast(
+      `Loaded ${result.filename} (${nextParsed.tables.length} tables)`
+    );
+  };
+
+  const handleLoadGithubFile = async (
+    file: GithubFileResult,
+    openInNewWorkspace: boolean
+  ) => {
+    const nextParsed = parseDbml(file.content);
+    const nextPos = computeAutoLayout(nextParsed, activeWorkspace.detailLevel);
+    const now = new Date().toISOString();
+    const githubLink: GithubFileLink = {
+      owner: file.owner,
+      repo: file.repo,
+      branch: file.branch,
+      path: file.path,
+      sha: file.sha,
+      htmlUrl: file.htmlUrl,
+      lastSyncedDbml: file.content,
+      lastSyncedAt: now,
+    };
+
+    if (openInNewWorkspace) {
+      const fileLabel = file.path.split('/').pop()?.replace(/\.dbml$/i, '') || file.repo;
+      const newWs: WorkspaceProject = {
+        id: `ws_gh_${Date.now()}`,
+        name: `${file.repo} · ${fileLabel}`,
+        description: `GitHub: ${file.owner}/${file.repo} (${file.branch})`,
+        dbml: file.content,
+        tablePositions: nextPos,
+        groupMeta: {},
+        stickyNotes: [],
+        detailLevel: activeWorkspace.detailLevel,
+        versions: [
+          {
+            id: `ver_${Date.now()}`,
+            tag: 'v1.0.0',
+            title: `Loaded ${file.path}`,
+            description: `${file.owner}/${file.repo}@${file.branch}`,
+            dbml: file.content,
+            tablePositions: nextPos,
+            stickyNotes: [],
+            createdAt: now,
+            isPublished: true,
+          },
+        ],
+        githubLink,
+        createdAt: now,
+        updatedAt: now,
+      };
+      await saveWorkspace(newWs);
+      setWorkspaces((prev) => [newWs, ...prev]);
+      handleSelectWorkspace(newWs.id);
+    } else {
+      updateActiveWorkspace((ws) => ({
+        ...ws,
+        dbml: file.content,
+        tablePositions: nextPos,
+        githubLink,
+      }));
+      setFocusRequest({ type: 'fit', nonce: Date.now() });
+    }
+    showToast(`Loaded ${file.path} from ${file.owner}/${file.repo}`);
+  };
+
+  const handleSyncedGithubFile = (
+    link: GithubFileLink,
+    updatedDbml?: string
+  ) => {
+    updateActiveWorkspace((ws) => {
+      if (typeof updatedDbml === 'string') {
+        const nextParsed = parseDbml(updatedDbml);
+        return {
+          ...ws,
+          dbml: updatedDbml,
+          tablePositions: computeAutoLayout(nextParsed, ws.detailLevel),
+          githubLink: link,
+        };
+      }
+      return {
+        ...ws,
+        githubLink: link,
+      };
+    });
+    if (typeof updatedDbml === 'string') {
+      setFocusRequest({ type: 'fit', nonce: Date.now() });
+      showToast(`Pulled latest ${link.path} from ${link.branch}`);
+    } else {
+      showToast(`Pushed ${link.path} to ${link.owner}/${link.repo} (${link.branch})`);
+    }
+  };
+
   const handleSelectWorkspace = (id: string) => {
     setActiveId(id);
     setSelectedTableId(null);
@@ -789,9 +1052,16 @@ export default function App() {
         onChangeViewMode={handleChangeViewMode}
         onSelectSearchResult={handleSelectSearchResult}
         onOpenWorkspaces={() => setWorkspacesModalOpen(true)}
+        onOpenUrlModal={() => setOpenUrlOpen(true)}
+        onOpenGithubModal={() => setGithubModalOpen(true)}
         onOpenImportExport={() => setImportExportOpen(true)}
         onOpenSaveVersion={() => setSaveVersionOpen(true)}
         onOpenShortcuts={() => setShortcutsOpen(true)}
+        githubLink={activeWorkspace.githubLink}
+        hasGithubChanges={Boolean(
+          activeWorkspace.githubLink &&
+            activeWorkspace.dbml !== activeWorkspace.githubLink.lastSyncedDbml
+        )}
         modKey={modKey}
         darkMode={darkMode}
         onToggleDarkMode={() => setDarkMode((d) => !d)}
@@ -1068,7 +1338,25 @@ export default function App() {
           stickyNotes={activeWorkspace.stickyNotes}
           darkMode={darkMode}
           onImportDbml={handleImportDbml}
+          onImportUrlResult={(res) => handleLoadUrlResult(res, false)}
           onClose={() => setImportExportOpen(false)}
+        />
+      )}
+
+      {openUrlOpen && (
+        <OpenUrlModal
+          currentUrlLink={activeWorkspace.urlLink}
+          onLoadUrlResult={handleLoadUrlResult}
+          onClose={() => setOpenUrlOpen(false)}
+        />
+      )}
+
+      {githubModalOpen && (
+        <GitHubModal
+          workspace={activeWorkspace}
+          onLoadGithubFile={handleLoadGithubFile}
+          onSyncedGithubFile={handleSyncedGithubFile}
+          onClose={() => setGithubModalOpen(false)}
         />
       )}
 

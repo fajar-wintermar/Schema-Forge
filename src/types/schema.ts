@@ -130,6 +130,23 @@ export interface SchemaVersion {
   isPublished: boolean;
 }
 
+export interface GithubFileLink {
+  owner: string;
+  repo: string;
+  branch: string;
+  path: string;
+  sha: string;
+  htmlUrl?: string;
+  lastSyncedDbml: string;
+  lastSyncedAt: string;
+}
+
+export interface UrlFileLink {
+  url: string;
+  resolvedUrl?: string;
+  loadedAt: string;
+}
+
 export interface WorkspaceProject {
   id: string;
   name: string;
@@ -140,6 +157,8 @@ export interface WorkspaceProject {
   stickyNotes: StickyNote[];
   detailLevel: DetailLevel;
   versions: SchemaVersion[];
+  githubLink?: GithubFileLink;
+  urlLink?: UrlFileLink;
   createdAt: string;
   updatedAt: string;
 }
