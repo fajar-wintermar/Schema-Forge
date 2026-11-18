@@ -78,6 +78,7 @@ type DocsSection =
   | { kind: 'enums' }
   | { kind: 'relationships' }
   | { kind: 'note'; noteId: string }
+  | { kind: 'noteDetail'; entryId: string }
   | { kind: 'group'; groupName: string }
   | { kind: 'table'; tableId: string };
 
@@ -133,11 +134,224 @@ function getPageNumbers(current: number, total: number): Array<number | 'ellipsi
   return pages;
 }
 
+function trimNotePreview(
+  content: string,
+  maxChars = 200
+): { preview: string; isTrimmed: boolean; words: number; lines: number } {
+  const plain = stripMarkdownToPlainText(content);
+  const words = content.trim().split(/\s+/).filter(Boolean).length;
+  const lines = content.split('\n').length;
+  const needsTrim = isRichMarkdownNote(content) || plain.length > maxChars;
+
+  if (plain.length <= maxChars) {
+    return { preview: plain, isTrimmed: needsTrim, words, lines };
+  }
+
+  let cut = plain.slice(0, maxChars);
+  const lastSpace = cut.lastIndexOf(' ');
+  if (lastSpace > Math.floor(maxChars * 0.65)) {
+    cut = cut.slice(0, lastSpace);
+  }
+  return {
+    preview: `${cut.trimEnd()}…`,
+    isTrimmed: true,
+    words,
+    lines,
+  };
+}
+
+interface PaginationBarProps {
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  itemLabel: string;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (size: number) => void;
+  pageSizeOptions?: number[];
+}
+
+const PaginationBar: React.FC<PaginationBarProps> = ({
+  page,
+  pageSize,
+  totalItems,
+  itemLabel,
+  onPageChange,
+  onPageSizeChange,
+  pageSizeOptions = [10, 20, 50, 100],
+}) => {
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+  const safePage = Math.min(page, totalPages);
+
+  return (
+    <div className="px-5 py-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-900 flex flex-wrap items-center justify-between gap-3 text-xs">
+      <div className="flex items-center gap-3 text-slate-500 dark:text-slate-400 tabular-nums">
+        <span>
+          Showing {(safePage - 1) * pageSize + 1}–
+          {Math.min(safePage * pageSize, totalItems)} of {totalItems} {itemLabel}
+        </span>
+        <select
+          value={pageSize}
+          onChange={(e) => onPageSizeChange(Number(e.target.value))}
+          aria-label={`${itemLabel} per page`}
+          className="px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 text-xs"
+        >
+          {pageSizeOptions.map((sz) => (
+            <option key={sz} value={sz}>
+              {sz} / page
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="flex items-center gap-1">
+        <button
+          type="button"
+          disabled={safePage <= 1}
+          onClick={() => onPageChange(1)}
+          className="p-1.5 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 disabled:opacity-40"
+          aria-label="First page"
+        >
+          <ChevronsLeft className="w-3.5 h-3.5" />
+        </button>
+        <button
+          type="button"
+          disabled={safePage <= 1}
+          onClick={() => onPageChange(Math.max(1, safePage - 1))}
+          className="p-1.5 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 disabled:opacity-40"
+          aria-label="Previous page"
+        >
+          <ChevronLeft className="w-3.5 h-3.5" />
+        </button>
+        {getPageNumbers(safePage, totalPages).map((item, idx) =>
+          item === 'ellipsis' ? (
+            <span key={`el-${idx}`} className="px-1.5 text-slate-400">
+              …
+            </span>
+          ) : (
+            <button
+              key={item}
+              type="button"
+              onClick={() => onPageChange(item)}
+              className={`min-w-[28px] h-7 px-2 rounded border text-xs font-medium tabular-nums ${
+                item === safePage
+                  ? 'border-blue-600 bg-blue-600 text-white'
+                  : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-700'
+              }`}
+            >
+              {item}
+            </button>
+          )
+        )}
+        <button
+          type="button"
+          disabled={safePage >= totalPages}
+          onClick={() => onPageChange(Math.min(totalPages, safePage + 1))}
+          className="p-1.5 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 disabled:opacity-40"
+          aria-label="Next page"
+        >
+          <ChevronRight className="w-3.5 h-3.5" />
+        </button>
+        <button
+          type="button"
+          disabled={safePage >= totalPages}
+          onClick={() => onPageChange(totalPages)}
+          className="p-1.5 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 disabled:opacity-40"
+          aria-label="Last page"
+        >
+          <ChevronsRight className="w-3.5 h-3.5" />
+        </button>
+      </div>
+    </div>
+  );
+};
+
+interface TrimmableNoteProps {
+  content: string;
+  compact?: boolean;
+  inlineShort?: boolean;
+  maxChars?: number;
+  defaultExpanded?: boolean;
+}
+
+const TrimmableNote: React.FC<TrimmableNoteProps> = ({
+  content,
+  compact = false,
+  inlineShort = false,
+  maxChars = 180,
+  defaultExpanded = false,
+}) => {
+  const [expanded, setExpanded] = useState(defaultExpanded);
+  const { preview, isTrimmed } = useMemo(
+    () => trimNotePreview(content, maxChars),
+    [content, maxChars]
+  );
+
+  if (!isTrimmed) {
+    return (
+      <MarkdownContent
+        content={content}
+        inline={inlineShort}
+        compact={!inlineShort && compact}
+      />
+    );
+  }
+
+  if (!expanded) {
+    return (
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={(e) => {
+          e.stopPropagation();
+          setExpanded(true);
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            e.stopPropagation();
+            setExpanded(true);
+          }
+        }}
+        className="group cursor-pointer text-left space-y-1"
+      >
+        <p className="text-xs text-slate-600 dark:text-slate-300 line-clamp-2 leading-relaxed">
+          {preview}
+        </p>
+        <span className="inline-flex items-center gap-1 text-[11px] font-medium text-blue-600 dark:text-blue-400 group-hover:underline">
+          <ChevronDown className="w-3 h-3" />
+          <span>Show full note</span>
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="space-y-2"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <MarkdownContent content={content} compact={compact} />
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setExpanded(false);
+        }}
+        className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400"
+      >
+        <ChevronUp className="w-3 h-3" />
+        <span>Trim note</span>
+      </button>
+    </div>
+  );
+};
+
 interface ReadmeNoteCardProps {
   title: string;
   subtitle?: string;
   content: string;
   accentColor?: string;
+  defaultExpanded?: boolean;
   scrollContainerRef?: React.RefObject<HTMLDivElement | null>;
 }
 
@@ -146,17 +360,20 @@ const ReadmeNoteCard: React.FC<ReadmeNoteCardProps> = ({
   subtitle,
   content,
   accentColor,
+  defaultExpanded = true,
   scrollContainerRef,
 }) => {
-  const [collapsed, setCollapsed] = useState(false);
+  const [expanded, setExpanded] = useState(defaultExpanded);
 
   const headings = useMemo(() => extractMarkdownHeadings(content), [content]);
-  const stats = useMemo(() => {
-    const words = content.trim().split(/\s+/).filter(Boolean).length;
-    const lines = content.split('\n').length;
-    const readMins = Math.max(1, Math.round(words / 200));
-    return { words, lines, readMins };
-  }, [content]);
+  const { preview, words, readMins } = useMemo(
+    () => {
+      const info = trimNotePreview(content, 240);
+      const mins = Math.max(1, Math.round(info.words / 200));
+      return { preview: info.preview, words: info.words, readMins: mins };
+    },
+    [content]
+  );
 
   const scrollToHeading = (id: string) => {
     const container = scrollContainerRef?.current;
@@ -195,29 +412,50 @@ const ReadmeNoteCard: React.FC<ReadmeNoteCardProps> = ({
 
         <div className="flex items-center gap-3 text-[11px] text-slate-400 shrink-0">
           <span className="tabular-nums hidden sm:inline">
-            {stats.words} words · ~{stats.readMins} min read
+            {words} words · ~{readMins} min read
           </span>
           <button
             type="button"
-            onClick={() => setCollapsed((c) => !c)}
-            className="inline-flex items-center gap-1 px-2 py-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
+            onClick={() => setExpanded((e) => !e)}
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 transition-colors"
           >
-            {collapsed ? (
+            {expanded ? (
               <>
-                <ChevronDown className="w-3 h-3" />
-                <span>Expand</span>
+                <ChevronUp className="w-3 h-3" />
+                <span>Trim note</span>
               </>
             ) : (
               <>
-                <ChevronUp className="w-3 h-3" />
-                <span>Collapse</span>
+                <ChevronDown className="w-3 h-3" />
+                <span>Show full note</span>
               </>
             )}
           </button>
         </div>
       </div>
 
-      {!collapsed && (
+      {!expanded ? (
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => setExpanded(true)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              setExpanded(true);
+            }
+          }}
+          className="px-6 py-4 cursor-pointer hover:bg-slate-50/70 dark:hover:bg-slate-800/30 transition-colors space-y-2"
+        >
+          <p className="text-xs text-slate-600 dark:text-slate-300 line-clamp-2 leading-relaxed max-w-4xl">
+            {preview}
+          </p>
+          <span className="inline-flex items-center gap-1 text-[11px] font-medium text-blue-600 dark:text-blue-400">
+            <span>Click to read full note</span>
+            <ArrowRight className="w-3 h-3" />
+          </span>
+        </div>
+      ) : (
         <>
           {headings.length >= 2 && (
             <div className="px-6 py-2.5 border-b border-slate-100 dark:border-slate-800/80 bg-slate-50/40 dark:bg-slate-950/30 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px]">
@@ -279,9 +517,15 @@ export const DocsView: React.FC<DocsViewProps> = ({
   const [relPageSize, setRelPageSize] = useState(25);
   const [relSearch, setRelSearch] = useState('');
   const [enumSearch, setEnumSearch] = useState('');
+  const [enumPage, setEnumPage] = useState(1);
+  const [enumPageSize, setEnumPageSize] = useState(20);
   const [notesSearch, setNotesSearch] = useState('');
   const [noteCategory, setNoteCategory] = useState<NoteCategory>('all');
+  const [notesPage, setNotesPage] = useState(1);
+  const [notesPageSize, setNotesPageSize] = useState(20);
   const [groupsSearch, setGroupsSearch] = useState('');
+  const [groupsPage, setGroupsPage] = useState(1);
+  const [groupsPageSize, setGroupsPageSize] = useState(10);
 
   // Reset to overview if active table, note, or group no longer exists after workspace switch
   useEffect(() => {
@@ -311,6 +555,18 @@ export const DocsView: React.FC<DocsViewProps> = ({
   useEffect(() => {
     setRelPage(1);
   }, [relSearch, selectedDomains, relPageSize, schema.refs.length]);
+
+  useEffect(() => {
+    setEnumPage(1);
+  }, [enumSearch, enumPageSize, schema.enums.length]);
+
+  useEffect(() => {
+    setGroupsPage(1);
+  }, [groupsSearch, groupsPageSize, schema.tableGroups.length, selectedDomains]);
+
+  useEffect(() => {
+    setNotesPage(1);
+  }, [notesSearch, noteCategory, notesPageSize, schema.notes.length, schema.tables.length, schema.tableGroups.length, schema.enums.length, stickyNotes.length]);
 
   const fkLookup = useMemo(() => {
     const map = new Map<
@@ -493,6 +749,13 @@ export const DocsView: React.FC<DocsViewProps> = ({
     );
   }, [schema.enums, enumSearch]);
 
+  const enumTotalPages = Math.max(1, Math.ceil(filteredEnums.length / enumPageSize));
+  const safeEnumPage = Math.min(enumPage, enumTotalPages);
+  const pagedEnums = useMemo(() => {
+    const start = (safeEnumPage - 1) * enumPageSize;
+    return filteredEnums.slice(start, start + enumPageSize);
+  }, [filteredEnums, safeEnumPage, enumPageSize]);
+
   const totalFieldsCount = useMemo(
     () => schema.tables.reduce((acc, t) => acc + t.columns.length, 0),
     [schema.tables]
@@ -644,6 +907,16 @@ export const DocsView: React.FC<DocsViewProps> = ({
     });
   }, [allNoteEntries, noteCategory, notesSearch]);
 
+  const notesTotalPages = Math.max(
+    1,
+    Math.ceil(filteredNoteEntries.length / notesPageSize)
+  );
+  const safeNotesPage = Math.min(notesPage, notesTotalPages);
+  const pagedNoteEntries = useMemo(() => {
+    const start = (safeNotesPage - 1) * notesPageSize;
+    return filteredNoteEntries.slice(start, start + notesPageSize);
+  }, [filteredNoteEntries, safeNotesPage, notesPageSize]);
+
   const filteredTableGroups = useMemo(() => {
     const gq = groupsSearch.trim().toLowerCase();
     if (!gq) return visibleGroups;
@@ -655,16 +928,36 @@ export const DocsView: React.FC<DocsViewProps> = ({
     );
   }, [visibleGroups, groupsSearch]);
 
+  const groupsTotalPages = Math.max(
+    1,
+    Math.ceil(filteredTableGroups.length / groupsPageSize)
+  );
+  const safeGroupsPage = Math.min(groupsPage, groupsTotalPages);
+  const pagedTableGroups = useMemo(() => {
+    const start = (safeGroupsPage - 1) * groupsPageSize;
+    return filteredTableGroups.slice(start, start + groupsPageSize);
+  }, [filteredTableGroups, safeGroupsPage, groupsPageSize]);
+
   const activeTableId = section.kind === 'table' ? section.tableId : null;
   const activeTable = activeTableId ? tableMap.get(activeTableId) || null : null;
   const activeNote =
     section.kind === 'note'
       ? schema.notes.find((n) => n.id === section.noteId) || null
       : null;
+  const activeNoteEntry =
+    section.kind === 'noteDetail'
+      ? allNoteEntries.find((e) => e.id === section.entryId) || null
+      : null;
   const activeGroup =
     section.kind === 'group'
       ? schema.tableGroups.find((g) => g.name === section.groupName) || null
       : null;
+
+  useEffect(() => {
+    if (section.kind === 'noteDetail' && !activeNoteEntry) {
+      setSection({ kind: 'notes' });
+    }
+  }, [section, activeNoteEntry]);
 
   const toggleDomainExpand = (domainName: string) => {
     setExpandedDomains((prev) => ({
@@ -1285,7 +1578,13 @@ export const DocsView: React.FC<DocsViewProps> = ({
                           Open Group Docs →
                         </button>
                       </div>
-                      <MarkdownContent content={grp.note!} compact />
+                      <TrimmableNote
+                        key={`tbl-grp-${activeTable.id}-${grp.name}`}
+                        content={grp.note!}
+                        compact
+                        maxChars={180}
+                        defaultExpanded={false}
+                      />
                     </div>
                   ))}
                 </div>
@@ -1313,7 +1612,15 @@ export const DocsView: React.FC<DocsViewProps> = ({
                           </span>
                         )}
                       </div>
-                      {sn.content && <MarkdownContent content={sn.content} compact />}
+                      {sn.content && (
+                        <TrimmableNote
+                          key={`tbl-sn-${sn.id}`}
+                          content={sn.content}
+                          compact
+                          maxChars={180}
+                          defaultExpanded={false}
+                        />
+                      )}
                     </div>
                   ))}
                 </div>
@@ -1323,10 +1630,12 @@ export const DocsView: React.FC<DocsViewProps> = ({
             {/* Rich / Long Table README Documentation */}
             {activeTable.note && isRichMarkdownNote(activeTable.note) && (
               <ReadmeNoteCard
+                key={`tbl-readme-${activeTable.id}`}
                 title="Table Documentation"
                 subtitle={activeTable.id}
                 content={activeTable.note}
                 accentColor={activeTable.headerColor}
+                defaultExpanded={false}
                 scrollContainerRef={mainPaneRef}
               />
             )}
@@ -1358,7 +1667,13 @@ export const DocsView: React.FC<DocsViewProps> = ({
 
               {activeTable.note && !isRichMarkdownNote(activeTable.note) && (
                 <div className="px-5 py-2.5 bg-slate-50/70 dark:bg-slate-800/40 border-b border-slate-200/70 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-300">
-                  <MarkdownContent content={activeTable.note} compact />
+                  <TrimmableNote
+                    key={`tbl-short-note-${activeTable.id}`}
+                    content={activeTable.note}
+                    compact
+                    maxChars={160}
+                    defaultExpanded={false}
+                  />
                 </div>
               )}
 
@@ -1419,12 +1734,16 @@ export const DocsView: React.FC<DocsViewProps> = ({
                                   <span>{fk.label}</span>
                                 </button>
                               )}
-                              {col.note &&
-                                (col.note.includes('\n') || col.note.length >= 120 ? (
-                                  <MarkdownContent content={col.note} compact />
-                                ) : (
-                                  <MarkdownContent content={col.note} inline />
-                                ))}
+                              {col.note && (
+                                <TrimmableNote
+                                  key={`col-note-${activeTable.id}-${col.name}`}
+                                  content={col.note}
+                                  compact
+                                  inlineShort
+                                  maxChars={120}
+                                  defaultExpanded={false}
+                                />
+                              )}
                               {!fk && !col.note && (
                                 <span className="text-slate-400">—</span>
                               )}
@@ -1620,13 +1939,158 @@ export const DocsView: React.FC<DocsViewProps> = ({
             </div>
 
             <ReadmeNoteCard
+              key={`standalone-note-${activeNote.id}`}
               title="Documentation Note"
               subtitle={activeNote.name}
               content={activeNote.content}
+              defaultExpanded
               scrollContainerRef={mainPaneRef}
             />
           </div>
         )}
+
+        {/* ---------- 1B-2. INDIVIDUAL NOTE DETAIL PAGE (FROM ALL NOTES) ---------- */}
+        {section.kind === 'noteDetail' && activeNoteEntry && (() => {
+          const list = filteredNoteEntries.some((e) => e.id === activeNoteEntry.id)
+            ? filteredNoteEntries
+            : allNoteEntries;
+          const idx = list.findIndex((e) => e.id === activeNoteEntry.id);
+          const prevEntry = idx > 0 ? list[idx - 1] : null;
+          const nextEntry = idx >= 0 && idx < list.length - 1 ? list[idx + 1] : null;
+          const target = activeNoteEntry.target;
+
+          return (
+            <div className="w-full px-6 lg:px-10 py-6 space-y-6">
+              <div className="flex flex-wrap items-center justify-between gap-3 pb-4 border-b border-slate-200 dark:border-slate-800">
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  {!navOpen && (
+                    <button
+                      type="button"
+                      onClick={onToggleNav}
+                      title={`Show Docs navigation (${modKey}J)`}
+                      className="p-1.5 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+                    >
+                      <PanelLeft className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSection({ kind: 'notes' });
+                      mainPaneRef.current?.scrollTo({ top: 0 });
+                    }}
+                    className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 font-medium"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5" />
+                    <span>All Notes</span>
+                  </button>
+                  <span className="text-slate-400">/</span>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                    {activeNoteEntry.categoryLabel}
+                  </span>
+                  <span className="text-slate-400">/</span>
+                  <span className="font-mono font-semibold text-slate-900 dark:text-slate-100">
+                    {activeNoteEntry.title}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-3 text-xs">
+                  {activeNoteEntry.line && (
+                    <span className="text-[11px] font-mono text-slate-400">
+                      DBML line {activeNoteEntry.line}
+                    </span>
+                  )}
+                  {target && target.kind !== 'note' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (target.kind === 'table') {
+                          openTableDetail(target.tableId);
+                        } else {
+                          setSection(target);
+                          mainPaneRef.current?.scrollTo({ top: 0 });
+                        }
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      <span>
+                        {target.kind === 'table'
+                          ? `Open ${target.tableId}`
+                          : target.kind === 'group'
+                          ? `Open ${target.groupName}`
+                          : target.kind === 'enums'
+                          ? 'View Enums'
+                          : 'Schema Overview'}
+                      </span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex items-center gap-2.5">
+                  {activeNoteEntry.accentColor && (
+                    <span
+                      className="w-3 h-3 rounded-xs shrink-0"
+                      style={{ backgroundColor: activeNoteEntry.accentColor }}
+                    />
+                  )}
+                  <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-50 font-mono">
+                    {activeNoteEntry.title}
+                  </h1>
+                </div>
+                {activeNoteEntry.subtitle && (
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    {activeNoteEntry.subtitle}
+                  </p>
+                )}
+              </div>
+
+              <ReadmeNoteCard
+                key={`note-detail-${activeNoteEntry.id}`}
+                title={activeNoteEntry.categoryLabel}
+                subtitle={activeNoteEntry.title}
+                content={activeNoteEntry.content}
+                accentColor={activeNoteEntry.accentColor}
+                defaultExpanded
+                scrollContainerRef={mainPaneRef}
+              />
+
+              <div className="flex items-center justify-between pt-4 border-t border-slate-200 dark:border-slate-800 text-xs">
+                {prevEntry ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSection({ kind: 'noteDetail', entryId: prevEntry.id });
+                      mainPaneRef.current?.scrollTo({ top: 0 });
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 font-mono max-w-[45%] truncate"
+                  >
+                    <ArrowLeft className="w-3.5 h-3.5 shrink-0" />
+                    <span className="truncate">{prevEntry.title}</span>
+                  </button>
+                ) : (
+                  <span />
+                )}
+
+                {nextEntry && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSection({ kind: 'noteDetail', entryId: nextEntry.id });
+                      mainPaneRef.current?.scrollTo({ top: 0 });
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 font-mono max-w-[45%] truncate"
+                  >
+                    <span className="truncate">{nextEntry.title}</span>
+                    <ArrowRight className="w-3.5 h-3.5 shrink-0" />
+                  </button>
+                )}
+              </div>
+            </div>
+          );
+        })()}
 
         {/* ---------- 1C. BUSINESS DOMAIN (TABLEGROUP) README VIEW ---------- */}
         {section.kind === 'group' && activeGroup && (
@@ -1677,10 +2141,12 @@ export const DocsView: React.FC<DocsViewProps> = ({
 
             {activeGroup.note ? (
               <ReadmeNoteCard
+                key={`group-readme-${activeGroup.name}`}
                 title="TableGroup Documentation"
                 subtitle={activeGroup.name}
                 content={activeGroup.note}
                 accentColor={activeGroup.color || '#2563EB'}
+                defaultExpanded
                 scrollContainerRef={mainPaneRef}
               />
             ) : (
@@ -1705,7 +2171,15 @@ export const DocsView: React.FC<DocsViewProps> = ({
                       </span>
                     )}
                   </div>
-                  {sn.content && <MarkdownContent content={sn.content} compact />}
+                  {sn.content && (
+                    <TrimmableNote
+                      key={`grp-sn-${sn.id}`}
+                      content={sn.content}
+                      compact
+                      maxChars={180}
+                      defaultExpanded={false}
+                    />
+                  )}
                 </div>
               ))}
 
@@ -1803,82 +2277,98 @@ export const DocsView: React.FC<DocsViewProps> = ({
                     : `No enumerated types matching "${enumSearch}"`}
                 </div>
               ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="border-b border-slate-200 dark:border-slate-800 text-[11px] font-semibold text-slate-500 dark:text-slate-400 bg-slate-50/70 dark:bg-slate-900">
-                        <th className="py-3 px-5">Enum Name</th>
-                        <th className="py-3 px-4 text-right">Values</th>
-                        <th className="py-3 px-4">Allowed Members</th>
-                        <th className="py-3 px-5">Used By Columns</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100 dark:divide-slate-800/70 text-xs">
-                      {filteredEnums.map((en) => {
-                        const usages =
-                          enumUsageMap.get(en.id.toLowerCase()) ||
-                          enumUsageMap.get(en.name.toLowerCase()) ||
-                          [];
-                        return (
-                          <tr
-                            key={en.id}
-                            className="align-top hover:bg-slate-50/60 dark:hover:bg-slate-800/30 transition-colors"
-                          >
-                            <td className="py-3.5 px-5 font-mono font-semibold text-slate-900 dark:text-slate-100 whitespace-nowrap">
-                              <span className="inline-flex items-center gap-2">
-                                <ListChecks className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-                                <span>{en.id}</span>
-                              </span>
-                            </td>
-                            <td className="py-3.5 px-4 text-right font-mono text-slate-500 dark:text-slate-400 tabular-nums whitespace-nowrap">
-                              {en.values.length}
-                            </td>
-                            <td className="py-3.5 px-4">
-                              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-1.5">
-                                {en.values.map((v, idx) => (
-                                  <div
-                                    key={v.name}
-                                    className="flex items-baseline gap-2 font-mono text-[11.5px]"
-                                  >
-                                    <span className="text-[10px] text-slate-400 tabular-nums w-4 text-right shrink-0">
-                                      {idx + 1}.
-                                    </span>
-                                    <span className="text-slate-800 dark:text-slate-200 font-medium">
-                                      {v.name}
-                                    </span>
-                                    {v.note && (
-                                      <span className="font-sans text-[11px] text-slate-400">
-                                        — <MarkdownContent content={v.note} inline />
-                                      </span>
-                                    )}
-                                  </div>
-                                ))}
-                              </div>
-                            </td>
-                            <td className="py-3.5 px-5">
-                              {usages.length === 0 ? (
-                                <span className="text-slate-400">—</span>
-                              ) : (
-                                <div className="flex flex-wrap gap-1.5">
-                                  {usages.map((u) => (
-                                    <button
-                                      key={`${u.tableId}.${u.columnName}`}
-                                      type="button"
-                                      onClick={() => openTableDetail(u.tableId)}
-                                      className="font-mono text-[11px] px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-blue-600 dark:text-blue-400 hover:border-blue-400"
+                <>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse">
+                      <thead>
+                        <tr className="border-b border-slate-200 dark:border-slate-800 text-[11px] font-semibold text-slate-500 dark:text-slate-400 bg-slate-50/70 dark:bg-slate-900">
+                          <th className="py-3 px-5">Enum Name</th>
+                          <th className="py-3 px-4 text-right">Values</th>
+                          <th className="py-3 px-4">Allowed Members</th>
+                          <th className="py-3 px-5">Used By Columns</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 dark:divide-slate-800/70 text-xs">
+                        {pagedEnums.map((en) => {
+                          const usages =
+                            enumUsageMap.get(en.id.toLowerCase()) ||
+                            enumUsageMap.get(en.name.toLowerCase()) ||
+                            [];
+                          return (
+                            <tr
+                              key={en.id}
+                              className="align-top hover:bg-slate-50/60 dark:hover:bg-slate-800/30 transition-colors"
+                            >
+                              <td className="py-3.5 px-5 font-mono font-semibold text-slate-900 dark:text-slate-100 whitespace-nowrap">
+                                <span className="inline-flex items-center gap-2">
+                                  <ListChecks className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                                  <span>{en.id}</span>
+                                </span>
+                              </td>
+                              <td className="py-3.5 px-4 text-right font-mono text-slate-500 dark:text-slate-400 tabular-nums whitespace-nowrap">
+                                {en.values.length}
+                              </td>
+                              <td className="py-3.5 px-4">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-1.5">
+                                  {en.values.map((v, idx) => (
+                                    <div
+                                      key={v.name}
+                                      className="flex items-baseline gap-2 font-mono text-[11.5px]"
                                     >
-                                      {u.tableId}.{u.columnName}
-                                    </button>
+                                      <span className="text-[10px] text-slate-400 tabular-nums w-4 text-right shrink-0">
+                                        {idx + 1}.
+                                      </span>
+                                      <span className="text-slate-800 dark:text-slate-200 font-medium">
+                                        {v.name}
+                                      </span>
+                                      {v.note && (
+                                        <span className="font-sans text-[11px] text-slate-400">
+                                          —{' '}
+                                          <TrimmableNote
+                                            content={v.note}
+                                            inlineShort
+                                            maxChars={90}
+                                          />
+                                        </span>
+                                      )}
+                                    </div>
                                   ))}
                                 </div>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                              </td>
+                              <td className="py-3.5 px-5">
+                                {usages.length === 0 ? (
+                                  <span className="text-slate-400">—</span>
+                                ) : (
+                                  <div className="flex flex-wrap gap-1.5">
+                                    {usages.map((u) => (
+                                      <button
+                                        key={`${u.tableId}.${u.columnName}`}
+                                        type="button"
+                                        onClick={() => openTableDetail(u.tableId)}
+                                        className="font-mono text-[11px] px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-blue-600 dark:text-blue-400 hover:border-blue-400"
+                                      >
+                                        {u.tableId}.{u.columnName}
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <PaginationBar
+                    page={safeEnumPage}
+                    pageSize={enumPageSize}
+                    totalItems={filteredEnums.length}
+                    itemLabel="enums"
+                    onPageChange={setEnumPage}
+                    onPageSizeChange={setEnumPageSize}
+                  />
+                </>
               )}
             </div>
           </div>
@@ -2139,7 +2629,7 @@ export const DocsView: React.FC<DocsViewProps> = ({
               </div>
             ) : (
               <div className="space-y-4">
-                {filteredTableGroups.map((g) => (
+                {pagedTableGroups.map((g) => (
                   <section
                     key={g.name}
                     className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden"
@@ -2174,7 +2664,12 @@ export const DocsView: React.FC<DocsViewProps> = ({
                     <div className="px-5 py-4 space-y-4">
                       {g.note ? (
                         <div className="max-w-4xl">
-                          <MarkdownContent content={g.note} />
+                          <TrimmableNote
+                            key={`grp-list-${g.name}`}
+                            content={g.note}
+                            maxChars={200}
+                            defaultExpanded={false}
+                          />
                         </div>
                       ) : (
                         <p className="text-xs text-slate-400 italic">
@@ -2202,12 +2697,23 @@ export const DocsView: React.FC<DocsViewProps> = ({
                     </div>
                   </section>
                 ))}
+
+                <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
+                  <PaginationBar
+                    page={safeGroupsPage}
+                    pageSize={groupsPageSize}
+                    totalItems={filteredTableGroups.length}
+                    itemLabel="table groups"
+                    onPageChange={setGroupsPage}
+                    onPageSizeChange={setGroupsPageSize}
+                  />
+                </div>
               </div>
             )}
           </div>
         )}
 
-        {/* ---------- 3C. ALL NOTES DIRECTORY VIEW ---------- */}
+        {/* ---------- 3C. ALL NOTES DIRECTORY VIEW (TRIMMED + PAGINATED) ---------- */}
         {section.kind === 'notes' && (
           <div className="w-full px-6 lg:px-10 py-6 space-y-6">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-200 dark:border-slate-800">
@@ -2308,70 +2814,76 @@ export const DocsView: React.FC<DocsViewProps> = ({
                 )}
               </div>
             ) : (
-              <div className="space-y-4">
-                {filteredNoteEntries.map((entry) => (
-                  <section
-                    key={entry.id}
-                    className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden"
-                  >
-                    <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-900 flex flex-wrap items-center justify-between gap-2">
-                      <div className="flex flex-wrap items-center gap-2 min-w-0">
-                        <span className="px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-600 dark:text-slate-300 shrink-0">
-                          {entry.categoryLabel}
-                        </span>
-                        {entry.accentColor && (
-                          <span
-                            className="w-2.5 h-2.5 rounded-xs shrink-0"
-                            style={{ backgroundColor: entry.accentColor }}
-                          />
-                        )}
-                        <span className="text-xs font-mono font-bold text-slate-900 dark:text-slate-100 truncate">
-                          {entry.title}
-                        </span>
-                        {entry.subtitle && (
-                          <span className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
-                            · {entry.subtitle}
-                          </span>
-                        )}
-                      </div>
+              <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
+                <div className="divide-y divide-slate-100 dark:divide-slate-800/80">
+                  {pagedNoteEntries.map((entry) => {
+                    const { preview, words } = trimNotePreview(entry.content, 200);
+                    return (
+                      <div
+                        key={entry.id}
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => {
+                          setSection({ kind: 'noteDetail', entryId: entry.id });
+                          mainPaneRef.current?.scrollTo({ top: 0 });
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault();
+                            setSection({ kind: 'noteDetail', entryId: entry.id });
+                            mainPaneRef.current?.scrollTo({ top: 0 });
+                          }
+                        }}
+                        className="cursor-pointer px-5 py-4 hover:bg-slate-50/80 dark:hover:bg-slate-800/40 transition-colors space-y-1.5"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <div className="flex flex-wrap items-center gap-2 min-w-0">
+                            <span className="px-2 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wider border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-300 shrink-0">
+                              {entry.categoryLabel}
+                            </span>
+                            {entry.accentColor && (
+                              <span
+                                className="w-2.5 h-2.5 rounded-xs shrink-0"
+                                style={{ backgroundColor: entry.accentColor }}
+                              />
+                            )}
+                            <span className="text-xs font-mono font-bold text-slate-900 dark:text-slate-100 truncate">
+                              {entry.title}
+                            </span>
+                            {entry.subtitle && (
+                              <span className="text-[11px] text-slate-500 dark:text-slate-400 truncate">
+                                · {entry.subtitle}
+                              </span>
+                            )}
+                          </div>
 
-                      {entry.target && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const tgt = entry.target!;
-                            if (tgt.kind === 'table') {
-                              openTableDetail(tgt.tableId);
-                            } else {
-                              setSection(tgt);
-                              mainPaneRef.current?.scrollTo({ top: 0 });
-                            }
-                          }}
-                          className="inline-flex items-center gap-1 text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline shrink-0"
-                        >
-                          <span>
-                            {entry.target.kind === 'table'
-                              ? 'Open Table'
-                              : entry.target.kind === 'group'
-                              ? 'Open TableGroup'
-                              : entry.target.kind === 'note'
-                              ? 'Open Note'
-                              : entry.target.kind === 'enums'
-                              ? 'View Enums'
-                              : 'Overview'}
-                          </span>
-                          <ArrowRight className="w-3 h-3" />
-                        </button>
-                      )}
-                    </div>
+                          <div className="flex items-center gap-3 text-[11px] shrink-0">
+                            <span className="text-slate-400 tabular-nums">
+                              {words} {words === 1 ? 'word' : 'words'}
+                            </span>
+                            <span className="inline-flex items-center gap-1 font-semibold text-blue-600 dark:text-blue-400">
+                              <span>Open Note</span>
+                              <ArrowRight className="w-3 h-3" />
+                            </span>
+                          </div>
+                        </div>
 
-                    <div className="px-5 py-4">
-                      <div className="max-w-4xl">
-                        <MarkdownContent content={entry.content} />
+                        <p className="text-xs text-slate-600 dark:text-slate-300 line-clamp-2 leading-relaxed max-w-4xl">
+                          {preview}
+                        </p>
                       </div>
-                    </div>
-                  </section>
-                ))}
+                    );
+                  })}
+                </div>
+
+                <PaginationBar
+                  page={safeNotesPage}
+                  pageSize={notesPageSize}
+                  totalItems={filteredNoteEntries.length}
+                  itemLabel="notes"
+                  onPageChange={setNotesPage}
+                  onPageSizeChange={setNotesPageSize}
+                />
               </div>
             )}
           </div>
@@ -2438,7 +2950,13 @@ export const DocsView: React.FC<DocsViewProps> = ({
                 </h1>
                 {schema.project.note && !isRichMarkdownNote(schema.project.note) && (
                   <div className="text-sm text-slate-600 dark:text-slate-300 max-w-3xl">
-                    <MarkdownContent content={schema.project.note} compact />
+                    <TrimmableNote
+                      key={`ov-proj-short-${schema.project.name || 'default'}`}
+                      content={schema.project.note}
+                      compact
+                      maxChars={120}
+                      defaultExpanded={false}
+                    />
                   </div>
                 )}
               </div>
@@ -2455,17 +2973,19 @@ export const DocsView: React.FC<DocsViewProps> = ({
               </div>
             </div>
 
-            {/* Project README Card (for rich / multi-line project notes) */}
+            {/* Project README Card (trimmed by default on Overview, click to expand) */}
             {schema.project.note && isRichMarkdownNote(schema.project.note) && (
               <ReadmeNoteCard
+                key={`ov-readme-${schema.project.name || 'default'}`}
                 title="README"
                 subtitle={schema.project.name || 'Project Documentation'}
                 content={schema.project.note}
+                defaultExpanded={false}
                 scrollContainerRef={mainPaneRef}
               />
             )}
 
-            {/* Standalone Project Notes Directory (if any Note blocks exist) */}
+            {/* Standalone Project Notes Directory (trimmed preview, click to open note detail) */}
             {schema.notes.length > 0 && (
               <div className="space-y-2.5">
                 <div className="flex items-center justify-between text-xs font-semibold text-slate-700 dark:text-slate-200">
@@ -2502,7 +3022,7 @@ export const DocsView: React.FC<DocsViewProps> = ({
                         <ArrowRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                       </div>
                       <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2">
-                        {stripMarkdownToPlainText(n.content)}
+                        {trimNotePreview(n.content, 160).preview}
                       </p>
                     </button>
                   ))}
@@ -2510,7 +3030,7 @@ export const DocsView: React.FC<DocsViewProps> = ({
               </div>
             )}
 
-            {/* Business Domains / TableGroup Notes Strip */}
+            {/* Business Domains / TableGroup Notes Strip (trimmed preview, click to open detail) */}
             {visibleGroups.length > 0 && (
               <div className="space-y-2.5">
                 <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
@@ -2562,7 +3082,7 @@ export const DocsView: React.FC<DocsViewProps> = ({
                       }}
                       className="cursor-pointer p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-blue-400 dark:hover:border-blue-600 text-left space-y-2 transition-colors flex flex-col justify-between"
                     >
-                      <div className="space-y-2 w-full">
+                      <div className="space-y-1.5 w-full">
                         <div className="flex items-center justify-between gap-2">
                           <span className="inline-flex items-center gap-2 min-w-0">
                             <span
@@ -2578,9 +3098,9 @@ export const DocsView: React.FC<DocsViewProps> = ({
                           </span>
                         </div>
                         {g.note ? (
-                          <div className="text-xs text-slate-600 dark:text-slate-300 max-h-36 overflow-hidden">
-                            <MarkdownContent content={g.note} compact />
-                          </div>
+                          <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">
+                            {trimNotePreview(g.note, 160).preview}
+                          </p>
                         ) : (
                           <p className="text-[11.5px] text-slate-400 italic">
                             No TableGroup note defined
