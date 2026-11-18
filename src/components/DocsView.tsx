@@ -2309,28 +2309,29 @@ export const DocsView: React.FC<DocsViewProps> = ({
                                 {en.values.length}
                               </td>
                               <td className="py-3.5 px-4">
-                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-4 gap-y-1.5">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-x-5 gap-y-2.5">
                                   {en.values.map((v, idx) => (
                                     <div
                                       key={v.name}
-                                      className="flex items-baseline gap-2 font-mono text-[11.5px]"
+                                      className="flex items-start gap-2 min-w-0"
                                     >
-                                      <span className="text-[10px] text-slate-400 tabular-nums w-4 text-right shrink-0">
+                                      <span className="font-mono text-[10px] text-slate-400 tabular-nums w-4 text-right shrink-0 pt-0.5">
                                         {idx + 1}.
                                       </span>
-                                      <span className="text-slate-800 dark:text-slate-200 font-medium">
-                                        {v.name}
-                                      </span>
-                                      {v.note && (
-                                        <span className="font-sans text-[11px] text-slate-400">
-                                          —{' '}
-                                          <TrimmableNote
-                                            content={v.note}
-                                            inlineShort
-                                            maxChars={90}
-                                          />
-                                        </span>
-                                      )}
+                                      <div className="min-w-0 flex-1 space-y-0.5">
+                                        <div className="font-mono text-[11.5px] text-slate-800 dark:text-slate-200 font-medium break-words">
+                                          {v.name}
+                                        </div>
+                                        {v.note && (
+                                          <div className="font-sans text-[11px] text-slate-500 dark:text-slate-400 leading-snug">
+                                            <TrimmableNote
+                                              content={v.note}
+                                              compact
+                                              maxChars={90}
+                                            />
+                                          </div>
+                                        )}
+                                      </div>
                                     </div>
                                   ))}
                                 </div>
