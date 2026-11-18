@@ -8,12 +8,14 @@ import {
   EyeOff,
   Filter,
   Grid,
+  Hand,
   KeyRound,
   Link2,
   Map as MapIcon,
   Maximize2,
   Minimize2,
   Minus,
+  MousePointer2,
   Palette,
   Plus,
   Rows3,
@@ -121,6 +123,9 @@ const NOTE_STYLES: Record<
   },
 };
 
+type CursorMode = 'select' | 'pan';
+const CURSOR_MODE_STORAGE_KEY = 'schemaforge_diagram_cursor_mode';
+
 export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
   schema,
   positions,
@@ -150,6 +155,14 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
   const [viewport, setViewport] = useState({ x: 40, y: 40, zoom: 0.85 });
   const [snapGrid, setSnapGrid] = useState(true);
   const [showMinimap, setShowMinimap] = useState(true);
+  const [cursorMode, setCursorMode] = useState<CursorMode>(() => {
+    try {
+      const saved = localStorage.getItem(CURSOR_MODE_STORAGE_KEY);
+      return saved === 'pan' ? 'pan' : 'select';
+    } catch {
+      return 'select';
+    }
+  });
   const [domainMenuOpen, setDomainMenuOpen] = useState(false);
   const [detailMenuOpen, setDetailMenuOpen] = useState(false);
   const [hoveredTableId, setHoveredTableId] = useState<string | null>(null);
@@ -161,6 +174,21 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     null
   );
   const [altPressedDuringDrag, setAltPressedDuringDrag] = useState(false);
+
+  const updateCursorMode = useCallback((mode: CursorMode) => {
+    setCursorMode(mode);
+    if (mode === 'pan') {
+      setHoveredTableId(null);
+      setHoveredRefId(null);
+      setColorPickerPosKey(null);
+      setDropTargetGroupName(null);
+    }
+    try {
+      localStorage.setItem(CURSOR_MODE_STORAGE_KEY, mode);
+    } catch {
+      // ignore storage errors
+    }
+  }, []);
 
   const dragRef = useRef<
     | { type: 'pan'; startX: number; startY: number; origX: number; origY: number }
@@ -292,9 +320,32 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         setDetailMenuOpen(false);
       }
     };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const target = e.target as HTMLElement | null;
+      if (
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT' ||
+          target.isContentEditable)
+      ) {
+        return;
+      }
+      const key = e.key.toLowerCase();
+      if (key === 'v') {
+        updateCursorMode('select');
+      } else if (key === 'h') {
+        updateCursorMode('pan');
+      }
+    };
     window.addEventListener('pointerdown', onPointerDownOutside);
-    return () => window.removeEventListener('pointerdown', onPointerDownOutside);
-  }, []);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDownOutside);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [updateCursorMode]);
 
   const fitBounds = useCallback(
     (boxes: Array<{ x: number; y: number; width: number; height: number }>) => {
@@ -563,6 +614,16 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
       ref={containerRef}
       onWheel={handleWheel}
       onPointerDown={(e) => {
+        if (cursorMode === 'pan') {
+          dragRef.current = {
+            type: 'pan',
+            startX: e.clientX,
+            startY: e.clientY,
+            origX: viewport.x,
+            origY: viewport.y,
+          };
+          return;
+        }
         if (
           e.target === e.currentTarget ||
           (e.target as HTMLElement).dataset.canvasBg === 'true'
@@ -609,12 +670,13 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
                 borderColor: isDropTarget ? '#2563EB' : `${color}66`,
                 backgroundColor: `${color}${darkMode ? '14' : '0d'}`,
               }}
-              className={`absolute rounded-2xl border-2 border-dashed transition-opacity pointer-events-auto ${
-                isDropTarget ? 'ring-4 ring-blue-500/30 border-solid' : ''
-              }`}
+              className={`absolute rounded-2xl border-2 border-dashed transition-opacity ${
+                cursorMode === 'pan' ? 'pointer-events-none' : 'pointer-events-auto'
+              } ${isDropTarget ? 'ring-4 ring-blue-500/30 border-solid' : ''}`}
             >
               <div
                 onPointerDown={(e) => {
+                  if (cursorMode === 'pan') return;
                   e.stopPropagation();
                   const origPositions: Record<string, TablePosition> = {};
                   for (const pk of gb.posKeys) {
@@ -784,8 +846,14 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
                   fill="none"
                   stroke="transparent"
                   strokeWidth={14}
-                  className="pointer-events-auto cursor-pointer"
-                  onMouseEnter={() => setHoveredRefId(edge.id)}
+                  className={
+                    cursorMode === 'pan'
+                      ? 'pointer-events-none'
+                      : 'pointer-events-auto cursor-pointer'
+                  }
+                  onMouseEnter={() => {
+                    if (cursorMode === 'select') setHoveredRefId(edge.id);
+                  }}
                   onMouseLeave={() => setHoveredRefId(null)}
                 />
                 <path
@@ -876,9 +944,12 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
                 top: pos.y,
                 width: TABLE_WIDTH,
               }}
-              onMouseEnter={() => setHoveredTableId(table.id)}
+              onMouseEnter={() => {
+                if (cursorMode === 'select') setHoveredTableId(table.id);
+              }}
               onMouseLeave={() => setHoveredTableId(null)}
               onPointerDown={(e) => {
+                if (cursorMode === 'pan') return;
                 e.stopPropagation();
                 onSelectTable(table.id);
                 setColorPickerPosKey(null);
@@ -892,7 +963,9 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
                   origGroup: inst.groupName,
                 };
               }}
-              className={`absolute rounded-lg border bg-white dark:bg-slate-900 pointer-events-auto select-none transition-opacity ${
+              className={`absolute rounded-lg border bg-white dark:bg-slate-900 select-none transition-opacity ${
+                cursorMode === 'pan' ? 'pointer-events-none' : 'pointer-events-auto'
+              } ${
                 isSelected
                   ? 'border-blue-600 ring-2 ring-blue-500/30 z-10'
                   : isHovered
@@ -1080,10 +1153,13 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
                 top: note.y,
                 width: note.width,
               }}
-              className={`absolute rounded-lg border shadow-sm pointer-events-auto ${style.bg} ${style.border} ${style.text}`}
+              className={`absolute rounded-lg border shadow-sm ${
+                cursorMode === 'pan' ? 'pointer-events-none' : 'pointer-events-auto'
+              } ${style.bg} ${style.border} ${style.text}`}
             >
               <div
                 onPointerDown={(e) => {
+                  if (cursorMode === 'pan') return;
                   e.stopPropagation();
                   dragRef.current = {
                     type: 'note',
@@ -1386,8 +1462,44 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
       {/* Floating Canvas Toolbar */}
       <div
         onPointerDown={(e) => e.stopPropagation()}
-        className="absolute bottom-4 right-4 flex items-center gap-1.5 p-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xs shadow-sm"
+        className="absolute bottom-4 right-4 z-20 flex flex-wrap items-center gap-1.5 p-1.5 rounded-xl border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xs shadow-sm max-w-[calc(100%-2rem)]"
       >
+        {/* Cursor Mode Toggle: Select/Drag Objects vs Pan Canvas Only */}
+        <div
+          className="flex items-center gap-0.5 p-0.5 rounded-lg bg-slate-100 dark:bg-slate-800/80"
+          role="group"
+          aria-label="Diagram cursor mode"
+        >
+          <button
+            type="button"
+            onClick={() => updateCursorMode('select')}
+            title="Select & Drag Objects (V) — click and drag tables, groups, and notes"
+            className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-colors whitespace-nowrap ${
+              cursorMode === 'select'
+                ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100'
+            }`}
+          >
+            <MousePointer2 className="w-3.5 h-3.5 shrink-0" />
+            <span>Select</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => updateCursorMode('pan')}
+            title="Move Canvas Only (H) — drag anywhere to pan without selecting or moving objects"
+            className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-colors whitespace-nowrap ${
+              cursorMode === 'pan'
+                ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
+                : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100'
+            }`}
+          >
+            <Hand className="w-3.5 h-3.5 shrink-0" />
+            <span>Pan</span>
+          </button>
+        </div>
+
+        <div className="w-px h-5 bg-slate-200 dark:bg-slate-700" />
+
         {/* dbdiagram-style Table Fields Visibility Selector */}
         <div ref={detailMenuRef} className="relative">
           <button
