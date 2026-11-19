@@ -1,5 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeft, ChevronRight } from 'lucide-react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowUp, ChevronLeft, ChevronRight } from 'lucide-react';
 import { DocsSidebar } from './components/DocsSidebar';
 import { buildAllNoteEntries, matchesTableQuery } from './noteUtils';
 import { AllNotesPage } from './pages/AllNotesPage';
@@ -37,6 +37,7 @@ export const DocsView: React.FC<DocsViewProps> = ({
   const [section, setSection] = useState<DocsSection>({ kind: 'overview' });
   const [expandedDomains, setExpandedDomains] = useState<Record<string, boolean>>({});
   const [expandedTreeTables, setExpandedTreeTables] = useState<Record<string, boolean>>({});
+  const [showScrollTop, setShowScrollTop] = useState(false);
   const mainPaneRef = useRef<HTMLDivElement | null>(null);
 
   // Pagination & search states
@@ -367,6 +368,26 @@ export const DocsView: React.FC<DocsViewProps> = ({
     }
   }, [section, activeNoteEntry]);
 
+  const updateScrollTopVisibility = useCallback(() => {
+    const pane = mainPaneRef.current;
+    setShowScrollTop(Boolean(pane && pane.scrollTop > 160));
+  }, []);
+
+  useEffect(() => {
+    const pane = mainPaneRef.current;
+    if (!pane) return;
+    const handleScroll = () => updateScrollTopVisibility();
+    pane.addEventListener('scroll', handleScroll, { passive: true });
+    updateScrollTopVisibility();
+    return () => {
+      pane.removeEventListener('scroll', handleScroll);
+    };
+  }, [updateScrollTopVisibility, section]);
+
+  const handleScrollToTop = () => {
+    mainPaneRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   const navigateSection = (next: DocsSection) => {
     setSection(next);
     mainPaneRef.current?.scrollTo({ top: 0 });
@@ -609,6 +630,19 @@ export const DocsView: React.FC<DocsViewProps> = ({
           />
         )}
       </div>
+
+      {showScrollTop && (
+        <button
+          type="button"
+          onClick={handleScrollToTop}
+          title="Go to top"
+          aria-label="Go to top"
+          className="absolute bottom-5 right-6 z-20 inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xs text-xs font-medium text-slate-700 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-400 dark:hover:border-blue-600 shadow-lg shadow-slate-900/10 dark:shadow-black/40 transition-all"
+        >
+          <ArrowUp className="w-3.5 h-3.5" />
+          <span></span>
+        </button>
+      )}
     </div>
   );
 };
