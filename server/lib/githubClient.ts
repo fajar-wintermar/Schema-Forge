@@ -271,3 +271,69 @@ export async function commitInlineTree(params: {
     })),
   };
 }
+
+export function isValidGithubBranchName(branch: string): boolean {
+  return Boolean(branch) && !/[\s~^:?*\[]/.test(branch);
+}
+
+export async function createBranchRef(params: {
+  owner: string;
+  repo: string;
+  newBranch: string;
+  baseSha: string;
+  accessToken: string;
+}): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+  const { owner, repo, newBranch, baseSha, accessToken } = params;
+  const createRefRes = await githubApiFetch(
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/refs`,
+    accessToken,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ref: `refs/heads/${newBranch}`,
+        sha: baseSha,
+      }),
+    }
+  );
+  const createRefJson = (await createRefRes.json()) as { message?: string };
+  if (!createRefRes.ok) {
+    return {
+      ok: false,
+      status: createRefRes.status || 400,
+      error: createRefJson.message || `Failed to create branch "${newBranch}".`,
+    };
+  }
+  return { ok: true };
+}
+
+export async function fetchBlobText(params: {
+  owner: string;
+  repo: string;
+  sha: string;
+  path: string;
+  accessToken?: string;
+  decodeBase64: (b64: string) => string;
+}): Promise<{ path: string; content: string; sha: string }> {
+  const { owner, repo, sha, path, accessToken, decodeBase64 } = params;
+  const blobRes = await githubApiFetch(
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+      repo
+    )}/git/blobs/${encodeURIComponent(sha)}`,
+    accessToken
+  );
+  const blobJson = (await blobRes.json()) as {
+    content?: string;
+    encoding?: string;
+    message?: string;
+  };
+  if (!blobRes.ok || typeof blobJson.content !== 'string') {
+    throw new Error(blobJson.message || `Failed to read blob for ${path}`);
+  }
+  const content =
+    blobJson.encoding === 'base64'
+      ? decodeBase64(blobJson.content)
+      : blobJson.content;
+  return { path, content, sha };
+}
+

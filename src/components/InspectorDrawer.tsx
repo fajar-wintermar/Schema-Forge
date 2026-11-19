@@ -9,7 +9,7 @@ import {
   X,
 } from 'lucide-react';
 import { ParsedSchema, TableDef } from '../types/schema';
-import { MarkdownContent } from './MarkdownContent';
+import { MarkdownContent } from '../features/markdown/MarkdownContent';
 
 interface InspectorDrawerProps {
   table: TableDef | null;

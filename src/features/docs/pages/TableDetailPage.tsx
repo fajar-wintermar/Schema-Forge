@@ -7,7 +7,7 @@ import {
   Link2,
 } from 'lucide-react';
 import { ParsedSchema, StickyNote, TableDef } from '../../../types/schema';
-import { isRichMarkdownNote } from '../../../components/MarkdownContent';
+import { isRichMarkdownNote } from '../../markdown/markdownUtils';
 import { CardinalityBadge } from '../components/CardinalityBadge';
 import { DocsBreadcrumb } from '../components/DocsBreadcrumb';
 import { ReadmeNoteCard } from '../components/ReadmeNoteCard';

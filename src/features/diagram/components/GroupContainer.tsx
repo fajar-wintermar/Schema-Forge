@@ -2,7 +2,7 @@ import React from 'react';
 import { Edit3, Eye, EyeOff, Sparkles } from 'lucide-react';
 import { TableGroupDef } from '../../../types/schema';
 import { GroupBoundingBox } from '../../../utils/autoLayout';
-import { stripMarkdownToPlainText } from '../../../components/MarkdownContent';
+import { stripMarkdownToPlainText } from '../../markdown/markdownUtils';
 import type { CursorMode } from '../types';
 
 export interface GroupContainerProps {

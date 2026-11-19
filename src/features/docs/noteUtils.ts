@@ -2,7 +2,7 @@ import { ParsedSchema, StickyNote, TableDef } from '../../types/schema';
 import {
   isRichMarkdownNote,
   stripMarkdownToPlainText,
-} from '../../components/MarkdownContent';
+} from '../markdown/markdownUtils';
 import type { DocsNoteEntry } from './types';
 
 export function trimNotePreview(

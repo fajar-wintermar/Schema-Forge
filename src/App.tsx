@@ -8,7 +8,7 @@ import React, {
 } from 'react';
 import { Maximize2, PanelLeftOpen } from 'lucide-react';
 import { InspectorDrawer } from './components/InspectorDrawer';
-import { Sidebar, SidebarTab } from './components/Sidebar';
+import { Sidebar, SidebarTab } from './features/sidebar/Sidebar';
 import { GlobalSearchResult, TopBar } from './components/TopBar';
 import { useGlobalShortcuts } from './features/app/hooks/useGlobalShortcuts';
 import { DiagramCanvas } from './features/diagram/DiagramCanvas';

@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
-import { MarkdownContent } from '../../../components/MarkdownContent';
+import { MarkdownContent } from '../../markdown/MarkdownContent';
 import { trimNotePreview } from '../noteUtils';
 
 export interface TrimmableNoteProps {

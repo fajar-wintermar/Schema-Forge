@@ -637,10 +637,9 @@ export const DocsView: React.FC<DocsViewProps> = ({
           onClick={handleScrollToTop}
           title="Go to top"
           aria-label="Go to top"
-          className="absolute bottom-5 right-6 z-20 inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xs text-xs font-medium text-slate-700 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-400 dark:hover:border-blue-600 shadow-lg shadow-slate-900/10 dark:shadow-black/40 transition-all"
+          className="absolute bottom-5 right-6 z-20 inline-flex items-center justify-center w-9 h-9 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xs text-slate-700 dark:text-slate-200 hover:text-blue-600 dark:hover:text-blue-400 hover:border-blue-400 dark:hover:border-blue-600 shadow-lg shadow-slate-900/10 dark:shadow-black/40 transition-all"
         >
-          <ArrowUp className="w-3.5 h-3.5" />
-          <span></span>
+          <ArrowUp className="w-4 h-4" />
         </button>
       )}
     </div>

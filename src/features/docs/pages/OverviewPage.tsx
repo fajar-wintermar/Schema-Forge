@@ -12,7 +12,7 @@ import { ParsedSchema, TableDef, TableGroupDef } from '../../../types/schema';
 import {
   isRichMarkdownNote,
   stripMarkdownToPlainText,
-} from '../../../components/MarkdownContent';
+} from '../../markdown/markdownUtils';
 import { PaginationBar } from '../components/PaginationBar';
 import { ReadmeNoteCard } from '../components/ReadmeNoteCard';
 import { TrimmableNote } from '../components/TrimmableNote';

@@ -3,7 +3,7 @@ import { ArrowRight, BookOpen, ChevronDown, ChevronUp } from 'lucide-react';
 import {
   MarkdownContent,
   extractMarkdownHeadings,
-} from '../../../components/MarkdownContent';
+} from '../../markdown/MarkdownContent';
 import { trimNotePreview } from '../noteUtils';
 
 export interface ReadmeNoteCardProps {
