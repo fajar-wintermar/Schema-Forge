@@ -13,6 +13,7 @@ export interface TableCardProps {
   fkSet?: Set<string>;
   isSelected: boolean;
   isHovered: boolean;
+  focusState?: 'focused' | 'neighbor' | 'dimmed' | 'normal';
   highlightedColumn?: { tableId: string; columnName: string } | null;
   colorPickerOpen: boolean;
   cursorMode: CursorMode;
@@ -31,6 +32,7 @@ export const TableCard: React.FC<TableCardProps> = ({
   fkSet,
   isSelected,
   isHovered,
+  focusState = 'normal',
   highlightedColumn,
   colorPickerOpen,
   cursorMode,
@@ -76,8 +78,12 @@ export const TableCard: React.FC<TableCardProps> = ({
       className={`absolute rounded-lg border bg-white dark:bg-slate-900 select-none transition-opacity ${
         cursorMode === 'pan' ? 'pointer-events-none' : 'pointer-events-auto'
       } ${
-        isSelected
-          ? 'border-blue-600 ring-2 ring-blue-500/30 z-10'
+        focusState === 'dimmed'
+          ? 'opacity-25 hover:opacity-85 border-slate-300 dark:border-slate-700'
+          : isSelected || focusState === 'focused'
+          ? 'border-blue-600 ring-2 ring-blue-500/35 z-20'
+          : focusState === 'neighbor'
+          ? 'border-blue-400 dark:border-blue-500 ring-1 ring-blue-400/40 z-10'
           : isHovered
           ? 'border-slate-400 dark:border-slate-500 z-10'
           : 'border-slate-300 dark:border-slate-700'

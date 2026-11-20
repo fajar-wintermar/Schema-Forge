@@ -2,6 +2,8 @@ import React from 'react';
 import {
   Check,
   ChevronUp,
+  CornerDownRight,
+  Crosshair,
   Grid,
   Hand,
   Map as MapIcon,
@@ -11,13 +13,17 @@ import {
   Plus,
   Rows3,
   Sparkles,
+  Spline,
   StickyNote as StickyNoteIcon,
 } from 'lucide-react';
 import { DetailLevel } from '../../../types/schema';
+import type { EdgeRoutingMode } from '../../../utils/io/edgeGeometry';
 import type { CursorMode } from '../types';
 
 export interface CanvasToolbarProps {
   cursorMode: CursorMode;
+  focusMode: boolean;
+  routingMode: EdgeRoutingMode;
   detailLevel: DetailLevel;
   detailMenuOpen: boolean;
   detailMenuRef: React.RefObject<HTMLDivElement | null>;
@@ -25,6 +31,8 @@ export interface CanvasToolbarProps {
   showMinimap: boolean;
   zoom: number;
   onUpdateCursorMode: (mode: CursorMode) => void;
+  onToggleFocusMode: () => void;
+  onToggleRoutingMode: () => void;
   onToggleDetailMenu: () => void;
   onCloseDetailMenu: () => void;
   onChangeDetailLevel: (level: DetailLevel) => void;
@@ -39,6 +47,8 @@ export interface CanvasToolbarProps {
 
 export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
   cursorMode,
+  focusMode,
+  routingMode,
   detailLevel,
   detailMenuOpen,
   detailMenuRef,
@@ -46,6 +56,8 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
   showMinimap,
   zoom,
   onUpdateCursorMode,
+  onToggleFocusMode,
+  onToggleRoutingMode,
   onToggleDetailMenu,
   onCloseDetailMenu,
   onChangeDetailLevel,
@@ -194,6 +206,52 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
         </div>
       )}
     </div>
+
+    <div className="w-px h-5 bg-slate-200 dark:bg-slate-700" />
+
+    <button
+      type="button"
+      onClick={onToggleFocusMode}
+      title={
+        focusMode
+          ? 'Focus Neighborhood Mode: On (F) — click any table to isolate 1-hop neighbors'
+          : 'Focus Neighborhood Mode: Off (F) — isolate 1-hop upstream/downstream tables'
+      }
+      className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
+        focusMode
+          ? 'bg-blue-600 text-white shadow-xs'
+          : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+      }`}
+    >
+      <Crosshair
+        className={`w-3.5 h-3.5 shrink-0 ${
+          focusMode ? 'text-white' : 'text-blue-600 dark:text-blue-400'
+        }`}
+      />
+      <span>Focus</span>
+    </button>
+
+    <button
+      type="button"
+      onClick={onToggleRoutingMode}
+      title={
+        routingMode === 'orthogonal'
+          ? 'Edge routing: Orthogonal right-angle (click to switch to Curved Bézier)'
+          : 'Edge routing: Curved Bézier (click to switch to Orthogonal right-angle)'
+      }
+      className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
+        routingMode === 'orthogonal'
+          ? 'bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300'
+          : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+      }`}
+    >
+      {routingMode === 'orthogonal' ? (
+        <CornerDownRight className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+      ) : (
+        <Spline className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+      )}
+      <span>{routingMode === 'orthogonal' ? 'Ortho' : 'Curved'}</span>
+    </button>
 
     <div className="w-px h-5 bg-slate-200 dark:bg-slate-700" />
 

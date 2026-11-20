@@ -6,6 +6,7 @@ import { CursorMode, NOTE_STYLES } from '../types';
 export interface StickyNoteCardProps {
   note: StickyNote;
   cursorMode: CursorMode;
+  isDimmed?: boolean;
   onStartDrag: (e: React.PointerEvent) => void;
   onUpdate: (patch: Partial<StickyNote>) => void;
   onDelete: () => void;
@@ -14,6 +15,7 @@ export interface StickyNoteCardProps {
 export const StickyNoteCard: React.FC<StickyNoteCardProps> = ({
   note,
   cursorMode,
+  isDimmed = false,
   onStartDrag,
   onUpdate,
   onDelete,
@@ -22,9 +24,9 @@ export const StickyNoteCard: React.FC<StickyNoteCardProps> = ({
   return (
     <div
       style={{ left: note.x, top: note.y, width: note.width }}
-      className={`absolute rounded-lg border shadow-sm ${
+      className={`absolute rounded-lg border shadow-sm transition-opacity ${
         cursorMode === 'pan' ? 'pointer-events-none' : 'pointer-events-auto'
-      } ${style.bg} ${style.border} ${style.text}`}
+      } ${isDimmed ? 'opacity-30' : ''} ${style.bg} ${style.border} ${style.text}`}
     >
       <div
         onPointerDown={(e) => {

@@ -15,10 +15,19 @@ import { GroupContainer } from './components/GroupContainer';
 import { StickyNoteCard } from './components/StickyNoteCard';
 import { TableCard } from './components/TableCard';
 import {
+  AnchorBox,
+  EdgeRoutingMode,
+} from '../../utils/io/edgeGeometry';
+import {
+  CROSS_DOMAIN_EDGE_STORAGE_KEY,
+  CrossDomainBundle,
+  CrossDomainEdgeMode,
   CURSOR_MODE_STORAGE_KEY,
   CursorMode,
   DiagramCanvasProps,
   DragState,
+  EDGE_ROUTING_STORAGE_KEY,
+  FOCUS_MODE_STORAGE_KEY,
   ViewportState,
 } from './types';
 
@@ -69,15 +78,77 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
   const [detailMenuOpen, setDetailMenuOpen] = useState(false);
   const [hoveredTableId, setHoveredTableId] = useState<string | null>(null);
   const [hoveredRefId, setHoveredRefId] = useState<string | null>(null);
+  const [hoveredBundleId, setHoveredBundleId] = useState<string | null>(null);
   const [colorPickerPosKey, setColorPickerPosKey] = useState<string | null>(null);
   const [dropTargetGroupName, setDropTargetGroupName] = useState<string | null>(null);
   const [altPressedDuringDrag, setAltPressedDuringDrag] = useState(false);
+
+  const [focusMode, setFocusMode] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(FOCUS_MODE_STORAGE_KEY) === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const [routingMode, setRoutingMode] = useState<EdgeRoutingMode>(() => {
+    try {
+      const saved = localStorage.getItem(EDGE_ROUTING_STORAGE_KEY);
+      return saved === 'orthogonal' ? 'orthogonal' : 'bezier';
+    } catch {
+      return 'bezier';
+    }
+  });
+  const [crossDomainMode, setCrossDomainMode] = useState<CrossDomainEdgeMode>(
+    () => {
+      try {
+        const saved = localStorage.getItem(CROSS_DOMAIN_EDGE_STORAGE_KEY);
+        return saved === 'bundle' || saved === 'hide' ? saved : 'show';
+      } catch {
+        return 'show';
+      }
+    }
+  );
+
+  const updateFocusMode = useCallback((next: boolean | ((prev: boolean) => boolean)) => {
+    setFocusMode((prev) => {
+      const resolved = typeof next === 'function' ? next(prev) : next;
+      try {
+        localStorage.setItem(FOCUS_MODE_STORAGE_KEY, String(resolved));
+      } catch {
+        // ignore storage errors
+      }
+      return resolved;
+    });
+  }, []);
+
+  const toggleRoutingMode = useCallback(() => {
+    setRoutingMode((prev) => {
+      const next: EdgeRoutingMode =
+        prev === 'bezier' ? 'orthogonal' : 'bezier';
+      try {
+        localStorage.setItem(EDGE_ROUTING_STORAGE_KEY, next);
+      } catch {
+        // ignore storage errors
+      }
+      return next;
+    });
+  }, []);
+
+  const updateCrossDomainMode = useCallback((next: CrossDomainEdgeMode) => {
+    setCrossDomainMode(next);
+    try {
+      localStorage.setItem(CROSS_DOMAIN_EDGE_STORAGE_KEY, next);
+    } catch {
+      // ignore storage errors
+    }
+  }, []);
 
   const updateCursorMode = useCallback((mode: CursorMode) => {
     setCursorMode(mode);
     if (mode === 'pan') {
       setHoveredTableId(null);
       setHoveredRefId(null);
+      setHoveredBundleId(null);
       setColorPickerPosKey(null);
       setDropTargetGroupName(null);
     }
@@ -175,6 +246,160 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     [stickyNotes, isFilteringDomains, visibleTableIdSet]
   );
 
+  const focusedTableId =
+    focusMode && selectedTableId && visibleTableIdSet.has(selectedTableId)
+      ? selectedTableId
+      : null;
+
+  const crossDomainEdgesInView = useMemo(
+    () =>
+      visibleEdges.filter(
+        (e) => e.fromInst.groupName !== e.toInst.groupName
+      ),
+    [visibleEdges]
+  );
+
+  const { renderedEdges, crossDomainBundles, anchorBoxByDomain } = useMemo(() => {
+    const boxMap = new Map<string, AnchorBox>();
+    for (const gb of visibleGroupBoxes) {
+      boxMap.set(gb.name, {
+        x: gb.x,
+        y: gb.y,
+        width: gb.width,
+        height: gb.height,
+      });
+    }
+    for (const inst of visibleInstances) {
+      if (inst.groupName === null) {
+        const p =
+          positions[inst.posKey] || positions[inst.table.id] || { x: 0, y: 0 };
+        boxMap.set(`ungrouped:${inst.table.id}`, {
+          x: p.x,
+          y: p.y,
+          width: TABLE_WIDTH,
+          height: getTableHeight(
+            inst.table,
+            detailLevel,
+            fkColsByTable.get(inst.table.id),
+            false
+          ),
+        });
+      }
+    }
+
+    if (crossDomainMode === 'show') {
+      return {
+        renderedEdges: visibleEdges,
+        crossDomainBundles: [] as CrossDomainBundle[],
+        anchorBoxByDomain: boxMap,
+      };
+    }
+
+    if (crossDomainMode === 'hide') {
+      return {
+        renderedEdges: visibleEdges.filter(
+          (e) => e.fromInst.groupName === e.toInst.groupName
+        ),
+        crossDomainBundles: [] as CrossDomainBundle[],
+        anchorBoxByDomain: boxMap,
+      };
+    }
+
+    // crossDomainMode === 'bundle'
+    const directEdges: typeof visibleEdges = [];
+    const bundleMap = new Map<string, CrossDomainBundle>();
+
+    for (const edge of visibleEdges) {
+      const isCross = edge.fromInst.groupName !== edge.toInst.groupName;
+      const touchesFocus =
+        focusedTableId !== null &&
+        (edge.ref.fromTable === focusedTableId ||
+          edge.ref.toTable === focusedTableId);
+
+      if (!isCross || touchesFocus) {
+        directEdges.push(edge);
+        continue;
+      }
+
+      const keyA =
+        edge.fromInst.groupName || `ungrouped:${edge.fromInst.table.id}`;
+      const keyB =
+        edge.toInst.groupName || `ungrouped:${edge.toInst.table.id}`;
+      const [domainA, domainB] = keyA < keyB ? [keyA, keyB] : [keyB, keyA];
+      const pairKey = `${domainA}::${domainB}`;
+
+      let bundle = bundleMap.get(pairKey);
+      if (!bundle) {
+        const groupColor =
+          schema.tableGroups.find((g) => g.name === domainA)?.color ||
+          schema.tableGroups.find((g) => g.name === domainB)?.color ||
+          '#64748b';
+        bundle = {
+          id: `bundle:${pairKey}`,
+          domainA,
+          domainB,
+          color: groupColor,
+          edges: [],
+        };
+        bundleMap.set(pairKey, bundle);
+      }
+      bundle.edges.push(edge);
+    }
+
+    return {
+      renderedEdges: directEdges,
+      crossDomainBundles: Array.from(bundleMap.values()),
+      anchorBoxByDomain: boxMap,
+    };
+  }, [
+    visibleEdges,
+    visibleGroupBoxes,
+    visibleInstances,
+    positions,
+    detailLevel,
+    fkColsByTable,
+    crossDomainMode,
+    focusedTableId,
+    schema.tableGroups,
+  ]);
+
+  const focusNeighborhood = useMemo(() => {
+    if (!focusedTableId) {
+      return {
+        active: false,
+        neighborIds: new Set<string>(),
+        groupNames: new Set<string>(),
+      };
+    }
+
+    const neighborIds = new Set<string>();
+    const activeEdges =
+      crossDomainMode === 'hide'
+        ? visibleEdges.filter((e) => e.fromInst.groupName === e.toInst.groupName)
+        : visibleEdges;
+
+    for (const edge of activeEdges) {
+      if (edge.ref.fromTable === focusedTableId && edge.ref.toTable !== focusedTableId) {
+        neighborIds.add(edge.ref.toTable);
+      } else if (
+        edge.ref.toTable === focusedTableId &&
+        edge.ref.fromTable !== focusedTableId
+      ) {
+        neighborIds.add(edge.ref.fromTable);
+      }
+    }
+
+    const focusTableSet = new Set<string>([focusedTableId, ...neighborIds]);
+    const groupNames = new Set<string>();
+    for (const inst of visibleInstances) {
+      if (inst.groupName && focusTableSet.has(inst.table.id)) {
+        groupNames.add(inst.groupName);
+      }
+    }
+
+    return { active: true, neighborIds, groupNames };
+  }, [focusedTableId, visibleEdges, visibleInstances, crossDomainMode]);
+
   useEffect(() => {
     const onPointerDownOutside = (e: PointerEvent) => {
       if (
@@ -205,6 +430,14 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
       const key = e.key.toLowerCase();
       if (key === 'v') updateCursorMode('select');
       else if (key === 'h') updateCursorMode('pan');
+      else if (key === 'f') updateFocusMode((prev) => !prev);
+      else if (e.key === 'Escape' && focusMode) {
+        if (selectedTableId) {
+          onSelectTable(null);
+        } else {
+          updateFocusMode(false);
+        }
+      }
     };
     window.addEventListener('pointerdown', onPointerDownOutside);
     window.addEventListener('keydown', onKeyDown);
@@ -212,7 +445,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
       window.removeEventListener('pointerdown', onPointerDownOutside);
       window.removeEventListener('keydown', onKeyDown);
     };
-  }, [updateCursorMode]);
+  }, [updateCursorMode, updateFocusMode, focusMode, selectedTableId, onSelectTable]);
 
   const fitBounds = useCallback(
     (boxes: Array<{ x: number; y: number; width: number; height: number }>) => {
@@ -506,6 +739,9 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
           const groupObj = schema.tableGroups.find((g) => g.name === gb.name);
           const isOnlySelected =
             selectedDomains.length === 1 && selectedDomains[0] === gb.name;
+          const isGroupDimmed =
+            focusNeighborhood.active &&
+            !focusNeighborhood.groupNames.has(gb.name);
           return (
             <GroupContainer
               key={gb.name}
@@ -515,6 +751,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
               darkMode={darkMode}
               isOnlySelected={isOnlySelected}
               isDropTarget={dropTargetGroupName === gb.name}
+              isDimmed={isGroupDimmed}
               altPressedDuringDrag={altPressedDuringDrag}
               onStartDrag={(e) => {
                 const origPositions: Record<string, TablePosition> = {};
@@ -540,20 +777,35 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         })}
 
         <EdgeLayer
-          edges={visibleEdges}
+          edges={renderedEdges}
+          bundles={crossDomainBundles}
+          anchorBoxByDomain={anchorBoxByDomain}
           positions={positions}
           detailLevel={detailLevel}
           fkColsByTable={fkColsByTable}
           hoveredRefId={hoveredRefId}
+          hoveredBundleId={hoveredBundleId}
           activeTableHighlight={hoveredTableId || selectedTableId}
+          focusMode={focusMode}
+          focusedTableId={focusedTableId}
+          routingMode={routingMode}
           cursorMode={cursorMode}
           darkMode={darkMode}
           onHoverRef={setHoveredRefId}
+          onHoverBundle={setHoveredBundleId}
         />
 
         {visibleInstances.map((inst) => {
           const pos =
             positions[inst.posKey] || positions[inst.table.id] || { x: 0, y: 0 };
+          const focusState = !focusNeighborhood.active
+            ? 'normal'
+            : inst.table.id === focusedTableId
+            ? 'focused'
+            : focusNeighborhood.neighborIds.has(inst.table.id)
+            ? 'neighbor'
+            : 'dimmed';
+
           return (
             <TableCard
               key={inst.posKey}
@@ -563,6 +815,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
               fkSet={fkColsByTable.get(inst.table.id)}
               isSelected={selectedTableId === inst.table.id}
               isHovered={hoveredTableId === inst.table.id}
+              focusState={focusState}
               highlightedColumn={highlightedColumn}
               colorPickerOpen={colorPickerPosKey === inst.posKey}
               cursorMode={cursorMode}
@@ -594,25 +847,35 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
           );
         })}
 
-        {visibleStickyNotes.map((note) => (
-          <StickyNoteCard
-            key={note.id}
-            note={note}
-            cursorMode={cursorMode}
-            onStartDrag={(e) => {
-              dragRef.current = {
-                type: 'note',
-                noteId: note.id,
-                startX: e.clientX,
-                startY: e.clientY,
-                origX: note.x,
-                origY: note.y,
-              };
-            }}
-            onUpdate={(patch) => onUpdateStickyNote(note.id, patch)}
-            onDelete={() => onDeleteStickyNote(note.id)}
-          />
-        ))}
+        {visibleStickyNotes.map((note) => {
+          let isNoteDimmed = false;
+          if (focusNeighborhood.active && note.linkedTarget?.startsWith('table:')) {
+            const targetId = note.linkedTarget.slice('table:'.length);
+            isNoteDimmed =
+              targetId !== focusedTableId &&
+              !focusNeighborhood.neighborIds.has(targetId);
+          }
+          return (
+            <StickyNoteCard
+              key={note.id}
+              note={note}
+              cursorMode={cursorMode}
+              isDimmed={isNoteDimmed}
+              onStartDrag={(e) => {
+                dragRef.current = {
+                  type: 'note',
+                  noteId: note.id,
+                  startX: e.clientX,
+                  startY: e.clientY,
+                  origX: note.x,
+                  origY: note.y,
+                };
+              }}
+              onUpdate={(patch) => onUpdateStickyNote(note.id, patch)}
+              onDelete={() => onDeleteStickyNote(note.id)}
+            />
+          );
+        })}
       </div>
 
       <DomainFilterBar
@@ -624,6 +887,15 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         filterMenuRef={filterMenuRef}
         onSetDomainMenuOpen={setDomainMenuOpen}
         onChangeSelectedDomains={onChangeSelectedDomains}
+        hasCrossDomainEdges={crossDomainEdgesInView.length > 0}
+        crossDomainEdgeCount={crossDomainEdgesInView.length}
+        crossDomainMode={crossDomainMode}
+        onChangeCrossDomainMode={updateCrossDomainMode}
+        focusMode={focusMode}
+        focusedTableId={focusedTableId}
+        neighborCount={focusNeighborhood.neighborIds.size}
+        onClearFocusSelection={() => onSelectTable(null)}
+        onExitFocusMode={() => updateFocusMode(false)}
       />
 
       {showMinimap && (
@@ -641,6 +913,8 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
 
       <CanvasToolbar
         cursorMode={cursorMode}
+        focusMode={focusMode}
+        routingMode={routingMode}
         detailLevel={detailLevel}
         detailMenuOpen={detailMenuOpen}
         detailMenuRef={detailMenuRef}
@@ -648,6 +922,8 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         showMinimap={showMinimap}
         zoom={viewport.zoom}
         onUpdateCursorMode={updateCursorMode}
+        onToggleFocusMode={() => updateFocusMode((prev) => !prev)}
+        onToggleRoutingMode={toggleRoutingMode}
         onToggleDetailMenu={() => setDetailMenuOpen((o) => !o)}
         onCloseDetailMenu={() => setDetailMenuOpen(false)}
         onChangeDetailLevel={onChangeDetailLevel}

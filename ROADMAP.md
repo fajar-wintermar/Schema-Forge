@@ -31,7 +31,7 @@
   - Extend `schemaDiff` to emit `ALTER TABLE ... ADD/DROP/ALTER COLUMN`, `CREATE/DROP INDEX`, and foreign-key `ALTER` statements between any two saved snapshots or Git commits (PostgreSQL & MySQL).
 - [x] **Full DBML Spec Parity**
   - Add parser, semantic validator, diagram, and docs support for `TablePartial`, `Checks` blocks, expression-based `Indexes`, and extended inline `Ref` metadata.
-- [ ] **Diagram Focus & Visual Decluttering**
+- [x] **Diagram Focus & Visual Decluttering**
   - **Focus Neighborhood Mode**: Clicking a table highlights its 1-hop upstream/downstream relationships and dims unrelated tables and edges.
   - **Orthogonal Edge Routing**: Optional right-angle connector routing alongside curved Béziers.
   - **Cross-Domain Edge Toggles**: Option to hide or bundle cross-domain links on crowded canvases.

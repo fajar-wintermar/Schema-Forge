@@ -6,6 +6,7 @@ import {
   TableGroupDef,
   TablePosition,
 } from '../../types/schema';
+import { ResolvedEdge } from '../../utils/autoLayout';
 
 export interface DiagramCanvasProps {
   schema: ParsedSchema;
@@ -41,8 +42,22 @@ export interface DiagramCanvasProps {
 }
 
 export type CursorMode = 'select' | 'pan';
+export type EdgeRoutingMode = 'bezier' | 'orthogonal';
+export type CrossDomainEdgeMode = 'show' | 'bundle' | 'hide';
+
+export interface CrossDomainBundle {
+  id: string;
+  domainA: string;
+  domainB: string;
+  color: string;
+  edges: ResolvedEdge[];
+}
 
 export const CURSOR_MODE_STORAGE_KEY = 'schemaforge_diagram_cursor_mode';
+export const EDGE_ROUTING_STORAGE_KEY = 'schemaforge_diagram_edge_routing';
+export const CROSS_DOMAIN_EDGE_STORAGE_KEY =
+  'schemaforge_diagram_cross_domain_edges';
+export const FOCUS_MODE_STORAGE_KEY = 'schemaforge_diagram_focus_mode';
 
 export interface ViewportState {
   x: number;

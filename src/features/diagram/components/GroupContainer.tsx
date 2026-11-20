@@ -12,6 +12,7 @@ export interface GroupContainerProps {
   darkMode: boolean;
   isOnlySelected: boolean;
   isDropTarget: boolean;
+  isDimmed?: boolean;
   altPressedDuringDrag: boolean;
   onStartDrag: (e: React.PointerEvent) => void;
   onToggleOnlyDomain: () => void;
@@ -26,6 +27,7 @@ export const GroupContainer: React.FC<GroupContainerProps> = ({
   darkMode,
   isOnlySelected,
   isDropTarget,
+  isDimmed = false,
   altPressedDuringDrag,
   onStartDrag,
   onToggleOnlyDomain,
@@ -45,7 +47,9 @@ export const GroupContainer: React.FC<GroupContainerProps> = ({
       }}
       className={`absolute rounded-2xl border-2 border-dashed transition-opacity ${
         cursorMode === 'pan' ? 'pointer-events-none' : 'pointer-events-auto'
-      } ${isDropTarget ? 'ring-4 ring-blue-500/30 border-solid' : ''}`}
+      } ${isDimmed ? 'opacity-30' : ''} ${
+        isDropTarget ? 'ring-4 ring-blue-500/30 border-solid' : ''
+      }`}
     >
       <div
         onPointerDown={(e) => {

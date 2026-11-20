@@ -1,18 +1,32 @@
 import React from 'react';
 import { DetailLevel, TableDef, TablePosition } from '../../../types/schema';
 import { ResolvedEdge, TABLE_WIDTH } from '../../../utils/autoLayout';
-import type { CursorMode } from '../types';
+import {
+  AnchorBox,
+  buildEdgePath,
+  EdgeRoutingMode,
+  getBoxToBoxAnchors,
+  getEdgeAnchorPoints,
+} from '../../../utils/io/edgeGeometry';
+import type { CrossDomainBundle, CursorMode } from '../types';
 
 export interface EdgeLayerProps {
   edges: ResolvedEdge[];
+  bundles?: CrossDomainBundle[];
+  anchorBoxByDomain?: Map<string, AnchorBox>;
   positions: Record<string, TablePosition>;
   detailLevel: DetailLevel;
   fkColsByTable: Map<string, Set<string>>;
   hoveredRefId: string | null;
+  hoveredBundleId?: string | null;
   activeTableHighlight: string | null;
+  focusMode: boolean;
+  focusedTableId: string | null;
+  routingMode: EdgeRoutingMode;
   cursorMode: CursorMode;
   darkMode: boolean;
   onHoverRef: (id: string | null) => void;
+  onHoverBundle?: (id: string | null) => void;
 }
 
 function getColAnchorY(
@@ -40,179 +54,277 @@ function getColAnchorY(
 
 export const EdgeLayer: React.FC<EdgeLayerProps> = ({
   edges,
+  bundles = [],
+  anchorBoxByDomain,
   positions,
   detailLevel,
   fkColsByTable,
   hoveredRefId,
+  hoveredBundleId = null,
   activeTableHighlight,
+  focusMode,
+  focusedTableId,
+  routingMode,
   cursorMode,
   darkMode,
   onHoverRef,
-}) => (
-  <svg
-    className="overflow-visible pointer-events-none"
-    style={{ position: 'absolute', left: 0, top: 0, width: 1, height: 1 }}
-  >
-    {edges.map((edge) => {
-      const { ref: r, fromInst, toInst } = edge;
-      const pA =
-        positions[fromInst.posKey] ||
-        positions[fromInst.table.id] || { x: 0, y: 0 };
-      const pB =
-        positions[toInst.posKey] ||
-        positions[toInst.table.id] || { x: 0, y: 0 };
-      const y1 = getColAnchorY(
-        fromInst.table,
-        fromInst.posKey,
-        r.fromColumns[0],
-        positions,
-        detailLevel,
-        fkColsByTable
-      );
-      const y2 = getColAnchorY(
-        toInst.table,
-        toInst.posKey,
-        r.toColumns[0],
-        positions,
-        detailLevel,
-        fkColsByTable
-      );
+  onHoverBundle,
+}) => {
+  const hasActiveFocus = focusMode && focusedTableId !== null;
 
-      const aCenter = pA.x + TABLE_WIDTH / 2;
-      const bCenter = pB.x + TABLE_WIDTH / 2;
-      let x1 = pA.x + TABLE_WIDTH;
-      let x2 = pB.x;
-      let dir1 = 1;
-      let dir2 = -1;
+  return (
+    <svg
+      className="overflow-visible pointer-events-none"
+      style={{ position: 'absolute', left: 0, top: 0, width: 1, height: 1 }}
+    >
+      {/* Cross-domain bundles (when cross-domain mode === 'bundle') */}
+      {bundles.map((bundle, bIdx) => {
+        if (!anchorBoxByDomain) return null;
+        const boxA = anchorBoxByDomain.get(bundle.domainA);
+        const boxB = anchorBoxByDomain.get(bundle.domainB);
+        if (!boxA || !boxB) return null;
 
-      if (fromInst.posKey === toInst.posKey) {
-        x1 = pA.x + TABLE_WIDTH;
-        x2 = pA.x + TABLE_WIDTH;
-        dir1 = 1;
-        dir2 = 1;
-      } else if (aCenter > bCenter + 40) {
-        x1 = pA.x;
-        x2 = pB.x + TABLE_WIDTH;
-        dir1 = -1;
-        dir2 = 1;
-      } else if (Math.abs(aCenter - bCenter) <= 40) {
-        x1 = pA.x + TABLE_WIDTH;
-        x2 = pB.x + TABLE_WIDTH;
-        dir1 = 1;
-        dir2 = 1;
-      }
+        const anchors = getBoxToBoxAnchors(boxA, boxB);
+        const laneOffset = ((bIdx % 5) - 2) * 14;
+        const { pathD, midX, midY } = buildEdgePath({
+          ...anchors,
+          isSelfRef: false,
+          routing: routingMode,
+          laneOffset,
+        });
 
-      const dx =
-        fromInst.posKey === toInst.posKey
-          ? 70
-          : Math.max(54, Math.abs(x2 - x1) * 0.45);
-      const cx1 = x1 + dir1 * dx;
-      const cx2 = x2 + dir2 * dx;
-      const pathD = `M ${x1} ${y1} C ${cx1} ${y1}, ${cx2} ${y2}, ${x2} ${y2}`;
+        const isBundleHovered = hoveredBundleId === bundle.id;
+        const bundleOpacity = hasActiveFocus ? 0.14 : isBundleHovered ? 1 : 0.78;
+        const strokeColor = isBundleHovered
+          ? '#2563EB'
+          : bundle.color || (darkMode ? '#64748b' : '#475569');
+        const labelA = bundle.domainA.replace(/^ungrouped:/, '');
+        const labelB = bundle.domainB.replace(/^ungrouped:/, '');
+        const pillLabel = isBundleHovered
+          ? `${labelA} ↔ ${labelB} (${bundle.edges.length})`
+          : `${bundle.edges.length} ref${bundle.edges.length > 1 ? 's' : ''}`;
+        const pillWidth = Math.max(46, pillLabel.length * 6.5 + 16);
 
-      const isHighlighted =
-        hoveredRefId === edge.id ||
-        activeTableHighlight === r.fromTable ||
-        activeTableHighlight === r.toTable;
-
-      const dimmedBySelection =
-        activeTableHighlight !== null && !isHighlighted;
-
-      const stroke = isHighlighted
-        ? r.color || '#2563EB'
-        : r.color
-        ? r.color
-        : darkMode
-        ? '#475569'
-        : '#94a3b8';
-
-      const midX = (x1 + cx1 + cx2 + x2) / 4;
-      const midY = (y1 + y2) / 2;
-      const metaLabel = [
-        r.name,
-        r.onDelete ? `del:${r.onDelete}` : null,
-        r.onUpdate ? `upd:${r.onUpdate}` : null,
-      ]
-        .filter(Boolean)
-        .join(' · ');
-
-      return (
-        <g key={edge.id} style={{ opacity: dimmedBySelection ? 0.25 : 1 }}>
-          <title>
-            {`${r.fromTable}.${r.fromColumns.join(', ')} ${r.relation} ${r.toTable}.${r.toColumns.join(', ')}${metaLabel ? ` (${metaLabel})` : ''}`}
-          </title>
-          <path
-            d={pathD}
-            fill="none"
-            stroke="transparent"
-            strokeWidth={14}
-            className={
-              cursorMode === 'pan'
-                ? 'pointer-events-none'
-                : 'pointer-events-auto cursor-pointer'
-            }
-            onMouseEnter={() => {
-              if (cursorMode === 'select') onHoverRef(edge.id);
-            }}
-            onMouseLeave={() => onHoverRef(null)}
-          />
-          <path
-            d={pathD}
-            fill="none"
-            stroke={stroke}
-            strokeWidth={isHighlighted ? 2.4 : r.color ? 1.8 : 1.5}
-          />
-          <circle
-            cx={x1}
-            cy={y1}
-            r={isHighlighted ? 4.5 : 3.5}
-            fill={stroke}
-          />
-          <circle
-            cx={x2}
-            cy={y2}
-            r={isHighlighted ? 4.5 : 3.5}
-            fill={isHighlighted ? stroke : r.color || '#64748b'}
-          />
-          {isHighlighted && (
-            <>
+        return (
+          <g key={bundle.id} style={{ opacity: bundleOpacity }}>
+            <title>
+              {bundle.edges
+                .map(
+                  (e) =>
+                    `${e.ref.fromTable}.${e.ref.fromColumns.join(', ')} ${e.ref.relation} ${e.ref.toTable}.${e.ref.toColumns.join(', ')}`
+                )
+                .join('\n')}
+            </title>
+            <path
+              d={pathD}
+              fill="none"
+              stroke="transparent"
+              strokeWidth={16}
+              className={
+                cursorMode === 'pan'
+                  ? 'pointer-events-none'
+                  : 'pointer-events-auto cursor-pointer'
+              }
+              onMouseEnter={() => {
+                if (cursorMode === 'select') onHoverBundle?.(bundle.id);
+              }}
+              onMouseLeave={() => onHoverBundle?.(null)}
+            />
+            <path
+              d={pathD}
+              fill="none"
+              stroke={strokeColor}
+              strokeWidth={isBundleHovered ? 2.6 : 2}
+              strokeDasharray="6 4"
+            />
+            <circle cx={anchors.x1} cy={anchors.y1} r={4} fill={strokeColor} />
+            <circle cx={anchors.x2} cy={anchors.y2} r={4} fill={strokeColor} />
+            <g
+              transform={`translate(${midX}, ${midY})`}
+              className={
+                cursorMode === 'pan'
+                  ? 'pointer-events-none'
+                  : 'pointer-events-auto cursor-pointer'
+              }
+              onMouseEnter={() => {
+                if (cursorMode === 'select') onHoverBundle?.(bundle.id);
+              }}
+              onMouseLeave={() => onHoverBundle?.(null)}
+            >
+              <rect
+                x={-pillWidth / 2}
+                y={-11}
+                width={pillWidth}
+                height={22}
+                rx={11}
+                fill={darkMode ? '#0f172a' : '#ffffff'}
+                stroke={strokeColor}
+                strokeWidth={1.4}
+              />
               <text
-                x={x1 + dir1 * 12}
-                y={y1 - 6}
+                x={0}
+                y={3.5}
+                textAnchor="middle"
                 fontSize={10}
-                fontWeight={700}
-                fill={stroke}
+                fontWeight={600}
+                fill={isBundleHovered ? '#2563EB' : darkMode ? '#e2e8f0' : '#334155'}
                 className="font-mono"
               >
-                {r.relation === '>' ? 'N' : '1'}
+                {pillLabel}
               </text>
-              <text
-                x={x2 + dir2 * 14}
-                y={y2 - 6}
-                fontSize={10}
-                fontWeight={700}
-                fill={stroke}
-                className="font-mono"
-              >
-                {r.relation === '<' ? 'N' : '1'}
-              </text>
-              {hoveredRefId === edge.id && metaLabel && (
+            </g>
+          </g>
+        );
+      })}
+
+      {/* Individual table-to-table edges */}
+      {edges.map((edge, idx) => {
+        const { ref: r, fromInst, toInst } = edge;
+        const pA =
+          positions[fromInst.posKey] ||
+          positions[fromInst.table.id] || { x: 0, y: 0 };
+        const pB =
+          positions[toInst.posKey] ||
+          positions[toInst.table.id] || { x: 0, y: 0 };
+        const y1 = getColAnchorY(
+          fromInst.table,
+          fromInst.posKey,
+          r.fromColumns[0],
+          positions,
+          detailLevel,
+          fkColsByTable
+        );
+        const y2 = getColAnchorY(
+          toInst.table,
+          toInst.posKey,
+          r.toColumns[0],
+          positions,
+          detailLevel,
+          fkColsByTable
+        );
+
+        const isSelfRef = fromInst.posKey === toInst.posKey;
+        const anchors = getEdgeAnchorPoints(pA, pB, y1, y2, isSelfRef);
+        const laneOffset = ((idx % 5) - 2) * 8;
+        const { pathD, midX, midY } = buildEdgePath({
+          ...anchors,
+          isSelfRef,
+          routing: routingMode,
+          laneOffset,
+        });
+
+        const isFocusedEdge =
+          hasActiveFocus &&
+          (r.fromTable === focusedTableId || r.toTable === focusedTableId);
+
+        const isHighlighted = hasActiveFocus
+          ? hoveredRefId === edge.id || isFocusedEdge
+          : hoveredRefId === edge.id ||
+            activeTableHighlight === r.fromTable ||
+            activeTableHighlight === r.toTable;
+
+        const opacity = hasActiveFocus
+          ? isFocusedEdge || hoveredRefId === edge.id
+            ? 1
+            : 0.08
+          : activeTableHighlight !== null && !isHighlighted
+          ? 0.25
+          : 1;
+
+        const stroke = isHighlighted
+          ? r.color || '#2563EB'
+          : r.color
+          ? r.color
+          : darkMode
+          ? '#475569'
+          : '#94a3b8';
+
+        const metaLabel = [
+          r.name,
+          r.onDelete ? `del:${r.onDelete}` : null,
+          r.onUpdate ? `upd:${r.onUpdate}` : null,
+        ]
+          .filter(Boolean)
+          .join(' · ');
+
+        return (
+          <g key={edge.id} style={{ opacity }}>
+            <title>
+              {`${r.fromTable}.${r.fromColumns.join(', ')} ${r.relation} ${r.toTable}.${r.toColumns.join(', ')}${metaLabel ? ` (${metaLabel})` : ''}`}
+            </title>
+            <path
+              d={pathD}
+              fill="none"
+              stroke="transparent"
+              strokeWidth={14}
+              className={
+                cursorMode === 'pan'
+                  ? 'pointer-events-none'
+                  : 'pointer-events-auto cursor-pointer'
+              }
+              onMouseEnter={() => {
+                if (cursorMode === 'select') onHoverRef(edge.id);
+              }}
+              onMouseLeave={() => onHoverRef(null)}
+            />
+            <path
+              d={pathD}
+              fill="none"
+              stroke={stroke}
+              strokeWidth={isHighlighted ? 2.4 : r.color ? 1.8 : 1.5}
+            />
+            <circle
+              cx={anchors.x1}
+              cy={anchors.y1}
+              r={isHighlighted ? 4.5 : 3.5}
+              fill={stroke}
+            />
+            <circle
+              cx={anchors.x2}
+              cy={anchors.y2}
+              r={isHighlighted ? 4.5 : 3.5}
+              fill={isHighlighted ? stroke : r.color || '#64748b'}
+            />
+            {isHighlighted && (
+              <>
                 <text
-                  x={midX}
-                  y={midY - 8}
-                  textAnchor="middle"
+                  x={anchors.x1 + anchors.dir1 * 12}
+                  y={anchors.y1 - 6}
                   fontSize={10}
-                  fontWeight={600}
+                  fontWeight={700}
                   fill={stroke}
                   className="font-mono"
                 >
-                  {metaLabel}
+                  {r.relation === '>' ? 'N' : '1'}
                 </text>
-              )}
-            </>
-          )}
-        </g>
-      );
-    })}
-  </svg>
-);
+                <text
+                  x={anchors.x2 + anchors.dir2 * 14}
+                  y={anchors.y2 - 6}
+                  fontSize={10}
+                  fontWeight={700}
+                  fill={stroke}
+                  className="font-mono"
+                >
+                  {r.relation === '<' ? 'N' : '1'}
+                </text>
+                {hoveredRefId === edge.id && metaLabel && (
+                  <text
+                    x={midX}
+                    y={midY - 8}
+                    textAnchor="middle"
+                    fontSize={10}
+                    fontWeight={600}
+                    fill={stroke}
+                    className="font-mono"
+                  >
+                    {metaLabel}
+                  </text>
+                )}
+              </>
+            )}
+          </g>
+        );
+      })}
+    </svg>
+  );
+};

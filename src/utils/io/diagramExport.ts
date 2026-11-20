@@ -12,6 +12,11 @@ import {
   resolveSchemaEdges,
   TABLE_WIDTH,
 } from '../autoLayout';
+import {
+  buildEdgePath,
+  EdgeRoutingMode,
+  getEdgeAnchorPoints,
+} from './edgeGeometry';
 
 function escapeXml(str: string): string {
   return str
@@ -45,8 +50,17 @@ export function buildDiagramSvg(params: {
   stickyNotes: StickyNote[];
   darkMode: boolean;
   title?: string;
+  edgeRouting?: EdgeRoutingMode;
 }): { svg: string; width: number; height: number } {
-  const { schema, positions, detailLevel, stickyNotes, darkMode, title } = params;
+  const {
+    schema,
+    positions,
+    detailLevel,
+    stickyNotes,
+    darkMode,
+    title,
+    edgeRouting = 'bezier',
+  } = params;
 
   const fkColsByTable = new Map<string, Set<string>>();
   for (const r of schema.refs) {
@@ -191,51 +205,29 @@ export function buildDiagramSvg(params: {
     return pos.y + 40 + idx * rowH + rowH / 2;
   };
 
-  for (const edge of resolvedEdges) {
+  resolvedEdges.forEach((edge, idx) => {
     const { ref: r, fromInst, toInst } = edge;
     const pA = positions[fromInst.posKey] || positions[fromInst.table.id] || { x: 0, y: 0 };
     const pB = positions[toInst.posKey] || positions[toInst.table.id] || { x: 0, y: 0 };
     const y1 = getAnchorY(fromInst.table, fromInst.posKey, r.fromColumns[0]);
     const y2 = getAnchorY(toInst.table, toInst.posKey, r.toColumns[0]);
 
-    const aCenter = pA.x + TABLE_WIDTH / 2;
-    const bCenter = pB.x + TABLE_WIDTH / 2;
-    let x1 = pA.x + TABLE_WIDTH;
-    let x2 = pB.x;
-    let dir1 = 1;
-    let dir2 = -1;
-
-    if (fromInst.posKey === toInst.posKey) {
-      x1 = pA.x + TABLE_WIDTH;
-      x2 = pA.x + TABLE_WIDTH;
-      dir1 = 1;
-      dir2 = 1;
-    } else if (aCenter > bCenter + 40) {
-      x1 = pA.x;
-      x2 = pB.x + TABLE_WIDTH;
-      dir1 = -1;
-      dir2 = 1;
-    } else if (Math.abs(aCenter - bCenter) <= 40) {
-      x1 = pA.x + TABLE_WIDTH;
-      x2 = pB.x + TABLE_WIDTH;
-      dir1 = 1;
-      dir2 = 1;
-    }
-
-    const dx =
-      fromInst.posKey === toInst.posKey
-        ? 70
-        : Math.max(54, Math.abs(x2 - x1) * 0.45);
-    const cx1 = x1 + dir1 * dx;
-    const cx2 = x2 + dir2 * dx;
+    const isSelfRef = fromInst.posKey === toInst.posKey;
+    const anchors = getEdgeAnchorPoints(pA, pB, y1, y2, isSelfRef);
+    const { pathD } = buildEdgePath({
+      ...anchors,
+      isSelfRef,
+      routing: edgeRouting,
+      laneOffset: ((idx % 5) - 2) * 8,
+    });
 
     const edgeColor = r.color || edgeStroke;
     parts.push(
-      `<path d="M ${x1} ${y1} C ${cx1} ${y1}, ${cx2} ${y2}, ${x2} ${y2}" fill="none" stroke="${edgeColor}" stroke-width="1.6" />`
+      `<path d="${pathD}" fill="none" stroke="${edgeColor}" stroke-width="1.6" />`
     );
-    parts.push(`<circle cx="${x1}" cy="${y1}" r="3.5" fill="${edgeColor}" />`);
-    parts.push(`<circle cx="${x2}" cy="${y2}" r="3.5" fill="${r.color || '#2563eb'}" />`);
-  }
+    parts.push(`<circle cx="${anchors.x1}" cy="${anchors.y1}" r="3.5" fill="${edgeColor}" />`);
+    parts.push(`<circle cx="${anchors.x2}" cy="${anchors.y2}" r="3.5" fill="${r.color || '#2563eb'}" />`);
+  });
 
   // 3. Table cards
   for (const inst of instances) {
