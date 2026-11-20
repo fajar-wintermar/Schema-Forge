@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   ArrowUpDown,
+  Blocks,
   BookOpen,
   ChevronDown,
   ChevronRight,
@@ -233,6 +234,26 @@ export const DocsSidebar: React.FC<DocsSidebarProps> = ({
             {schema.enums.length}
           </span>
         </button>
+
+        {schema.tablePartials.length > 0 && (
+          <button
+            type="button"
+            onClick={() => onNavigateSection({ kind: 'partials' })}
+            className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-md text-xs transition-colors ${
+              section.kind === 'partials'
+                ? 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 font-semibold'
+                : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800/70'
+            }`}
+          >
+            <span className="flex items-center gap-2 truncate">
+              <Blocks className="w-3.5 h-3.5 shrink-0" />
+              <span className="truncate">Table Partials</span>
+            </span>
+            <span className="text-[11px] text-slate-400 tabular-nums">
+              {schema.tablePartials.length}
+            </span>
+          </button>
+        )}
 
         <button
           type="button"

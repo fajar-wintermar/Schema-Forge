@@ -197,6 +197,25 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
           </div>
         )}
 
+        {/* Applied TablePartials */}
+        {table.appliedPartials && table.appliedPartials.length > 0 && (
+          <div className="space-y-1.5">
+            <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+              Applied Partials
+            </div>
+            <div className="flex flex-wrap gap-1.5">
+              {table.appliedPartials.map((p) => (
+                <span
+                  key={p}
+                  className="px-2 py-0.5 rounded border border-violet-200 dark:border-violet-800 bg-violet-50/70 dark:bg-violet-950/40 font-mono text-[11px] text-violet-700 dark:text-violet-300"
+                >
+                  ~{p}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Columns */}
         <div className="space-y-2">
           <div className="flex items-center justify-between text-xs">
@@ -214,16 +233,29 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
                   <span className="font-mono font-medium text-slate-900 dark:text-slate-100 flex items-center gap-1 truncate">
                     {c.pk && <KeyRound className="w-3 h-3 text-amber-500 shrink-0" />}
                     {c.name}
+                    {c.fromPartial && (
+                      <span
+                        title={`Inherited from ~${c.fromPartial}`}
+                        className="text-[10px] text-violet-500 font-normal"
+                      >
+                        ~{c.fromPartial}
+                      </span>
+                    )}
                   </span>
                   <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400 shrink-0">
                     {c.type}
                   </span>
                 </div>
-                {(c.defaultValue || c.note || c.unique || c.notNull) && (
+                {(c.defaultValue || c.note || c.unique || c.notNull || c.check) && (
                   <div className="text-[11px] text-slate-400 flex flex-wrap gap-x-2">
                     {c.notNull && !c.pk && <span>not null</span>}
                     {c.unique && <span>unique</span>}
                     {c.defaultValue && <span>default: {c.defaultValue}</span>}
+                    {c.check && (
+                      <span className="font-mono text-cyan-600 dark:text-cyan-400">
+                        check: {c.check}
+                      </span>
+                    )}
                     {c.note && (
                       <span className="text-slate-500">
                         <MarkdownContent content={c.note} inline />
@@ -235,6 +267,69 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
             ))}
           </div>
         </div>
+
+        {/* Indexes */}
+        {table.indexes.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-semibold text-slate-700 dark:text-slate-300">
+                Indexes
+              </span>
+              <span className="text-slate-400 tabular-nums">
+                {table.indexes.length}
+              </span>
+            </div>
+            <div className="space-y-1.5">
+              {table.indexes.map((idx, i) => (
+                <div
+                  key={i}
+                  className="p-2 rounded-lg border border-slate-200 dark:border-slate-800 text-[11px] font-mono space-y-0.5"
+                >
+                  <div className="text-slate-800 dark:text-slate-200 break-all">
+                    ({idx.columns.join(', ')})
+                  </div>
+                  <div className="flex flex-wrap gap-x-2 text-[10px] text-slate-400">
+                    {idx.name && <span>{idx.name}</span>}
+                    {idx.type && <span>type: {idx.type}</span>}
+                    {idx.unique && <span className="text-emerald-500">unique</span>}
+                    {idx.pk && <span className="text-amber-500">pk</span>}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Checks */}
+        {table.checks.length > 0 && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-semibold text-slate-700 dark:text-slate-300">
+                Check Constraints
+              </span>
+              <span className="text-slate-400 tabular-nums">
+                {table.checks.length}
+              </span>
+            </div>
+            <div className="space-y-1.5">
+              {table.checks.map((chk, i) => (
+                <div
+                  key={i}
+                  className="p-2 rounded-lg border border-slate-200 dark:border-slate-800 text-[11px] space-y-0.5"
+                >
+                  {chk.name && (
+                    <div className="font-mono text-[10px] text-slate-500 dark:text-slate-400">
+                      {chk.name}
+                    </div>
+                  )}
+                  <div className="font-mono text-cyan-700 dark:text-cyan-300 break-all">
+                    {chk.expression}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Relationships */}
         {(outgoing.length > 0 || incoming.length > 0) && (
@@ -249,11 +344,22 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
                   key={r.id}
                   type="button"
                   onClick={() => onSelectTable(r.toTable)}
-                  className="w-full text-left p-2 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 text-[11px] font-mono flex items-center justify-between gap-2"
+                  className="w-full text-left p-2 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 text-[11px] font-mono space-y-0.5"
                 >
-                  <span className="truncate text-slate-700 dark:text-slate-300">
+                  <div className="truncate text-slate-700 dark:text-slate-300">
                     {r.fromColumns.join(',')} <ArrowRight className="w-3 h-3 inline text-blue-500" /> {r.toTable}.{r.toColumns.join(',')}
-                  </span>
+                  </div>
+                  {(r.onDelete || r.onUpdate || r.name) && (
+                    <div className="text-[10px] text-slate-400 truncate">
+                      {[
+                        r.name,
+                        r.onDelete ? `del: ${r.onDelete}` : null,
+                        r.onUpdate ? `upd: ${r.onUpdate}` : null,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </div>
+                  )}
                 </button>
               ))}
               {incoming.map((r) => (
@@ -261,11 +367,22 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
                   key={r.id}
                   type="button"
                   onClick={() => onSelectTable(r.fromTable)}
-                  className="w-full text-left p-2 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 text-[11px] font-mono flex items-center justify-between gap-2"
+                  className="w-full text-left p-2 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800/50 text-[11px] font-mono space-y-0.5"
                 >
-                  <span className="truncate text-slate-700 dark:text-slate-300">
+                  <div className="truncate text-slate-700 dark:text-slate-300">
                     {r.fromTable}.{r.fromColumns.join(',')} <ArrowRight className="w-3 h-3 inline text-emerald-500" /> {r.toColumns.join(',')}
-                  </span>
+                  </div>
+                  {(r.onDelete || r.onUpdate || r.name) && (
+                    <div className="text-[10px] text-slate-400 truncate">
+                      {[
+                        r.name,
+                        r.onDelete ? `del: ${r.onDelete}` : null,
+                        r.onUpdate ? `upd: ${r.onUpdate}` : null,
+                      ]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </div>
+                  )}
                 </button>
               ))}
             </div>

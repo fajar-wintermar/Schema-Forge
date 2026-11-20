@@ -48,6 +48,9 @@ export function exportSchemaToSql(
             : `'${col.defaultValue.replace(/'/g, "''")}'`;
         parts.push(`DEFAULT ${def}`);
       }
+      if (col.check) {
+        parts.push(`CHECK (${col.check})`);
+      }
       colLines.push(parts.join(' '));
     }
 
@@ -55,6 +58,15 @@ export function exportSchemaToSql(
       colLines.push(
         `  PRIMARY KEY (${pkCols.map((c) => q(c)).join(', ')})`
       );
+    }
+
+    for (const chk of table.checks || []) {
+      const expr = chk.expression.replace(/^`|`$/g, '');
+      if (chk.name) {
+        colLines.push(`  CONSTRAINT ${q(chk.name)} CHECK (${expr})`);
+      } else {
+        colLines.push(`  CHECK (${expr})`);
+      }
     }
 
     lines.push(colLines.join(',\n'));
@@ -67,13 +79,26 @@ export function exportSchemaToSql(
     }
 
     for (const idx of table.indexes) {
+      const items =
+        idx.items ||
+        idx.columns.map((c) => ({
+          value: c.replace(/^`|`$/g, ''),
+          isExpression: c.startsWith('`') && c.endsWith('`'),
+        }));
+      const rawSuffix = items
+        .map((it) => it.value.replace(/[^a-zA-Z0-9_]+/g, '_').replace(/^_|_$/g, ''))
+        .filter(Boolean)
+        .join('_');
       const idxName =
-        idx.name || `idx_${table.name}_${idx.columns.join('_')}`;
+        idx.name || `idx_${table.name}_${rawSuffix || 'expr'}`;
       const uniq = idx.unique ? 'UNIQUE ' : '';
+      const usingClause =
+        dialect === 'postgres' && idx.type ? ` USING ${idx.type}` : '';
+      const colsExpr = items
+        .map((it) => (it.isExpression ? it.value : q(it.value)))
+        .join(', ');
       lines.push(
-        `CREATE ${uniq}INDEX ${q(idxName)} ON ${tableIdentifier} (${idx.columns
-          .map((c) => q(c))
-          .join(', ')});`
+        `CREATE ${uniq}INDEX ${q(idxName)} ON ${tableIdentifier}${usingClause} (${colsExpr});`
       );
     }
 

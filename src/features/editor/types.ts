@@ -6,6 +6,7 @@ export interface DbmlEditorProps {
   errors: ParseError[];
   scrollToLine?: number | null;
   enumNames?: string[];
+  partialNames?: string[];
   tables?: TableDef[];
   isMaximized?: boolean;
   onToggleMaximize?: () => void;
@@ -49,9 +50,4 @@ export interface AutocompleteItem {
   kind: 'keyword' | 'type' | 'enum' | 'table' | 'column' | 'setting' | 'snippet';
   detail?: string;
   cursorOffsetBack?: number;
-}
-
-export interface HighlightSegment {
-  text: string;
-  className: string;
 }

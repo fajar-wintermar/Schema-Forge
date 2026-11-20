@@ -37,6 +37,8 @@ const DBML_SETTING_KEYWORDS = new Set([
   'headercolor',
   'btree',
   'hash',
+  'gin',
+  'gist',
   'check',
   'database_type',
 ]);
@@ -205,10 +207,13 @@ export function highlightDbml(rawLines: string[]): HighlightToken[][] {
           lower === 'enum' ||
           lower === 'tablegroup' ||
           lower === 'project' ||
-          lower === 'indexes'
+          lower === 'indexes' ||
+          lower === 'checks'
         ) {
           blockKind = lower;
         }
+      } else if (word.startsWith('~') && braceDepth >= 1 && lineWordIdx === 0) {
+        tokType = 'decorator';
       } else if (lower === 'as' && braceDepth === 0) {
         tokType = 'keyword';
       } else if (bracketDepth > 0 && DBML_SETTING_KEYWORDS.has(lower)) {
@@ -219,7 +224,7 @@ export function highlightDbml(rawLines: string[]): HighlightToken[][] {
       ) {
         tokType = 'boolean';
       } else if (
-        blockKind === 'table' &&
+        (blockKind === 'table' || blockKind === 'tablepartial') &&
         braceDepth === 1 &&
         bracketDepth === 0 &&
         lineWordIdx === 1

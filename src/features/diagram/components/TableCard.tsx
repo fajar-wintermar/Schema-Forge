@@ -88,7 +88,19 @@ export const TableCard: React.FC<TableCardProps> = ({
         style={{ backgroundColor: headerBg, color: headerText }}
         className="h-10 px-3 rounded-t-[7px] flex items-center justify-between gap-2 cursor-move"
       >
-        <span className="text-[13px] font-semibold truncate">{table.id}</span>
+        <div className="flex items-center gap-1.5 min-w-0">
+          <span className="text-[13px] font-semibold truncate">{table.id}</span>
+          {table.appliedPartials && table.appliedPartials.length > 0 && (
+            <span
+              title={`Inherits TablePartial: ${table.appliedPartials
+                .map((p) => `~${p}`)
+                .join(', ')}`}
+              className="text-[10px] font-mono opacity-80 shrink-0"
+            >
+              ~{table.appliedPartials.length}
+            </span>
+          )}
+        </div>
         <div
           className="flex items-center gap-1 shrink-0"
           onPointerDown={(e) => e.stopPropagation()}
@@ -171,7 +183,11 @@ export const TableCard: React.FC<TableCardProps> = ({
                     ? 'bg-blue-500/15 dark:bg-blue-500/25 ring-1 ring-inset ring-blue-500/70'
                     : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'
                 }`}
-                title={col.note || undefined}
+                title={
+                  [col.note, col.check ? `CHECK (${col.check})` : null]
+                    .filter(Boolean)
+                    .join(' · ') || undefined
+                }
               >
                 <div className="flex items-center gap-1.5 min-w-0">
                   {col.pk ? (
@@ -231,16 +247,28 @@ export const TableCard: React.FC<TableCardProps> = ({
         </div>
       )}
 
-      {/* Table Note / Indexes footer in Full Detail mode */}
-      {detailLevel === 'full' && (table.note || table.indexes.length > 0) && (
-        <div className="px-3 py-1.5 bg-slate-50/70 dark:bg-slate-800/40 border-t border-slate-100 dark:border-slate-800 rounded-b-lg text-[11px] text-slate-500 dark:text-slate-400 truncate">
-          {table.note
-            ? stripMarkdownToPlainText(table.note)
-            : `${table.indexes.length} index${
-                table.indexes.length > 1 ? 'es' : ''
-              }`}
-        </div>
-      )}
+      {/* Table Note / Indexes / Checks footer in Full Detail mode */}
+      {detailLevel === 'full' &&
+        (table.note || table.indexes.length > 0 || table.checks.length > 0) && (
+          <div className="px-3 py-1.5 bg-slate-50/70 dark:bg-slate-800/40 border-t border-slate-100 dark:border-slate-800 rounded-b-lg text-[11px] text-slate-500 dark:text-slate-400 truncate">
+            {table.note
+              ? stripMarkdownToPlainText(table.note)
+              : [
+                  table.indexes.length > 0
+                    ? `${table.indexes.length} index${
+                        table.indexes.length > 1 ? 'es' : ''
+                      }`
+                    : null,
+                  table.checks.length > 0
+                    ? `${table.checks.length} check${
+                        table.checks.length > 1 ? 's' : ''
+                      }`
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+          </div>
+        )}
     </div>
   );
 };

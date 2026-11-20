@@ -45,6 +45,7 @@ export type DocsSection =
   | { kind: 'groups' }
   | { kind: 'notes' }
   | { kind: 'enums' }
+  | { kind: 'partials' }
   | { kind: 'relationships' }
   | { kind: 'note'; noteId: string }
   | { kind: 'noteDetail'; entryId: string }

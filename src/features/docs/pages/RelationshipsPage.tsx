@@ -111,12 +111,24 @@ export const RelationshipsPage: React.FC<RelationshipsPageProps> = ({
                       </button>
                     </td>
                     <td className="py-2.5 px-5 font-mono text-[11px] text-slate-500 dark:text-slate-400 whitespace-nowrap">
-                      {[
-                        r.onDelete ? `on delete ${r.onDelete}` : null,
-                        r.onUpdate ? `on update ${r.onUpdate}` : null,
-                      ]
-                        .filter(Boolean)
-                        .join(' · ') || '—'}
+                      <span className="inline-flex items-center gap-2">
+                        {r.color && (
+                          <span
+                            className="w-2.5 h-2.5 rounded-xs shrink-0"
+                            style={{ backgroundColor: r.color }}
+                            title={`Ref color: ${r.color}`}
+                          />
+                        )}
+                        <span>
+                          {[
+                            r.name,
+                            r.onDelete ? `on delete ${r.onDelete}` : null,
+                            r.onUpdate ? `on update ${r.onUpdate}` : null,
+                          ]
+                            .filter(Boolean)
+                            .join(' · ') || '—'}
+                        </span>
+                      </span>
                     </td>
                   </tr>
                 ))}

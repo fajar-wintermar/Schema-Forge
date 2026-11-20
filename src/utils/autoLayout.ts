@@ -28,7 +28,14 @@ export function getTableHeight(
   const rowHeight = detailLevel === 'full' ? 30 : 26;
   const rows = Math.max(cols.length, detailLevel === 'keys' ? 1 : 0);
   const noteExtra = detailLevel === 'full' && table.note ? 30 : 0;
-  const idxExtra = detailLevel === 'full' && table.indexes.length > 0 ? 24 : 0;
+  const idxExtra =
+    detailLevel === 'full' &&
+    !table.note &&
+    (table.indexes.length > 0 || table.checks.length > 0)
+      ? 24
+      : detailLevel === 'full' && table.note && table.checks.length > 0
+      ? 0
+      : 0;
   return headerHeight + rows * rowHeight + noteExtra + idxExtra + sharedFooter + 10;
 }
 

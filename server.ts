@@ -5,7 +5,23 @@ import path from 'node:path';
 import { getRequestListener } from '@hono/node-server';
 import { api } from './server/api';
 
-const PORT = Number(process.env.PORT || 3000);
+function readCliFlag(flag: string): string | undefined {
+  const args = process.argv.slice(2);
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg === flag && args[i + 1]) return args[i + 1];
+    if (arg.startsWith(`${flag}=`)) return arg.slice(flag.length + 1);
+  }
+  return undefined;
+}
+
+const cliPort = readCliFlag('--port');
+const PORT = Number(
+  cliPort ||
+    (process.env.NODE_ENV === 'production' ? process.env.PORT : undefined) ||
+    3000
+);
+const HOST = readCliFlag('--host') || process.env.HOST || '0.0.0.0';
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -42,8 +58,8 @@ async function startServer() {
       vite.middlewares(req, res);
     });
 
-    server.listen(PORT, '0.0.0.0', () => {
-      console.log(`SchemaForge Hono+Vite dev server running on http://0.0.0.0:${PORT}`);
+    server.listen(PORT, HOST, () => {
+      console.log(`SchemaForge Hono+Vite dev server running on http://${HOST}:${PORT}`);
     });
     return;
   }
@@ -74,8 +90,8 @@ async function startServer() {
     fs.createReadStream(filePath).pipe(res);
   });
 
-  server.listen(PORT, '0.0.0.0', () => {
-    console.log(`SchemaForge Hono production server running on http://0.0.0.0:${PORT}`);
+  server.listen(PORT, HOST, () => {
+    console.log(`SchemaForge Hono production server running on http://${HOST}:${PORT}`);
   });
 }
 

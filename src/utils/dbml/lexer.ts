@@ -4,6 +4,7 @@ export interface DbmlToken {
   type: 'word' | 'string' | 'symbol' | 'newline';
   value: string;
   line: number;
+  quote?: "'" | '"' | '`' | "'''";
 }
 
 export function dedentTripleQuoted(raw: string): string {
@@ -128,13 +129,14 @@ export function tokenizeDbml(input: string, errors: ParseError[]): DbmlToken[] {
         type: 'string',
         value: dedentTripleQuoted(val),
         line: startLine,
+        quote: "'''",
       });
       continue;
     }
 
     // Single, double, or backtick quoted strings
     if (ch === "'" || ch === '"' || ch === '`') {
-      const quote = ch;
+      const quote = ch as "'" | '"' | '`';
       const startLine = line;
       i++;
       let val = '';
@@ -160,7 +162,7 @@ export function tokenizeDbml(input: string, errors: ParseError[]): DbmlToken[] {
           message: `Unclosed string literal (missing ${quote})`,
         });
       }
-      tokens.push({ type: 'string', value: val, line: startLine });
+      tokens.push({ type: 'string', value: val, line: startLine, quote });
       continue;
     }
 
@@ -171,8 +173,8 @@ export function tokenizeDbml(input: string, errors: ParseError[]): DbmlToken[] {
       continue;
     }
 
-    // Single-char symbols
-    if ('{}[]():,.<>-'.includes(ch)) {
+    // Single-char symbols (including ~ for TablePartial injection)
+    if ('{}[]():,.<>-~'.includes(ch)) {
       tokens.push({ type: 'symbol', value: ch, line });
       i++;
       continue;
@@ -183,7 +185,7 @@ export function tokenizeDbml(input: string, errors: ParseError[]): DbmlToken[] {
     const startLine = line;
     while (
       i < len &&
-      !/[\s{}\[\]():,.<>'"`\-]/.test(input[i]) &&
+      !/[\s{}\[\]():,.<>'"`\-~]/.test(input[i]) &&
       !(input[i] === '/' && (input[i + 1] === '/' || input[i + 1] === '*'))
     ) {
       word += input[i];

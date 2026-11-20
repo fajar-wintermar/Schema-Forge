@@ -229,11 +229,12 @@ export function buildDiagramSvg(params: {
     const cx1 = x1 + dir1 * dx;
     const cx2 = x2 + dir2 * dx;
 
+    const edgeColor = r.color || edgeStroke;
     parts.push(
-      `<path d="M ${x1} ${y1} C ${cx1} ${y1}, ${cx2} ${y2}, ${x2} ${y2}" fill="none" stroke="${edgeStroke}" stroke-width="1.6" />`
+      `<path d="M ${x1} ${y1} C ${cx1} ${y1}, ${cx2} ${y2}, ${x2} ${y2}" fill="none" stroke="${edgeColor}" stroke-width="1.6" />`
     );
-    parts.push(`<circle cx="${x1}" cy="${y1}" r="3.5" fill="${edgeStroke}" />`);
-    parts.push(`<circle cx="${x2}" cy="${y2}" r="3.5" fill="#2563eb" />`);
+    parts.push(`<circle cx="${x1}" cy="${y1}" r="3.5" fill="${edgeColor}" />`);
+    parts.push(`<circle cx="${x2}" cy="${y2}" r="3.5" fill="${r.color || '#2563eb'}" />`);
   }
 
   // 3. Table cards

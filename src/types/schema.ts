@@ -13,16 +13,33 @@ export interface ColumnDef {
   increment: boolean;
   defaultValue?: string;
   note?: string;
+  check?: string;
+  checkName?: string;
+  fromPartial?: string;
   line?: number;
+}
+
+export interface IndexColumnItem {
+  value: string;
+  isExpression: boolean;
 }
 
 export interface IndexDef {
   columns: string[];
+  items?: IndexColumnItem[];
   name?: string;
   unique?: boolean;
   pk?: boolean;
   type?: string;
   note?: string;
+  line?: number;
+}
+
+export interface CheckDef {
+  name?: string;
+  expression: string;
+  note?: string;
+  line?: number;
 }
 
 export interface TableDef {
@@ -34,6 +51,21 @@ export interface TableDef {
   note?: string;
   columns: ColumnDef[];
   indexes: IndexDef[];
+  checks: CheckDef[];
+  appliedPartials?: string[];
+  line?: number;
+}
+
+export interface TablePartialDef {
+  id: string;
+  name: string;
+  headerColor?: string;
+  note?: string;
+  columns: ColumnDef[];
+  indexes: IndexDef[];
+  checks: CheckDef[];
+  appliedPartials?: string[];
+  settings?: Record<string, string>;
   line?: number;
 }
 
@@ -47,6 +79,8 @@ export interface RefDef {
   toColumns: string[];
   onDelete?: string;
   onUpdate?: string;
+  color?: string;
+  settings?: Record<string, string>;
   line?: number;
 }
 
@@ -93,6 +127,7 @@ export interface ParseError {
 export interface ParsedSchema {
   project: ProjectMeta;
   tables: TableDef[];
+  tablePartials: TablePartialDef[];
   refs: RefDef[];
   enums: EnumDef[];
   tableGroups: TableGroupDef[];

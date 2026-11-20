@@ -105,6 +105,18 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({
           >
             {schema.enums.length} Enums
           </button>
+          {schema.tablePartials.length > 0 && (
+            <>
+              <span>·</span>
+              <button
+                type="button"
+                onClick={() => onNavigateSection({ kind: 'partials' })}
+                className="tabular-nums hover:underline"
+              >
+                {schema.tablePartials.length} Partials
+              </button>
+            </>
+          )}
           <span>·</span>
           <button
             type="button"

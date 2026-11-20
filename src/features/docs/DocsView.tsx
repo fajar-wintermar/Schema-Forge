@@ -7,6 +7,7 @@ import { EnumsPage } from './pages/EnumsPage';
 import { GroupDetailPage } from './pages/GroupDetailPage';
 import { NoteDetailPage, StandaloneNotePage } from './pages/NoteDetailPage';
 import { OverviewPage } from './pages/OverviewPage';
+import { PartialsPage } from './pages/PartialsPage';
 import { RelationshipsPage } from './pages/RelationshipsPage';
 import { TableDetailPage } from './pages/TableDetailPage';
 import { TableGroupsPage } from './pages/TableGroupsPage';
@@ -56,6 +57,7 @@ export const DocsView: React.FC<DocsViewProps> = ({
   const [groupsSearch, setGroupsSearch] = useState('');
   const [groupsPage, setGroupsPage] = useState(1);
   const [groupsPageSize, setGroupsPageSize] = useState(10);
+  const [partialSearch, setPartialSearch] = useState('');
 
   // Reset to overview if active table, note, or group no longer exists after workspace switch
   useEffect(() => {
@@ -540,6 +542,20 @@ export const DocsView: React.FC<DocsViewProps> = ({
             onSetEnumSearch={setEnumSearch}
             onSetEnumPage={setEnumPage}
             onSetEnumPageSize={setEnumPageSize}
+            onNavigateSection={navigateSection}
+            onOpenTableDetail={openTableDetail}
+          />
+        )}
+
+        {section.kind === 'partials' && (
+          <PartialsPage
+            partials={schema.tablePartials}
+            tables={schema.tables}
+            partialSearch={partialSearch}
+            navOpen={navOpen}
+            modKey={modKey}
+            onToggleNav={onToggleNav}
+            onSetPartialSearch={setPartialSearch}
             onNavigateSection={navigateSection}
             onOpenTableDetail={openTableDetail}
           />

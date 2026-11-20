@@ -194,7 +194,15 @@ echo "Built $out from $(ls ${folder}/*.dbml | wc -l) files"
 }
 
 interface TopBlock {
-  kind: 'project' | 'table' | 'enum' | 'tablegroup' | 'note' | 'ref' | 'other';
+  kind:
+    | 'project'
+    | 'table'
+    | 'tablepartial'
+    | 'enum'
+    | 'tablegroup'
+    | 'note'
+    | 'ref'
+    | 'other';
   name?: string;
   refFromTable?: string;
   text: string;
@@ -290,6 +298,20 @@ export function splitDbmlIntoModuleFiles(
         while (i < lines.length && !lines[i].includes('*/')) i++;
       }
       i++;
+      continue;
+    }
+
+    const partialMatch = trimmed.match(
+      /^TablePartial\s+((?:"[^"]+"|'[^']+'|[^\s\[{]+))/i
+    );
+    if (partialMatch) {
+      const { text, nextIdx } = collectBlockText(i);
+      blocks.push({
+        kind: 'tablepartial',
+        name: stripQuotes(partialMatch[1]),
+        text,
+      });
+      i = nextIdx;
       continue;
     }
 

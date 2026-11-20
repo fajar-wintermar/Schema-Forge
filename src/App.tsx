@@ -294,6 +294,7 @@ export default function App() {
     errors: schemaActions.editorErrors,
     scrollToLine,
     enumNames: parsedSchema.enums.map((e) => e.name),
+    partialNames: parsedSchema.tablePartials.map((p) => p.name),
     tables: parsedSchema.tables,
     modKey,
     schemaFiles: activeWorkspace.schemaFiles,

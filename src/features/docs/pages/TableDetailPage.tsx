@@ -198,8 +198,29 @@ export const TableDetailPage: React.FC<TableDetailPageProps> = ({
           <span className="text-xs text-slate-500 dark:text-slate-400 tabular-nums shrink-0">
             {activeTable.columns.length} columns · {activeTable.indexes.length}{' '}
             indexes
+            {activeTable.checks.length > 0
+              ? ` · ${activeTable.checks.length} checks`
+              : ''}
           </span>
         </div>
+
+        {activeTable.appliedPartials && activeTable.appliedPartials.length > 0 && (
+          <div className="px-5 py-2 bg-violet-50/50 dark:bg-violet-950/20 border-b border-slate-200/70 dark:border-slate-800 flex flex-wrap items-center gap-2 text-xs">
+            <span className="text-slate-500 dark:text-slate-400">
+              Mixed-in Partials:
+            </span>
+            {activeTable.appliedPartials.map((partialName) => (
+              <button
+                key={partialName}
+                type="button"
+                onClick={() => onNavigateSection({ kind: 'partials' })}
+                className="font-mono text-[11px] px-2 py-0.5 rounded border border-violet-200 dark:border-violet-800 bg-white dark:bg-slate-900 text-violet-700 dark:text-violet-300 hover:border-violet-400"
+              >
+                ~{partialName}
+              </button>
+            ))}
+          </div>
+        )}
 
         {activeTable.note && !isRichMarkdownNote(activeTable.note) && (
           <div className="px-5 py-2.5 bg-slate-50/70 dark:bg-slate-800/40 border-b border-slate-200/70 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-300">
@@ -233,6 +254,7 @@ export const TableDetailPage: React.FC<TableDetailPageProps> = ({
                 if (col.unique) constraints.push('UNIQUE');
                 if (col.notNull && !col.pk) constraints.push('NOT NULL');
                 if (col.increment) constraints.push('INCREMENT');
+                if (col.check) constraints.push('CHECK');
 
                 return (
                   <tr
@@ -245,6 +267,14 @@ export const TableDetailPage: React.FC<TableDetailPageProps> = ({
                           <KeyRound className="w-3 h-3 text-amber-500 shrink-0" />
                         )}
                         {col.name}
+                        {col.fromPartial && (
+                          <span
+                            title={`Inherited from TablePartial ~${col.fromPartial}`}
+                            className="text-[10px] font-normal text-violet-600 dark:text-violet-400"
+                          >
+                            ~{col.fromPartial}
+                          </span>
+                        )}
                       </span>
                     </td>
                     <td className="py-2.5 px-4 font-mono text-slate-600 dark:text-slate-300 whitespace-nowrap">
@@ -270,6 +300,11 @@ export const TableDetailPage: React.FC<TableDetailPageProps> = ({
                             <span>{fk.label}</span>
                           </button>
                         )}
+                        {col.check && (
+                          <div className="font-mono text-[11px] text-cyan-700 dark:text-cyan-300">
+                            CHECK ({col.check})
+                          </div>
+                        )}
                         {col.note && (
                           <TrimmableNote
                             key={`col-note-${activeTable.id}-${col.name}`}
@@ -280,7 +315,7 @@ export const TableDetailPage: React.FC<TableDetailPageProps> = ({
                             defaultExpanded={false}
                           />
                         )}
-                        {!fk && !col.note && (
+                        {!fk && !col.note && !col.check && (
                           <span className="text-slate-400">—</span>
                         )}
                       </div>
@@ -295,21 +330,91 @@ export const TableDetailPage: React.FC<TableDetailPageProps> = ({
         {activeTable.indexes.length > 0 && (
           <div className="px-5 py-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-800/20">
             <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1.5">
-              Indexes
+              Indexes ({activeTable.indexes.length})
             </div>
-            <div className="space-y-1">
-              {activeTable.indexes.map((idx, i) => (
+            <div className="space-y-1.5">
+              {activeTable.indexes.map((idx, i) => {
+                const items =
+                  idx.items ||
+                  idx.columns.map((c) => ({
+                    value: c,
+                    isExpression: c.startsWith('`') && c.endsWith('`'),
+                  }));
+                return (
+                  <div
+                    key={i}
+                    className="text-xs font-mono text-slate-700 dark:text-slate-300 flex flex-wrap items-center gap-2"
+                  >
+                    <span>
+                      (
+                      {items.map((it, itemIdx) => (
+                        <React.Fragment key={itemIdx}>
+                          {itemIdx > 0 && ', '}
+                          <span
+                            className={
+                              it.isExpression
+                                ? 'text-cyan-700 dark:text-cyan-300'
+                                : ''
+                            }
+                          >
+                            {it.isExpression ? `\`${it.value.replace(/^`|`$/g, '')}\`` : it.value}
+                          </span>
+                        </React.Fragment>
+                      ))}
+                      )
+                    </span>
+                    {idx.name && (
+                      <span className="text-slate-400">· {idx.name}</span>
+                    )}
+                    {idx.type && (
+                      <span className="text-sky-600 dark:text-sky-400">
+                        · {idx.type}
+                      </span>
+                    )}
+                    {idx.pk && (
+                      <span className="text-amber-600 dark:text-amber-400">
+                        · pk
+                      </span>
+                    )}
+                    {idx.unique && (
+                      <span className="text-emerald-600 dark:text-emerald-400">
+                        · unique
+                      </span>
+                    )}
+                    {idx.note && (
+                      <span className="font-sans text-[11px] text-slate-500 dark:text-slate-400">
+                        — {idx.note}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {activeTable.checks.length > 0 && (
+          <div className="px-5 py-3 border-t border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-800/20">
+            <div className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 mb-1.5">
+              Check Constraints ({activeTable.checks.length})
+            </div>
+            <div className="space-y-1.5">
+              {activeTable.checks.map((chk, i) => (
                 <div
                   key={i}
-                  className="text-xs font-mono text-slate-700 dark:text-slate-300 flex items-center gap-2"
+                  className="text-xs flex flex-wrap items-center gap-2"
                 >
-                  <span>({idx.columns.join(', ')})</span>
-                  {idx.name && (
-                    <span className="text-slate-400">· {idx.name}</span>
+                  <code className="font-mono text-cyan-700 dark:text-cyan-300 bg-cyan-50/70 dark:bg-cyan-950/30 px-1.5 py-0.5 rounded">
+                    CHECK ({chk.expression})
+                  </code>
+                  {chk.name && (
+                    <span className="font-mono text-[11px] text-slate-400">
+                      · {chk.name}
+                    </span>
                   )}
-                  {idx.unique && (
-                    <span className="text-emerald-600 dark:text-emerald-400">
-                      · unique
+                  {chk.note && (
+                    <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                      — {chk.note}
                     </span>
                   )}
                 </div>
@@ -334,19 +439,32 @@ export const TableDetailPage: React.FC<TableDetailPageProps> = ({
                 {outgoing.map((r) => (
                   <div
                     key={r.id}
-                    className="px-4 py-2.5 flex items-center justify-between gap-2 text-xs"
+                    className="px-4 py-2.5 space-y-1 text-xs"
                   >
-                    <span className="font-mono text-slate-700 dark:text-slate-300 truncate">
-                      {r.fromColumns.join(', ')}
-                    </span>
-                    <CardinalityBadge relation={r.relation} />
-                    <button
-                      type="button"
-                      onClick={() => onOpenTableDetail(r.toTable)}
-                      className="font-mono text-blue-600 dark:text-blue-400 hover:underline font-semibold truncate"
-                    >
-                      {r.toTable}.{r.toColumns.join(', ')}
-                    </button>
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-mono text-slate-700 dark:text-slate-300 truncate">
+                        {r.fromColumns.join(', ')}
+                      </span>
+                      <CardinalityBadge relation={r.relation} />
+                      <button
+                        type="button"
+                        onClick={() => onOpenTableDetail(r.toTable)}
+                        className="font-mono text-blue-600 dark:text-blue-400 hover:underline font-semibold truncate"
+                      >
+                        {r.toTable}.{r.toColumns.join(', ')}
+                      </button>
+                    </div>
+                    {(r.name || r.onDelete || r.onUpdate) && (
+                      <div className="font-mono text-[10.5px] text-slate-400">
+                        {[
+                          r.name,
+                          r.onDelete ? `on delete ${r.onDelete}` : null,
+                          r.onUpdate ? `on update ${r.onUpdate}` : null,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -366,19 +484,32 @@ export const TableDetailPage: React.FC<TableDetailPageProps> = ({
                 {incoming.map((r) => (
                   <div
                     key={r.id}
-                    className="px-4 py-2.5 flex items-center justify-between gap-2 text-xs"
+                    className="px-4 py-2.5 space-y-1 text-xs"
                   >
-                    <button
-                      type="button"
-                      onClick={() => onOpenTableDetail(r.fromTable)}
-                      className="font-mono text-blue-600 dark:text-blue-400 hover:underline font-semibold truncate"
-                    >
-                      {r.fromTable}.{r.fromColumns.join(', ')}
-                    </button>
-                    <CardinalityBadge relation={r.relation} />
-                    <span className="font-mono text-slate-700 dark:text-slate-300 truncate">
-                      {r.toColumns.join(', ')}
-                    </span>
+                    <div className="flex items-center justify-between gap-2">
+                      <button
+                        type="button"
+                        onClick={() => onOpenTableDetail(r.fromTable)}
+                        className="font-mono text-blue-600 dark:text-blue-400 hover:underline font-semibold truncate"
+                      >
+                        {r.fromTable}.{r.fromColumns.join(', ')}
+                      </button>
+                      <CardinalityBadge relation={r.relation} />
+                      <span className="font-mono text-slate-700 dark:text-slate-300 truncate">
+                        {r.toColumns.join(', ')}
+                      </span>
+                    </div>
+                    {(r.name || r.onDelete || r.onUpdate) && (
+                      <div className="font-mono text-[10.5px] text-slate-400">
+                        {[
+                          r.name,
+                          r.onDelete ? `on delete ${r.onDelete}` : null,
+                          r.onUpdate ? `on update ${r.onUpdate}` : null,
+                        ]
+                          .filter(Boolean)
+                          .join(' · ')}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>

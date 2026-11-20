@@ -1,13 +1,15 @@
 import { TableDef } from '../../types/schema';
-import { AutocompleteItem, HighlightSegment } from './types';
+import { AutocompleteItem } from './types';
 
 export const TOP_KEYWORDS = new Set([
   'project',
   'table',
+  'tablepartial',
   'tablegroup',
   'ref',
   'enum',
   'indexes',
+  'checks',
   'note',
   'as',
 ]);
@@ -29,11 +31,16 @@ export const SETTING_KEYWORDS = new Set([
   'update',
   'name',
   'type',
+  'check',
   'cascade',
   'restrict',
   'no',
   'action',
   'set',
+  'btree',
+  'hash',
+  'gin',
+  'gist',
   'database_type',
 ]);
 
@@ -79,249 +86,12 @@ export const BUILTIN_TYPES = new Set([
   'interval',
 ]);
 
-export function kindColor(kind: AutocompleteItem['kind']): string {
-  switch (kind) {
-    case 'table':
-      return 'text-blue-600 dark:text-blue-400';
-    case 'column':
-      return 'text-emerald-600 dark:text-emerald-400';
-    case 'type':
-    case 'enum':
-      return 'text-emerald-600 dark:text-emerald-400';
-    case 'setting':
-      return 'text-sky-600 dark:text-sky-400';
-    default:
-      return 'text-violet-600 dark:text-violet-400';
-  }
-}
-
-export function tokenizeForHighlight(
-  code: string,
-  enumNameSet: Set<string>
-): HighlightSegment[][] {
-  const lines: HighlightSegment[][] = [[]];
-  let i = 0;
-  const len = code.length;
-  let bracketDepth = 0;
-  let braceDepth = 0;
-  let lineWordIndex = 0;
-  let blockKind: 'table' | 'enum' | 'tablegroup' | 'project' | 'indexes' | null =
-    null;
-
-  const pushSeg = (text: string, className: string) => {
-    const parts = text.split('\n');
-    parts.forEach((part, idx) => {
-      if (idx > 0) {
-        lines.push([]);
-        lineWordIndex = 0;
-      }
-      if (part.length > 0) {
-        lines[lines.length - 1].push({ text: part, className });
-      }
-    });
-  };
-
-  while (i < len) {
-    const ch = code[i];
-
-    if (ch === '\n') {
-      lines.push([]);
-      lineWordIndex = 0;
-      i++;
-      continue;
-    }
-
-    if (ch === ' ' || ch === '\t' || ch === '\r') {
-      let ws = '';
-      while (i < len && (code[i] === ' ' || code[i] === '\t' || code[i] === '\r')) {
-        ws += code[i];
-        i++;
-      }
-      lines[lines.length - 1].push({ text: ws, className: '' });
-      continue;
-    }
-
-    if (ch === '/' && code[i + 1] === '/') {
-      let comment = '';
-      while (i < len && code[i] !== '\n') {
-        comment += code[i];
-        i++;
-      }
-      pushSeg(comment, 'text-slate-400 dark:text-slate-500');
-      continue;
-    }
-
-    if (ch === '/' && code[i + 1] === '*') {
-      let comment = '/*';
-      i += 2;
-      while (i < len && !(code[i] === '*' && code[i + 1] === '/')) {
-        comment += code[i];
-        i++;
-      }
-      if (i < len) {
-        comment += '*/';
-        i += 2;
-      }
-      pushSeg(comment, 'text-slate-400 dark:text-slate-500');
-      continue;
-    }
-
-    if (code.slice(i, i + 3) === "'''") {
-      let str = "'''";
-      i += 3;
-      while (i < len && code.slice(i, i + 3) !== "'''") {
-        str += code[i];
-        i++;
-      }
-      if (i < len) {
-        str += "'''";
-        i += 3;
-      }
-      pushSeg(str, 'text-amber-700 dark:text-amber-300');
-      lineWordIndex++;
-      continue;
-    }
-
-    if (ch === "'" || ch === '"' || ch === '`') {
-      const quote = ch;
-      let str = quote;
-      i++;
-      while (i < len && code[i] !== quote) {
-        if (code[i] === '\\' && i + 1 < len) {
-          str += code[i] + code[i + 1];
-          i += 2;
-        } else {
-          str += code[i];
-          i++;
-        }
-      }
-      if (i < len) {
-        str += code[i];
-        i++;
-      }
-      pushSeg(
-        str,
-        quote === '`'
-          ? 'text-cyan-700 dark:text-cyan-300'
-          : 'text-amber-700 dark:text-amber-300'
-      );
-      lineWordIndex++;
-      continue;
-    }
-
-    if (ch === '#' && /^#[0-9a-fA-F]{3,8}\b/.test(code.slice(i))) {
-      const match = code.slice(i).match(/^#[0-9a-fA-F]{3,8}/)!;
-      pushSeg(match[0], 'text-pink-600 dark:text-pink-400');
-      i += match[0].length;
-      lineWordIndex++;
-      continue;
-    }
-
-    if (ch === '<' && code[i + 1] === '>') {
-      pushSeg('<>', 'text-blue-600 dark:text-blue-400');
-      i += 2;
-      continue;
-    }
-
-    if ('{}[]():,.<>-'.includes(ch)) {
-      if (ch === '[') bracketDepth++;
-      else if (ch === ']') bracketDepth = Math.max(0, bracketDepth - 1);
-      else if (ch === '{') braceDepth++;
-      else if (ch === '}') {
-        braceDepth = Math.max(0, braceDepth - 1);
-        if (braceDepth === 0) blockKind = null;
-      }
-
-      const isRelOp = '<>-'.includes(ch) && bracketDepth === 0;
-      pushSeg(
-        ch,
-        isRelOp
-          ? 'text-blue-600 dark:text-blue-400'
-          : 'text-slate-400 dark:text-slate-500'
-      );
-      i++;
-      continue;
-    }
-
-    if (/[0-9]/.test(ch)) {
-      let num = '';
-      while (i < len && /[0-9.]/.test(code[i])) {
-        num += code[i];
-        i++;
-      }
-      pushSeg(num, 'text-orange-600 dark:text-orange-400');
-      lineWordIndex++;
-      continue;
-    }
-
-    let word = '';
-    while (
-      i < len &&
-      !/[\s{}\[\]():,.<>'"`\-]/.test(code[i]) &&
-      !(code[i] === '/' && (code[i + 1] === '/' || code[i + 1] === '*'))
-    ) {
-      word += code[i];
-      i++;
-    }
-
-    const lower = word.toLowerCase();
-    let cls = 'text-slate-900 dark:text-slate-100';
-
-    if (TOP_KEYWORDS.has(lower) && bracketDepth === 0 && lineWordIndex === 0) {
-      cls = 'text-violet-600 dark:text-violet-400';
-      if (
-        lower === 'table' ||
-        lower === 'enum' ||
-        lower === 'tablegroup' ||
-        lower === 'project' ||
-        lower === 'indexes'
-      ) {
-        blockKind = lower;
-      }
-    } else if (lower === 'as' && braceDepth === 0) {
-      cls = 'text-violet-600 dark:text-violet-400';
-    } else if (bracketDepth > 0 && SETTING_KEYWORDS.has(lower)) {
-      cls = 'text-sky-600 dark:text-sky-400';
-    } else if (
-      blockKind === 'table' &&
-      braceDepth === 1 &&
-      bracketDepth === 0 &&
-      lineWordIndex === 1 &&
-      (BUILTIN_TYPES.has(lower) || enumNameSet.has(lower) || enumNameSet.has(word))
-    ) {
-      cls = 'text-emerald-600 dark:text-emerald-400';
-    } else if (
-      blockKind === 'table' &&
-      braceDepth === 1 &&
-      bracketDepth === 0 &&
-      lineWordIndex === 1
-    ) {
-      cls = 'text-emerald-600 dark:text-emerald-400';
-    } else if (
-      braceDepth === 0 &&
-      lineWordIndex === 1 &&
-      (blockKind === 'table' || blockKind === 'enum' || blockKind === 'project')
-    ) {
-      cls = 'text-blue-700 dark:text-blue-300';
-    } else if (
-      (lower === 'true' || lower === 'false' || lower === 'null') &&
-      bracketDepth > 0
-    ) {
-      cls = 'text-orange-600 dark:text-orange-400';
-    }
-
-    pushSeg(word, cls);
-    lineWordIndex++;
-  }
-
-  return lines;
-}
-
 export function getAutocompleteContext(
   code: string,
   cursorPos: number,
   tables: TableDef[],
-  enumNames: string[]
+  enumNames: string[],
+  partialNames: string[] = []
 ): { replaceStart: number; items: AutocompleteItem[] } {
   const before = code.slice(0, cursorPos);
   const lastNewline = before.lastIndexOf('\n');
@@ -379,7 +149,9 @@ export function getAutocompleteContext(
     } else if (ch === ']') {
       bracketDepth = Math.max(0, bracketDepth - 1);
     } else if (ch === '{') {
-      const m = pendingBlock.trim().match(/^(tablegroup|table|enum|project|indexes|ref)\b/i);
+      const m = pendingBlock
+        .trim()
+        .match(/^(tablepartial|tablegroup|table|enum|project|indexes|checks|ref)\b/i);
       blockStack.push(m ? m[1].toLowerCase() : 'block');
       pendingBlock = '';
     } else if (ch === '}') {
@@ -398,6 +170,26 @@ export function getAutocompleteContext(
 
   const currentBlock = blockStack[blockStack.length - 1] || null;
   const braceDepth = blockStack.length;
+
+  // Match ~partial injection inside Table / TablePartial
+  const partialTildeMatch = currentLine.match(/~([a-zA-Z0-9_]*)$/);
+  if (
+    partialTildeMatch &&
+    (currentBlock === 'table' || currentBlock === 'tablepartial') &&
+    bracketDepth === 0
+  ) {
+    const partialPrefix = partialTildeMatch[1].toLowerCase();
+    const replaceStart = cursorPos - partialTildeMatch[1].length - 1;
+    const items: AutocompleteItem[] = partialNames
+      .filter((p) => !partialPrefix || p.toLowerCase().includes(partialPrefix))
+      .map((p) => ({
+        label: `~${p}`,
+        insertText: `~${p}`,
+        kind: 'snippet',
+        detail: 'Inject TablePartial',
+      }));
+    return { replaceStart, items };
+  }
 
   // Match table.column reference prefix like "orders." or "orders.us"
   const dotMatch = currentLine.match(/([a-zA-Z0-9_]+)\.([a-zA-Z0-9_]*)$/);
@@ -444,7 +236,7 @@ export function getAutocompleteContext(
         { label: 'color:', insertText: 'color: #2563EB', kind: 'setting', detail: 'Domain group accent color' },
         { label: 'note:', insertText: "note: ''", kind: 'setting', detail: 'Group note', cursorOffsetBack: 1 },
       ];
-    } else if (/^table\b/i.test(trimmedLine)) {
+    } else if (/^(?:table|tablepartial)\b/i.test(trimmedLine)) {
       candidates = [
         { label: 'headercolor:', insertText: 'headercolor: #1e3a8a', kind: 'setting', detail: 'Table header color' },
         { label: 'note:', insertText: "note: ''", kind: 'setting', detail: 'Table description', cursorOffsetBack: 1 },
@@ -456,6 +248,7 @@ export function getAutocompleteContext(
         { label: 'delete: restrict', insertText: 'delete: restrict', kind: 'setting', detail: 'ON DELETE RESTRICT' },
         { label: 'update: cascade', insertText: 'update: cascade', kind: 'setting', detail: 'ON UPDATE CASCADE' },
         { label: 'update: no action', insertText: 'update: no action', kind: 'setting', detail: 'ON UPDATE NO ACTION' },
+        { label: 'color:', insertText: 'color: #2563EB', kind: 'setting', detail: 'Relationship line color' },
       ];
     } else if (currentBlock === 'indexes') {
       candidates = [
@@ -464,17 +257,34 @@ export function getAutocompleteContext(
         { label: 'name:', insertText: "name: ''", kind: 'setting', detail: 'Index name', cursorOffsetBack: 1 },
         { label: 'type: btree', insertText: 'type: btree', kind: 'setting', detail: 'B-Tree index' },
         { label: 'type: hash', insertText: 'type: hash', kind: 'setting', detail: 'Hash index' },
+        { label: 'type: gin', insertText: 'type: gin', kind: 'setting', detail: 'GIN index' },
+        { label: 'type: gist', insertText: 'type: gist', kind: 'setting', detail: 'GiST index' },
         { label: 'note:', insertText: "note: ''", kind: 'setting', detail: 'Index note', cursorOffsetBack: 1 },
       ];
+    } else if (currentBlock === 'checks') {
+      candidates = [
+        { label: 'name:', insertText: "name: ''", kind: 'setting', detail: 'Check constraint name', cursorOffsetBack: 1 },
+        { label: 'note:', insertText: "note: ''", kind: 'setting', detail: 'Check note', cursorOffsetBack: 1 },
+      ];
     } else {
+      const hasInlineRef = /\bref\s*:/i.test(insideBracket);
       candidates = [
         { label: 'pk', insertText: 'pk', kind: 'setting', detail: 'Primary key' },
         { label: 'not null', insertText: 'not null', kind: 'setting', detail: 'Disallows NULL' },
         { label: 'unique', insertText: 'unique', kind: 'setting', detail: 'Unique constraint' },
         { label: 'increment', insertText: 'increment', kind: 'setting', detail: 'Auto-increment' },
         { label: 'default:', insertText: "default: ''", kind: 'setting', detail: 'Default value', cursorOffsetBack: 1 },
+        { label: 'check:', insertText: 'check: ``', kind: 'setting', detail: 'Inline CHECK constraint', cursorOffsetBack: 1 },
         { label: 'note:', insertText: "note: ''", kind: 'setting', detail: 'Column description', cursorOffsetBack: 1 },
         { label: 'ref: >', insertText: 'ref: > ', kind: 'setting', detail: 'Inline foreign key reference' },
+        ...(hasInlineRef
+          ? [
+              { label: 'delete: cascade', insertText: 'delete: cascade', kind: 'setting' as const, detail: 'ON DELETE CASCADE' },
+              { label: 'delete: set null', insertText: 'delete: set null', kind: 'setting' as const, detail: 'ON DELETE SET NULL' },
+              { label: 'update: cascade', insertText: 'update: cascade', kind: 'setting' as const, detail: 'ON UPDATE CASCADE' },
+              { label: 'color:', insertText: 'color: #2563EB', kind: 'setting' as const, detail: 'Inline ref line color' },
+            ]
+          : []),
         { label: 'null', insertText: 'null', kind: 'setting', detail: 'Explicitly nullable' },
       ];
     }
@@ -493,6 +303,12 @@ export function getAutocompleteContext(
           insertText: 'Table table_name [headercolor: #1e3a8a] {\n  id uuid [pk, not null]\n}',
           kind: 'snippet',
           detail: 'Define a database table',
+        },
+        {
+          label: 'TablePartial',
+          insertText: 'TablePartial partial_name {\n  created_at timestamptz [default: `now()`]\n  updated_at timestamptz [default: `now()`]\n}',
+          kind: 'snippet',
+          detail: 'Reusable table columns/indexes/checks',
         },
         {
           label: 'TableGroup',
@@ -549,7 +365,7 @@ export function getAutocompleteContext(
       kind: 'table',
       detail: `${t.columns.length} columns`,
     }));
-  } else if (currentBlock === 'table') {
+  } else if (currentBlock === 'table' || currentBlock === 'tablepartial') {
     const tokensOnLine = currentLine.trimStart().split(/\s+/).filter(Boolean);
     const endsWithSpace = /\s$/.test(currentLine);
     const typingColType =
@@ -580,11 +396,18 @@ export function getAutocompleteContext(
       ];
     } else if (tokensOnLine.length <= 1 && !endsWithSpace) {
       candidates = [
+        ...partialNames.map((p) => ({
+          label: `~${p}`,
+          insertText: `~${p}`,
+          kind: 'snippet' as const,
+          detail: 'Inject TablePartial',
+        })),
         { label: 'id', insertText: 'id uuid [pk, not null]', kind: 'column', detail: 'Primary key column' },
         { label: 'created_at', insertText: "created_at timestamptz [default: `now()`]", kind: 'column', detail: 'Creation timestamp' },
         { label: 'updated_at', insertText: "updated_at timestamptz [default: `now()`]", kind: 'column', detail: 'Update timestamp' },
         { label: 'status', insertText: "status varchar(50) [not null]", kind: 'column', detail: 'Status column' },
-        { label: 'indexes', insertText: 'indexes {\n    \n  }', kind: 'keyword', detail: 'Composite indexes block', cursorOffsetBack: 4 },
+        { label: 'indexes', insertText: 'indexes {\n    \n  }', kind: 'keyword', detail: 'Composite / expression indexes block', cursorOffsetBack: 4 },
+        { label: 'checks', insertText: 'checks {\n    `` [name: \'\']\n  }', kind: 'keyword', detail: 'Table CHECK constraints block', cursorOffsetBack: 15 },
         { label: 'Note:', insertText: "Note: ''", kind: 'keyword', detail: 'Table note', cursorOffsetBack: 1 },
       ];
     }
@@ -598,5 +421,5 @@ export function getAutocompleteContext(
       )
     : candidates;
 
-  return { replaceStart, items: filtered.slice(0, 12) };
+  return { replaceStart, items: filtered.slice(0, 14) };
 }

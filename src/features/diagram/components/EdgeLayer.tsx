@@ -119,13 +119,28 @@ export const EdgeLayer: React.FC<EdgeLayerProps> = ({
         activeTableHighlight !== null && !isHighlighted;
 
       const stroke = isHighlighted
-        ? '#2563EB'
+        ? r.color || '#2563EB'
+        : r.color
+        ? r.color
         : darkMode
         ? '#475569'
         : '#94a3b8';
 
+      const midX = (x1 + cx1 + cx2 + x2) / 4;
+      const midY = (y1 + y2) / 2;
+      const metaLabel = [
+        r.name,
+        r.onDelete ? `del:${r.onDelete}` : null,
+        r.onUpdate ? `upd:${r.onUpdate}` : null,
+      ]
+        .filter(Boolean)
+        .join(' · ');
+
       return (
         <g key={edge.id} style={{ opacity: dimmedBySelection ? 0.25 : 1 }}>
+          <title>
+            {`${r.fromTable}.${r.fromColumns.join(', ')} ${r.relation} ${r.toTable}.${r.toColumns.join(', ')}${metaLabel ? ` (${metaLabel})` : ''}`}
+          </title>
           <path
             d={pathD}
             fill="none"
@@ -145,7 +160,7 @@ export const EdgeLayer: React.FC<EdgeLayerProps> = ({
             d={pathD}
             fill="none"
             stroke={stroke}
-            strokeWidth={isHighlighted ? 2.4 : 1.5}
+            strokeWidth={isHighlighted ? 2.4 : r.color ? 1.8 : 1.5}
           />
           <circle
             cx={x1}
@@ -157,7 +172,7 @@ export const EdgeLayer: React.FC<EdgeLayerProps> = ({
             cx={x2}
             cy={y2}
             r={isHighlighted ? 4.5 : 3.5}
-            fill={isHighlighted ? '#2563EB' : '#64748b'}
+            fill={isHighlighted ? stroke : r.color || '#64748b'}
           />
           {isHighlighted && (
             <>
@@ -166,7 +181,7 @@ export const EdgeLayer: React.FC<EdgeLayerProps> = ({
                 y={y1 - 6}
                 fontSize={10}
                 fontWeight={700}
-                fill="#2563EB"
+                fill={stroke}
                 className="font-mono"
               >
                 {r.relation === '>' ? 'N' : '1'}
@@ -176,11 +191,24 @@ export const EdgeLayer: React.FC<EdgeLayerProps> = ({
                 y={y2 - 6}
                 fontSize={10}
                 fontWeight={700}
-                fill="#2563EB"
+                fill={stroke}
                 className="font-mono"
               >
                 {r.relation === '<' ? 'N' : '1'}
               </text>
+              {hoveredRefId === edge.id && metaLabel && (
+                <text
+                  x={midX}
+                  y={midY - 8}
+                  textAnchor="middle"
+                  fontSize={10}
+                  fontWeight={600}
+                  fill={stroke}
+                  className="font-mono"
+                >
+                  {metaLabel}
+                </text>
+              )}
             </>
           )}
         </g>

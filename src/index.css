@@ -22,12 +22,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.dbml-editor-textarea::selection {
-  color: transparent !important;
-  -webkit-text-fill-color: transparent !important;
-  background-color: rgba(59, 130, 246, 0.28) !important;
-}
-
 .canvas-grid-light {
   background-color: #f8fafc;
   background-image: radial-gradient(#cbd5e1 1px, transparent 1px);

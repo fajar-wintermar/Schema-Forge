@@ -1,24 +1,37 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import { Check, Copy } from 'lucide-react';
-import { ParseError } from '../../types/schema';
 import {
   buildShellMergeScript,
   createStarterModuleDbml,
   MERGED_SCHEMA_VIEW_ID,
   normalizeModulePath,
 } from '../../utils/schemaModules';
-import { AutocompletePopover } from './components/AutocompletePopover';
-import { CodeViewport } from './components/CodeViewport';
+import {
+  CodeMirrorViewport,
+  CodeMirrorViewportHandle,
+  SearchStats,
+} from './components/CodeMirrorViewport';
 import { EditorToolbar } from './components/EditorToolbar';
 import { ErrorFooter } from './components/ErrorFooter';
 import { FindReplaceBar } from './components/FindReplaceBar';
 import { GotoLineBar } from './components/GotoLineBar';
 import { ModuleExplorer } from './components/ModuleExplorer';
-import { tokenizeForHighlight } from './dbmlLanguage';
 import { buildSchemaFileTree } from './fileTreeUtils';
-import { useEditorAutocomplete } from './hooks/useEditorAutocomplete';
-import { useEditorSearchAndNav } from './hooks/useEditorSearchAndNav';
 import { DbmlEditorProps } from './types';
+
+function countLinesFast(text: string): number {
+  let count = 1;
+  for (let i = 0; i < text.length; i++) {
+    if (text.charCodeAt(i) === 10) count++;
+  }
+  return count;
+}
 
 export const DbmlEditor: React.FC<DbmlEditorProps> = ({
   value,
@@ -27,6 +40,7 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
   scrollToLine,
   enumNames = [],
   tables = [],
+  partialNames = [],
   isMaximized = false,
   onToggleMaximize,
   onMinimize,
@@ -46,16 +60,34 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
   const isModular = Boolean(schemaFiles && schemaFiles.length > 0);
   const isMergedPreview = isModular && activeFilePath === MERGED_SCHEMA_VIEW_ID;
 
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const codeAreaRef = useRef<HTMLDivElement>(null);
+  const cmRef = useRef<CodeMirrorViewportHandle>(null);
   const editorWrapperRef = useRef<HTMLDivElement>(null);
+  const findInputRef = useRef<HTMLInputElement>(null);
+  const replaceInputRef = useRef<HTMLInputElement>(null);
+  const gotoInputRef = useRef<HTMLInputElement>(null);
+
   const [problemsOpen, setProblemsOpen] = useState(false);
+
+  // Find / Replace & Go to Line state
+  const [findOpen, setFindOpen] = useState(false);
+  const [replaceOpen, setReplaceOpen] = useState(false);
+  const [findQuery, setFindQuery] = useState('');
+  const [replaceQuery, setReplaceQuery] = useState('');
+  const [matchCase, setMatchCase] = useState(false);
+  const [wholeWord, setWholeWord] = useState(false);
+  const [searchStats, setSearchStats] = useState<SearchStats>({
+    matchCount: 0,
+    activeIndex: 0,
+  });
+  const [gotoOpen, setGotoOpen] = useState(false);
+  const [gotoValue, setGotoValue] = useState('');
 
   // Modular file explorer UI state
   const [explorerOpen, setExplorerOpen] = useState(true);
   const [fileSearch, setFileSearch] = useState('');
-  const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
+  const [collapsedFolders, setCollapsedFolders] = useState<
+    Record<string, boolean>
+  >({});
   const [newFileOpen, setNewFileOpen] = useState(false);
   const [newFileName, setNewFileName] = useState('');
   const [newFileIncludeStub, setNewFileIncludeStub] = useState(true);
@@ -64,65 +96,89 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
   const [deleteTargetPath, setDeleteTargetPath] = useState<string | null>(null);
   const [copiedScript, setCopiedScript] = useState(false);
 
-  const lines = useMemo(() => value.split('\n'), [value]);
-  const lineStartOffsets = useMemo(() => {
-    const offsets: number[] = [];
-    let pos = 0;
-    for (let i = 0; i < lines.length; i++) {
-      offsets.push(pos);
-      pos += lines[i].length + 1;
+  const lineCount = useMemo(() => countLinesFast(value), [value]);
+
+  const openFindBar = useCallback((withReplace = false) => {
+    const selected = cmRef.current?.getSelectedText() || '';
+    setGotoOpen(false);
+    setFindOpen(true);
+    setReplaceOpen(withReplace);
+    if (selected && !selected.includes('\n') && selected.length <= 120) {
+      setFindQuery(selected);
     }
-    return offsets;
-  }, [lines]);
+    requestAnimationFrame(() => {
+      findInputRef.current?.focus();
+      findInputRef.current?.select();
+    });
+  }, []);
 
-  const errorsByLine = useMemo(() => {
-    const map = new Map<number, ParseError[]>();
-    for (const err of errors) {
-      if (!map.has(err.line)) map.set(err.line, []);
-      map.get(err.line)!.push(err);
-    }
-    return map;
-  }, [errors]);
+  const closeFindBar = useCallback(() => {
+    setFindOpen(false);
+    setReplaceOpen(false);
+    cmRef.current?.clearSearch();
+    cmRef.current?.focus();
+  }, []);
 
-  const enumNameSet = useMemo(
-    () => new Set(enumNames.flatMap((n) => [n, n.toLowerCase()])),
-    [enumNames]
-  );
+  const openGotoLine = useCallback(() => {
+    setFindOpen(false);
+    setReplaceOpen(false);
+    cmRef.current?.clearSearch();
+    setGotoValue('');
+    setGotoOpen(true);
+    requestAnimationFrame(() => {
+      gotoInputRef.current?.focus();
+    });
+  }, []);
 
-  const highlightedLines = useMemo(
-    () => tokenizeForHighlight(value, enumNameSet),
-    [value, enumNameSet]
-  );
+  const closeGotoLine = useCallback(() => {
+    setGotoOpen(false);
+    cmRef.current?.focus();
+  }, []);
 
-  const autocomplete = useEditorAutocomplete({
-    value,
-    tables,
-    enumNames,
-    onChange,
-    textareaRef,
-    scrollContainerRef,
-    codeAreaRef,
-  });
-
-  const searchAndNav = useEditorSearchAndNav({
-    value,
-    lines,
-    lineStartOffsets,
-    isMergedPreview,
-    onChange,
-    textareaRef,
-    scrollContainerRef,
-    editorWrapperRef,
-    onDismissAutocomplete: autocomplete.dismissAutocomplete,
-  });
-
+  // Re-run CM6 search query whenever query/flags/doc update while find bar is open
   useEffect(() => {
-    if (!scrollToLine || !scrollContainerRef.current) return;
-    const lineHeight = 20;
-    const targetTop = Math.max(0, (scrollToLine - 4) * lineHeight);
-    scrollContainerRef.current.scrollTo({ top: targetTop, behavior: 'smooth' });
-  }, [scrollToLine, activeFilePath]);
+    if (!findOpen) return;
+    const stats = cmRef.current?.applySearch(
+      findQuery,
+      matchCase,
+      wholeWord,
+      false
+    );
+    if (stats) setSearchStats(stats);
+  }, [findOpen, findQuery, matchCase, wholeWord, value, activeFilePath]);
 
+  // Global keyboard shortcuts scoped to the editor panel (Cmd/Ctrl+F, H, G)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+      const key = e.key.toLowerCase();
+      if (key !== 'f' && key !== 'h' && key !== 'g') return;
+
+      const activeEl = document.activeElement;
+      const inEditor =
+        Boolean(editorWrapperRef.current?.contains(activeEl)) ||
+        findOpen ||
+        gotoOpen;
+      if (!inEditor) return;
+
+      if (key === 'f' && !e.shiftKey) {
+        e.preventDefault();
+        openFindBar(false);
+      } else if (key === 'h' && !e.shiftKey) {
+        e.preventDefault();
+        openFindBar(!isMergedPreview);
+      } else if (key === 'g' && !e.shiftKey) {
+        e.preventDefault();
+        openGotoLine();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [findOpen, gotoOpen, isMergedPreview, openFindBar, openGotoLine]);
+
+  // Reset inline rename/delete states and expand active file's parent folders
   useEffect(() => {
     setRenameTargetPath(null);
     setDeleteTargetPath(null);
@@ -195,13 +251,10 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
     setRenameTargetPath(null);
   };
 
-  const handleJumpFromMergedCursor = () => {
-    if (!onJumpToMergedLine) return;
-    const ta = textareaRef.current;
-    const pos = ta ? ta.selectionStart : 0;
-    const lineNum = Math.max(1, value.slice(0, pos).split('\n').length);
-    onJumpToMergedLine(lineNum);
-  };
+  const handleJumpFromMergedCursor = useCallback(() => {
+    if (!onJumpToMergedLine || !cmRef.current) return;
+    onJumpToMergedLine(cmRef.current.getCursorLine());
+  }, [onJumpToMergedLine]);
 
   const handleCopyMergeScript = async () => {
     try {
@@ -213,66 +266,45 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
     }
   };
 
-  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    if (isMergedPreview) return;
-    const nextVal = e.target.value;
-    const pos = e.target.selectionStart;
-    onChange(nextVal);
-    autocomplete.triggerAutocomplete(nextVal, pos, false);
+  const handleGoToMatch = (nextIdx: number) => {
+    const dir = nextIdx < searchStats.activeIndex ? 'prev' : 'next';
+    const stats = cmRef.current?.stepSearch(dir);
+    if (stats) setSearchStats(stats);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (isMergedPreview) {
-      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && onJumpToMergedLine) {
-        e.preventDefault();
-        handleJumpFromMergedCursor();
-      }
-      return;
-    }
+  const handleReplaceCurrent = () => {
+    if (isMergedPreview || !findQuery) return;
+    const stats = cmRef.current?.replaceOne(
+      findQuery,
+      replaceQuery,
+      matchCase,
+      wholeWord
+    );
+    if (stats) setSearchStats(stats);
+  };
 
-    if (e.ctrlKey && e.code === 'Space') {
-      e.preventDefault();
-      autocomplete.triggerAutocomplete(value, e.currentTarget.selectionStart, true);
-      return;
-    }
+  const handleReplaceAll = () => {
+    if (isMergedPreview || !findQuery) return;
+    const stats = cmRef.current?.replaceAllMatches(
+      findQuery,
+      replaceQuery,
+      matchCase,
+      wholeWord
+    );
+    if (stats) setSearchStats(stats);
+  };
 
-    const { acState } = autocomplete;
-    if (acState.open && acState.items.length > 0) {
-      if (e.key === 'ArrowDown') {
-        e.preventDefault();
-        autocomplete.cycleActiveIndex(1);
-        return;
-      }
-      if (e.key === 'ArrowUp') {
-        e.preventDefault();
-        autocomplete.cycleActiveIndex(-1);
-        return;
-      }
-      if (e.key === 'Enter' || e.key === 'Tab') {
-        e.preventDefault();
-        autocomplete.acceptSuggestion(
-          acState.items[acState.activeIndex] || acState.items[0]
-        );
-        return;
-      }
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        autocomplete.dismissAutocomplete();
-        return;
-      }
-    }
+  const handleSubmitGotoLine = () => {
+    const match = gotoValue.trim().match(/^(\d+)(?::(\d+))?$/);
+    if (!match) return;
+    const lineNum = Number(match[1]);
+    const colNum = match[2] ? Number(match[2]) : undefined;
+    cmRef.current?.jumpToLine(lineNum, colNum);
+    setGotoOpen(false);
+  };
 
-    if (e.key === 'Tab') {
-      e.preventDefault();
-      const el = e.currentTarget;
-      const start = el.selectionStart;
-      const end = el.selectionEnd;
-      const next = value.substring(0, start) + '  ' + value.substring(end);
-      onChange(next);
-      requestAnimationFrame(() => {
-        el.selectionStart = el.selectionEnd = start + 2;
-      });
-    }
+  const handleJumpToLine = (line: number) => {
+    cmRef.current?.jumpToLine(line);
   };
 
   return (
@@ -287,8 +319,8 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
         explorerOpen={explorerOpen}
         onToggleExplorer={() => setExplorerOpen((o) => !o)}
         onEnableModularMode={onEnableModularMode}
-        findOpen={searchAndNav.findOpen}
-        onOpenFind={() => searchAndNav.openFindBar(false)}
+        findOpen={findOpen}
+        onOpenFind={() => openFindBar(false)}
         isMaximized={isMaximized}
         onToggleMaximize={onToggleMaximize}
         onMinimize={onMinimize}
@@ -335,7 +367,8 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
             <div className="shrink-0 px-2.5 py-1.5 border-b border-emerald-200/80 dark:border-emerald-900/60 bg-emerald-50/70 dark:bg-emerald-950/30 flex flex-wrap items-center justify-between gap-2 text-[11px]">
               <span className="text-emerald-900 dark:text-emerald-200">
                 Generated on the fly from {sortedSchemaFiles.length} files in{' '}
-                <code className="font-mono font-semibold">{schemaFolder}/</code> · Read-only (never pushed to GitHub)
+                <code className="font-mono font-semibold">{schemaFolder}/</code>{' '}
+                · Read-only (never pushed to GitHub)
               </span>
               <div className="flex items-center gap-1.5 shrink-0">
                 {onJumpToMergedLine && (
@@ -358,93 +391,84 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
                     <Copy className="w-3 h-3" />
                   )}
                   <span>
-                    {copiedScript ? 'Copied build-schema.sh' : 'Copy build-schema.sh'}
+                    {copiedScript
+                      ? 'Copied build-schema.sh'
+                      : 'Copy build-schema.sh'}
                   </span>
                 </button>
               </div>
             </div>
           )}
 
-          {searchAndNav.findOpen && (
+          {findOpen && (
             <FindReplaceBar
               modKey={modKey}
-              findInputRef={searchAndNav.findInputRef}
-              replaceInputRef={searchAndNav.replaceInputRef}
-              findQuery={searchAndNav.findQuery}
-              onFindQueryChange={searchAndNav.setFindQuery}
-              replaceQuery={searchAndNav.replaceQuery}
-              onReplaceQueryChange={searchAndNav.setReplaceQuery}
-              replaceOpen={searchAndNav.replaceOpen}
-              onToggleReplace={() => searchAndNav.setReplaceOpen((r) => !r)}
-              matchCase={searchAndNav.matchCase}
-              onToggleMatchCase={() => searchAndNav.setMatchCase((v) => !v)}
-              wholeWord={searchAndNav.wholeWord}
-              onToggleWholeWord={() => searchAndNav.setWholeWord((v) => !v)}
-              matchCount={searchAndNav.findMatches.length}
-              safeMatchIdx={searchAndNav.safeMatchIdx}
-              onGoToMatch={searchAndNav.goToMatch}
-              onReplaceCurrent={searchAndNav.handleReplaceCurrent}
-              onReplaceAll={searchAndNav.handleReplaceAll}
-              onClose={searchAndNav.closeFindBar}
+              findInputRef={findInputRef}
+              replaceInputRef={replaceInputRef}
+              findQuery={findQuery}
+              onFindQueryChange={setFindQuery}
+              replaceQuery={replaceQuery}
+              onReplaceQueryChange={setReplaceQuery}
+              replaceOpen={replaceOpen}
+              onToggleReplace={() =>
+                setReplaceOpen((r) => (!isMergedPreview ? !r : false))
+              }
+              matchCase={matchCase}
+              onToggleMatchCase={() => setMatchCase((v) => !v)}
+              wholeWord={wholeWord}
+              onToggleWholeWord={() => setWholeWord((v) => !v)}
+              matchCount={searchStats.matchCount}
+              safeMatchIdx={searchStats.activeIndex}
+              onGoToMatch={handleGoToMatch}
+              onReplaceCurrent={handleReplaceCurrent}
+              onReplaceAll={handleReplaceAll}
+              onClose={closeFindBar}
             />
           )}
 
-          {searchAndNav.gotoOpen && (
+          {gotoOpen && (
             <GotoLineBar
-              gotoInputRef={searchAndNav.gotoInputRef}
-              gotoValue={searchAndNav.gotoValue}
-              onGotoValueChange={searchAndNav.setGotoValue}
-              totalLines={lines.length}
-              onSubmit={searchAndNav.handleSubmitGotoLine}
-              onClose={searchAndNav.closeGotoLine}
+              gotoInputRef={gotoInputRef}
+              gotoValue={gotoValue}
+              onGotoValueChange={setGotoValue}
+              totalLines={lineCount}
+              onSubmit={handleSubmitGotoLine}
+              onClose={closeGotoLine}
             />
           )}
 
-          <div ref={codeAreaRef} className="relative flex-1 flex min-h-0 overflow-hidden">
-            <CodeViewport
+          <div className="relative flex-1 flex min-h-0 overflow-hidden">
+            <CodeMirrorViewport
+              ref={cmRef}
               value={value}
-              lines={lines}
-              lineStartOffsets={lineStartOffsets}
-              highlightedLines={highlightedLines}
-              errorsByLine={errorsByLine}
-              scrollToLine={scrollToLine}
-              gotoHighlightLine={searchAndNav.gotoHighlightLine}
-              findMatches={searchAndNav.findMatches}
-              safeMatchIdx={searchAndNav.safeMatchIdx}
+              onChange={onChange}
+              errors={errors}
+              tables={tables}
+              enumNames={enumNames}
+              partialNames={partialNames}
+              activeFilePath={activeFilePath}
               isMergedPreview={isMergedPreview}
-              hasJumpToMerged={Boolean(onJumpToMergedLine)}
-              scrollContainerRef={scrollContainerRef}
-              textareaRef={textareaRef}
-              onScrollDismissAutocomplete={autocomplete.dismissAutocomplete}
-              onChange={handleChange}
-              onKeyDown={handleKeyDown}
-              onJumpFromMergedCursor={handleJumpFromMergedCursor}
+              scrollToLine={scrollToLine}
+              onOpenFind={openFindBar}
+              onOpenGotoLine={openGotoLine}
+              onJumpFromMergedCursor={
+                onJumpToMergedLine ? handleJumpFromMergedCursor : undefined
+              }
             />
-
-            {autocomplete.acState.open && autocomplete.acState.items.length > 0 && (
-              <AutocompletePopover
-                items={autocomplete.acState.items}
-                activeIndex={autocomplete.acState.activeIndex}
-                top={autocomplete.acState.top}
-                left={autocomplete.acState.left}
-                onSelect={autocomplete.acceptSuggestion}
-                onHoverIndex={autocomplete.setActiveIndex}
-              />
-            )}
           </div>
 
           <ErrorFooter
             errors={errors}
             problemsOpen={problemsOpen}
             onToggleProblems={() => setProblemsOpen((p) => !p)}
-            onJumpToLine={searchAndNav.jumpToLine}
+            onJumpToLine={handleJumpToLine}
             isModular={isModular}
             otherFileErrorEntries={otherFileErrorEntries}
             otherFileErrorsCount={otherFileErrorsCount}
             onSelectFile={onSelectFile}
-            lineCount={lines.length}
+            lineCount={lineCount}
             modKey={modKey}
-            onOpenGotoLine={searchAndNav.openGotoLine}
+            onOpenGotoLine={openGotoLine}
           />
         </div>
       </div>
