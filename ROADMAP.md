@@ -35,7 +35,7 @@
   - **Focus Neighborhood Mode**: Clicking a table highlights its 1-hop upstream/downstream relationships and dims unrelated tables and edges.
   - **Orthogonal Edge Routing**: Optional right-angle connector routing alongside curved Béziers.
   - **Cross-Domain Edge Toggles**: Option to hide or bundle cross-domain links on crowded canvases.
-- [ ] **Global Command Palette (`Cmd/Ctrl + K`)**
+- [x] **Global Command Palette (`Cmd/Ctrl + K`)**
   - Instant fuzzy search and jump to any table, column, domain, Markdown note, or `.dbml` module across Editor, Diagram, and Docs views.
 
 ---

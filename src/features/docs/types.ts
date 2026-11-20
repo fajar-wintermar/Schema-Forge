@@ -8,6 +8,7 @@ export interface DocsViewProps {
   modKey?: string;
   selectedDomains?: string[];
   onClearDomainFilter?: () => void;
+  sectionRequest?: { section: DocsSection; nonce: number } | null;
   onSelectTable: (tableId: string) => void;
 }
 

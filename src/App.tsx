@@ -9,9 +9,14 @@ import React, {
 import { Maximize2, PanelLeftOpen } from 'lucide-react';
 import { InspectorDrawer } from './components/InspectorDrawer';
 import { Sidebar, SidebarTab } from './features/sidebar/Sidebar';
-import { GlobalSearchResult, TopBar } from './components/TopBar';
+import { TopBar } from './components/TopBar';
 import { useGlobalShortcuts } from './features/app/hooks/useGlobalShortcuts';
+import {
+  CommandItem,
+  CommandTargetView,
+} from './features/command/commandSearch';
 import { DiagramCanvas } from './features/diagram/DiagramCanvas';
+import type { DocsSection } from './features/docs/types';
 import { DbmlEditor } from './features/editor/DbmlEditor';
 import { useRemoteWorkspaceSync } from './features/workspace/hooks/useRemoteWorkspaceSync';
 import { useSchemaActions } from './features/workspace/hooks/useSchemaActions';
@@ -19,6 +24,11 @@ import { useWorkspaceStore } from './features/workspace/hooks/useWorkspaceStore'
 import { TableGroupDef, ViewMode } from './types/schema';
 import { MERGED_SCHEMA_VIEW_ID } from './utils/schemaModules';
 
+const CommandPaletteModal = lazy(() =>
+  import('./features/command/CommandPaletteModal').then((m) => ({
+    default: m.CommandPaletteModal,
+  }))
+);
 const DocsView = lazy(() =>
   import('./features/docs/DocsView').then((m) => ({ default: m.DocsView }))
 );
@@ -79,7 +89,13 @@ export default function App() {
     nonce: number;
   } | null>(null);
 
+  const [docsSectionRequest, setDocsSectionRequest] = useState<{
+    section: DocsSection;
+    nonce: number;
+  } | null>(null);
+
   // Modal visibility state
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [groupModalState, setGroupModalState] = useState<{
     open: boolean;
     group: TableGroupDef | null;
@@ -157,6 +173,8 @@ export default function App() {
     setImportExportOpen,
     workspacesModalOpen,
     setWorkspacesModalOpen,
+    commandPaletteOpen,
+    setCommandPaletteOpen,
   });
 
   const schemaActions = useSchemaActions({
@@ -242,49 +260,138 @@ export default function App() {
     });
   };
 
-  const handleSelectSearchResult = (res: GlobalSearchResult) => {
-    if (res.kind === 'group' && res.groupName) {
+  const handleExecuteCommand = (
+    item: CommandItem,
+    target: CommandTargetView = 'auto'
+  ) => {
+    if (item.kind === 'action' && item.actionId) {
+      switch (item.actionId) {
+        case 'view-split':
+          handleChangeViewMode('split');
+          break;
+        case 'view-diagram':
+          handleChangeViewMode('diagram');
+          break;
+        case 'view-docs':
+          handleChangeViewMode('docs');
+          break;
+        case 'auto-layout':
+          if (viewMode === 'docs') setViewMode('split');
+          schemaActions.handleAutoLayout();
+          break;
+        case 'toggle-theme':
+          setDarkMode((d) => !d);
+          break;
+        case 'import-export':
+          setImportExportOpen(true);
+          break;
+        case 'save-version':
+          setSaveVersionOpen(true);
+          break;
+        case 'github':
+          setGithubModalOpen(true);
+          break;
+        case 'shortcuts':
+          setShortcutsOpen(true);
+          break;
+      }
+      return;
+    }
+
+    if (item.kind === 'file' || target === 'editor') {
+      if (viewMode !== 'split') setViewMode('split');
+      if (editorState === 'minimized') setEditorState('normal');
+      if (item.filePath) {
+        schemaActions.handleSelectSchemaFile(item.filePath);
+        showToast(`Opened ${item.title}`);
+        return;
+      }
+      if (item.line) {
+        schemaActions.jumpToMergedLine(item.line);
+        showToast(`Jumped to ${item.title} (Ln ${item.line})`);
+      }
+      return;
+    }
+
+    if (
+      (target === 'docs' || (target === 'auto' && viewMode === 'docs')) &&
+      item.docsSection
+    ) {
+      setViewMode('docs');
+      setDocsSectionRequest({ section: item.docsSection, nonce: Date.now() });
+      showToast(`Opened ${item.title} in Docs`);
+      return;
+    }
+
+    if (item.kind === 'partial') {
+      if (viewMode === 'split' && item.line) {
+        if (editorState === 'minimized') setEditorState('normal');
+        schemaActions.jumpToMergedLine(item.line);
+        showToast(`Jumped to ${item.title}`);
+      } else if (item.docsSection) {
+        setViewMode('docs');
+        setDocsSectionRequest({ section: item.docsSection, nonce: Date.now() });
+        showToast(`Opened ${item.title} in Docs`);
+      }
+      return;
+    }
+
+    if (item.kind === 'note' && !item.tableId && !item.groupName) {
+      if (item.docsSection && (viewMode === 'docs' || !item.line)) {
+        setViewMode('docs');
+        setDocsSectionRequest({ section: item.docsSection, nonce: Date.now() });
+        showToast(`Opened note "${item.title}"`);
+      } else if (item.line) {
+        if (viewMode === 'diagram') setViewMode('split');
+        if (editorState === 'minimized') setEditorState('normal');
+        schemaActions.jumpToMergedLine(item.line);
+        showToast(`Jumped to note "${item.title}"`);
+      }
+      return;
+    }
+
+    if (item.kind === 'group' && item.groupName) {
       setHighlightedColumn(null);
       setSelectedTableId(null);
       if (viewMode === 'docs') setViewMode('split');
       if (editorState === 'maximized') setEditorState('normal');
-      setSelectedDomains([res.groupName]);
-      if (res.line) schemaActions.jumpToMergedLine(res.line);
-      setFocusRequest({ type: 'group', id: res.groupName, nonce: Date.now() });
-      showToast(`Showing domain "${res.groupName}"`);
+      setSelectedDomains([item.groupName]);
+      if (item.line) schemaActions.jumpToMergedLine(item.line);
+      setFocusRequest({ type: 'group', id: item.groupName, nonce: Date.now() });
+      showToast(`Showing domain "${item.groupName}"`);
       return;
     }
 
-    if (res.tableId) {
+    if (item.tableId) {
       if (viewMode === 'docs') setViewMode('split');
       if (editorState === 'maximized') setEditorState('normal');
       if (
         effectiveSelectedDomains.length > 0 &&
-        !res.domains.some((d) => effectiveSelectedDomains.includes(d))
+        !item.domains.some((d) => effectiveSelectedDomains.includes(d))
       ) {
         setSelectedDomains([]);
       }
-      setSelectedTableId(res.tableId);
+      setSelectedTableId(item.tableId);
 
-      if (res.kind === 'column' && res.columnName) {
+      if (item.kind === 'column' && item.columnName) {
         setHighlightedColumn({
-          tableId: res.tableId,
-          columnName: res.columnName,
+          tableId: item.tableId,
+          columnName: item.columnName,
         });
         if (
           activeWorkspace.detailLevel === 'names' ||
-          (activeWorkspace.detailLevel === 'keys' && !res.isPk)
+          (activeWorkspace.detailLevel === 'keys' && !item.isPk)
         ) {
           schemaActions.handleDetailLevelChange('columns');
         }
-        showToast(`Highlighted ${res.tableId}.${res.columnName}`);
+        showToast(`Highlighted ${item.tableId}.${item.columnName}`);
       } else {
         setHighlightedColumn(null);
-        showToast(`Focused table ${res.tableId}`);
+        showToast(`Focused table ${item.tableId}`);
       }
 
-      if (res.line) schemaActions.jumpToMergedLine(res.line);
-      setFocusRequest({ type: 'table', id: res.tableId, nonce: Date.now() });
+      if (item.line) schemaActions.jumpToMergedLine(item.line);
+      setFocusRequest({ type: 'table', id: item.tableId, nonce: Date.now() });
     }
   };
 
@@ -314,7 +421,6 @@ export default function App() {
     <div className="h-screen w-screen flex flex-col overflow-hidden bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
       <TopBar
         projectName={activeWorkspace.name}
-        schema={parsedSchema}
         sidebarOpen={sidebarOpen}
         onToggleSidebar={() => {
           if (viewMode !== 'docs') {
@@ -323,7 +429,7 @@ export default function App() {
         }}
         viewMode={viewMode}
         onChangeViewMode={handleChangeViewMode}
-        onSelectSearchResult={handleSelectSearchResult}
+        onOpenCommandPalette={() => setCommandPaletteOpen(true)}
         onOpenWorkspaces={() => setWorkspacesModalOpen(true)}
         onOpenUrlModal={() => setOpenUrlOpen(true)}
         onOpenGithubModal={() => setGithubModalOpen(true)}
@@ -412,6 +518,7 @@ export default function App() {
                 navOpen={docsNavOpen}
                 onToggleNav={() => setDocsNavOpen((o) => !o)}
                 modKey={modKey}
+                sectionRequest={docsSectionRequest}
                 onSelectTable={(id) => {
                   setSelectedTableId(id);
                   setViewMode('split');
@@ -653,6 +760,20 @@ export default function App() {
             onCreateModularProject={remoteSync.handleCreateModularWorkspace}
             onDeleteWorkspace={removeWorkspace}
             onClose={() => setWorkspacesModalOpen(false)}
+          />
+        )}
+
+        {commandPaletteOpen && (
+          <CommandPaletteModal
+            open={commandPaletteOpen}
+            schema={parsedSchema}
+            stickyNotes={activeWorkspace.stickyNotes}
+            schemaFiles={activeWorkspace.schemaFiles}
+            schemaFolder={schemaActions.activeSchemaFolder}
+            viewMode={viewMode}
+            modKey={modKey}
+            onClose={() => setCommandPaletteOpen(false)}
+            onSelectCommand={handleExecuteCommand}
           />
         )}
 

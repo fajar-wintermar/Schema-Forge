@@ -20,7 +20,11 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({
     { label: 'Toggle maximize / restore code editor', keys: [`${modKey}`, '⇧', 'E'] },
     { label: 'Open Import / Export studio', keys: [`${modKey}`, 'I'] },
     { label: 'Save version snapshot', keys: [`${modKey}`, 'S'] },
-    { label: 'Global search (tables, columns, domains)', keys: [`${modKey}`, 'K'] },
+    {
+      label:
+        'Global Command Palette (tables, columns, domains, notes, .dbml modules)',
+      keys: [`${modKey}`, 'K'],
+    },
     { label: 'Close active modal', keys: ['Esc'] },
   ];
 

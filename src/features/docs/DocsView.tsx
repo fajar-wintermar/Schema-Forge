@@ -29,6 +29,7 @@ export const DocsView: React.FC<DocsViewProps> = ({
   modKey = '⌘',
   selectedDomains = [],
   onClearDomainFilter,
+  sectionRequest,
   onSelectTable,
 }) => {
   const [search, setSearch] = useState('');
@@ -58,6 +59,14 @@ export const DocsView: React.FC<DocsViewProps> = ({
   const [groupsPage, setGroupsPage] = useState(1);
   const [groupsPageSize, setGroupsPageSize] = useState(10);
   const [partialSearch, setPartialSearch] = useState('');
+
+  useEffect(() => {
+    if (!sectionRequest) return;
+    setSection(sectionRequest.section);
+    requestAnimationFrame(() => {
+      mainPaneRef.current?.scrollTo({ top: 0 });
+    });
+  }, [sectionRequest]);
 
   // Reset to overview if active table, note, or group no longer exists after workspace switch
   useEffect(() => {

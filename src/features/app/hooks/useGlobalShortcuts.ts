@@ -23,6 +23,8 @@ interface UseGlobalShortcutsOptions {
   setImportExportOpen: React.Dispatch<React.SetStateAction<boolean>>;
   workspacesModalOpen: boolean;
   setWorkspacesModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  commandPaletteOpen: boolean;
+  setCommandPaletteOpen: React.Dispatch<React.SetStateAction<boolean>>;
 }
 
 export function useGlobalShortcuts({
@@ -45,11 +47,14 @@ export function useGlobalShortcuts({
   setImportExportOpen,
   workspacesModalOpen,
   setWorkspacesModalOpen,
+  commandPaletteOpen,
+  setCommandPaletteOpen,
 }: UseGlobalShortcutsOptions): void {
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        if (shortcutsOpen) setShortcutsOpen(false);
+        if (commandPaletteOpen) setCommandPaletteOpen(false);
+        else if (shortcutsOpen) setShortcutsOpen(false);
         else if (openUrlOpen) setOpenUrlOpen(false);
         else if (githubModalOpen) setGithubModalOpen(false);
         else if (groupModalOpen) closeGroupModal();
@@ -61,7 +66,18 @@ export function useGlobalShortcuts({
 
       if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
 
+      const key = e.key.toLowerCase();
+
+      // Mod + K: Toggle Global Command Palette (works anywhere, even in CodeMirror)
+      if (!e.shiftKey && key === 'k') {
+        e.preventDefault();
+        e.stopPropagation();
+        setCommandPaletteOpen((o) => !o);
+        return;
+      }
+
       const anyModalOpen =
+        commandPaletteOpen ||
         shortcutsOpen ||
         openUrlOpen ||
         githubModalOpen ||
@@ -69,8 +85,6 @@ export function useGlobalShortcuts({
         saveVersionOpen ||
         importExportOpen ||
         workspacesModalOpen;
-
-      const key = e.key.toLowerCase();
 
       // Mod + I: Toggle Import / Export
       if (!e.shiftKey && key === 'i') {
@@ -138,8 +152,8 @@ export function useGlobalShortcuts({
       }
     };
 
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [
     viewMode,
     setViewMode,
@@ -160,5 +174,7 @@ export function useGlobalShortcuts({
     setImportExportOpen,
     workspacesModalOpen,
     setWorkspacesModalOpen,
+    commandPaletteOpen,
+    setCommandPaletteOpen,
   ]);
 }
