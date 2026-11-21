@@ -13,6 +13,7 @@ import {
   type WorkspaceRow,
   type WorkspaceVersionRow,
 } from '../lib/dbHelpers';
+import { parseDbml } from '../../src/utils/dbmlParser';
 
 export const shareRoutes = new Hono<{ Bindings: AppEnv }>();
 
@@ -286,10 +287,6 @@ async function handleResolvePublicShare(c: ApiContext, versionParam?: string) {
     {}
   );
   let stickyNotes = safeJsonParse<unknown[]>(ws.sticky_notes_json, []);
-  let schemaFiles = safeJsonParse<Array<{ id: string; path: string; content: string }> | undefined>(
-    ws.schema_files_json,
-    undefined
-  )?.map((f) => ({ id: f.id, path: f.path, content: f.content }));
 
   // If link is pinned to a specific version tag, lock strictly to that version
   if (share.pinned_version_tag) {
@@ -313,7 +310,6 @@ async function handleResolvePublicShare(c: ApiContext, versionParam?: string) {
     dbml = pinnedRow.dbml;
     tablePositions = safeJsonParse(pinnedRow.table_positions_json, {});
     stickyNotes = safeJsonParse(pinnedRow.sticky_notes_json, []);
-    schemaFiles = undefined;
   } else {
     const requestedTag = (versionParam || c.req.query('v') || '').trim();
     if (requestedTag && requestedTag !== 'live') {
@@ -328,9 +324,10 @@ async function handleResolvePublicShare(c: ApiContext, versionParam?: string) {
       dbml = matched.dbml;
       tablePositions = safeJsonParse(matched.table_positions_json, {});
       stickyNotes = safeJsonParse(matched.sticky_notes_json, []);
-      schemaFiles = undefined;
     }
   }
+
+  const parsedSchema = parseDbml(dbml);
 
   return c.json({
     share: {
@@ -346,7 +343,7 @@ async function handleResolvePublicShare(c: ApiContext, versionParam?: string) {
       createdByLogin: share.created_by_login,
     },
     content: {
-      dbml,
+      parsedSchema,
       tablePositions,
       stickyNotes,
       detailLevel:
@@ -356,7 +353,6 @@ async function handleResolvePublicShare(c: ApiContext, versionParam?: string) {
           ? ws.detail_level
           : 'full',
       groupMeta: safeJsonParse(ws.group_meta_json, {}),
-      schemaFiles,
     },
     publishedVersions: share.pinned_version_tag
       ? []

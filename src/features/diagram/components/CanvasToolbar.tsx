@@ -11,6 +11,7 @@ import {
   Minus,
   MousePointer2,
   Plus,
+  RotateCcw,
   Rows3,
   Sparkles,
   Spline,
@@ -44,6 +45,8 @@ export interface CanvasToolbarProps {
   onZoomIn: () => void;
   onFitView: () => void;
   readOnly?: boolean;
+  onResetLayout?: () => void;
+  hasCustomLayout?: boolean;
 }
 
 export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
@@ -70,6 +73,8 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
   onZoomIn,
   onFitView,
   readOnly = false,
+  onResetLayout,
+  hasCustomLayout = false,
 }) => (
   <div
     onPointerDown={(e) => e.stopPropagation()}
@@ -255,20 +260,32 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
       <span>{routingMode === 'orthogonal' ? 'Ortho' : 'Curved'}</span>
     </button>
 
+    <div className="w-px h-5 bg-slate-200 dark:bg-slate-700" />
+
+    <button
+      type="button"
+      onClick={onAutoLayout}
+      title="Auto-arrange TableGroups and tables to minimize edge overlaps"
+      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors whitespace-nowrap"
+    >
+      <Sparkles className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+      <span>Auto Layout</span>
+    </button>
+
+    {onResetLayout && hasCustomLayout && (
+      <button
+        type="button"
+        onClick={onResetLayout}
+        title="Reset view layout back to original shared positions"
+        className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-blue-700 dark:text-blue-300 bg-blue-50 dark:bg-blue-950/50 hover:bg-blue-100 dark:hover:bg-blue-950/80 transition-colors whitespace-nowrap"
+      >
+        <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+        <span>Reset</span>
+      </button>
+    )}
+
     {!readOnly && (
       <>
-        <div className="w-px h-5 bg-slate-200 dark:bg-slate-700" />
-
-        <button
-          type="button"
-          onClick={onAutoLayout}
-          title="Auto-arrange TableGroups and tables to minimize edge overlaps"
-          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors whitespace-nowrap"
-        >
-          <Sparkles className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
-          <span>Auto Layout</span>
-        </button>
-
         <div className="w-px h-5 bg-slate-200 dark:bg-slate-700" />
 
         <button

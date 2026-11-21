@@ -40,6 +40,8 @@ export interface DiagramCanvasProps {
   } | null;
   darkMode: boolean;
   readOnly?: boolean;
+  onResetLayout?: () => void;
+  hasCustomLayout?: boolean;
 }
 
 export type CursorMode = 'select' | 'pan';

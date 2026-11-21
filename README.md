@@ -34,9 +34,9 @@
 
 ### Local-First Persistence, Offline PWA, Cloud Sync & Shareable Links
 - **Installable Offline PWA**: Includes Web App Manifest, Service Worker app-shell precaching (`vite-plugin-pwa`), desktop/mobile **Install App** prompt (plus iOS Safari Add to Home Screen guide), and live offline connectivity indicator—so you can install SchemaForge to your computer and keep editing, diagramming, and exporting even without internet.
-- **Local-First IndexedDB Storage**: Works offline out of the box—automatically persists workspaces, diagram coordinates, sticky notes, GitHub link metadata, and version snapshots in browser **IndexedDB** (`SchemaForgeLocalDB`).
+- **Local-First Encrypted IndexedDB Storage**: Works offline out of the box—persists workspaces, diagram coordinates, sticky notes, GitHub link metadata, and version snapshots in browser **IndexedDB** (`SchemaForgeLocalDB`), encrypted at rest with non-extractable **AES-256-GCM** Web Crypto keys.
 - **Optional Cloud Workspaces (Cloudflare D1)**: Sign in with GitHub to sync workspaces, layout positions, sticky notes, and saved versions across devices via **Cloudflare D1** (or local SQLite in Node.js development).
-- **Shareable Read-Only Links (`/share/:token` & `/share/:token/:versionTag`)**: Generate clean read-only Docs and ER Diagram URLs pointing either to the live workspace or pinned to a published version (e.g., `v1.2.0`), with optional expiration and one-click revocation. Viewers can inspect the diagram/docs safely and click **Open Editable Copy** to fork into their own workspace.
+- **Shareable View-Only Links (`/share/:token` & `/share/:token/:versionTag`)**: Generate clean view-only Docs and ER Diagram URLs pointing either to the live workspace or pinned to a published version (e.g., `v1.2.0`), with optional expiration and one-click revocation. Viewers can inspect docs, browse the diagram, and temporarily adjust the layout for viewing without copying or accessing the underlying DBML source.
 - **Version History & Changelog**: Save draft or published snapshots (`⌘S` / `Ctrl+S`), revert with automatic pre-revert checkpoints, and inspect semantic or raw line-by-line diffs between any two versions.
 
 ### GitHub Sync, URL Loader & Import/Export
@@ -113,7 +113,8 @@
     ├── types/
     │   └── schema.ts                 # Core TypeScript models (Workspace, ParsedSchema, ShareLink, etc.)
     ├── db/
-    │   └── localDb.ts                # IndexedDB wrapper for offline workspaces & preferences
+    │   ├── localCrypto.ts            # AES-256-GCM sealing/unsealing for local storage
+    │   └── localDb.ts                # Encrypted IndexedDB wrapper for offline workspaces & preferences
     ├── components/
     │   ├── BrandLogo.tsx             # Brand mark component
     │   ├── InspectorDrawer.tsx       # Table, domain, header-color, and sticky-note inspector

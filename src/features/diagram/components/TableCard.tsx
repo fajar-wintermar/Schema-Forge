@@ -94,9 +94,7 @@ export const TableCard: React.FC<TableCardProps> = ({
       {/* Table Header */}
       <div
         style={{ backgroundColor: headerBg, color: headerText }}
-        className={`h-10 px-3 rounded-t-[7px] flex items-center justify-between gap-2 ${
-          readOnly ? 'cursor-pointer' : 'cursor-move'
-        }`}
+        className="h-10 px-3 rounded-t-[7px] flex items-center justify-between gap-2 cursor-move"
       >
         <div className="flex items-center gap-1.5 min-w-0">
           <span className="text-[13px] font-semibold truncate">{table.id}</span>

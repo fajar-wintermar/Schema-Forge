@@ -55,13 +55,11 @@ export const GroupContainer: React.FC<GroupContainerProps> = ({
     >
       <div
         onPointerDown={(e) => {
-          if (cursorMode === 'pan' || readOnly) return;
+          if (cursorMode === 'pan') return;
           e.stopPropagation();
           onStartDrag(e);
         }}
-        className={`flex items-center justify-between gap-3 px-4 py-2.5 select-none ${
-          readOnly ? '' : 'cursor-move'
-        }`}
+        className="flex items-center justify-between gap-3 px-4 py-2.5 select-none cursor-move"
       >
         <div className="flex items-center gap-2 min-w-0">
           <span
@@ -99,27 +97,23 @@ export const GroupContainer: React.FC<GroupContainerProps> = ({
               <EyeOff className="w-3.5 h-3.5" />
             )}
           </button>
-          {!readOnly && (
-            <>
-              <button
-                type="button"
-                onClick={onAutoLayoutGroup}
-                title="Auto-layout tables in this domain"
-                className="p-1 rounded-md text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400 hover:bg-white/70 dark:hover:bg-slate-800/70"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-              </button>
-              {groupObj && (
-                <button
-                  type="button"
-                  onClick={() => onEditGroup(groupObj)}
-                  title="Edit domain"
-                  className="p-1 rounded-md text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-white/70 dark:hover:bg-slate-800/70"
-                >
-                  <Edit3 className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </>
+          <button
+            type="button"
+            onClick={onAutoLayoutGroup}
+            title="Auto-layout tables in this domain"
+            className="p-1 rounded-md text-slate-500 hover:text-blue-600 dark:text-slate-400 dark:hover:text-blue-400 hover:bg-white/70 dark:hover:bg-slate-800/70"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+          </button>
+          {!readOnly && groupObj && (
+            <button
+              type="button"
+              onClick={() => onEditGroup(groupObj)}
+              title="Edit domain"
+              className="p-1 rounded-md text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-100 hover:bg-white/70 dark:hover:bg-slate-800/70"
+            >
+              <Edit3 className="w-3.5 h-3.5" />
+            </button>
           )}
         </div>
       </div>

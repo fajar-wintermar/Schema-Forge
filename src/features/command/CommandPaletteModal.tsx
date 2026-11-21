@@ -35,6 +35,7 @@ interface CommandPaletteModalProps {
   schemaFolder?: string;
   viewMode: ViewMode;
   modKey: string;
+  readOnly?: boolean;
   onClose: () => void;
   onSelectCommand: (item: CommandItem, target: CommandTargetView) => void;
 }
@@ -97,7 +98,10 @@ function renderHighlightedText(text: string, indices: number[]): React.ReactNode
   return parts;
 }
 
-function getItemTargets(item: CommandItem): {
+function getItemTargets(
+  item: CommandItem,
+  readOnly: boolean
+): {
   canCode: boolean;
   canDiagram: boolean;
   canDocs: boolean;
@@ -106,10 +110,10 @@ function getItemTargets(item: CommandItem): {
     return { canCode: false, canDiagram: false, canDocs: false };
   }
   if (item.kind === 'file') {
-    return { canCode: true, canDiagram: false, canDocs: false };
+    return { canCode: !readOnly, canDiagram: false, canDocs: false };
   }
   return {
-    canCode: Boolean(item.line || item.filePath),
+    canCode: !readOnly && Boolean(item.line || item.filePath),
     canDiagram: Boolean(item.tableId || item.groupName),
     canDocs: Boolean(item.docsSection),
   };
@@ -150,6 +154,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
   schemaFolder = 'schema',
   viewMode,
   modKey,
+  readOnly = false,
   onClose,
   onSelectCommand,
 }) => {
@@ -235,7 +240,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
     if (e.key === 'Enter' && results[activeIndex]) {
       e.preventDefault();
       const chosen = results[activeIndex].item;
-      const targets = getItemTargets(chosen);
+      const targets = getItemTargets(chosen, readOnly);
       if (e.altKey && targets.canDocs) {
         choose(chosen, 'docs');
       } else if (e.shiftKey && targets.canCode) {
@@ -324,7 +329,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
           ) : (
             results.map(({ item, titleMatches }, idx) => {
               const isActive = idx === activeIndex;
-              const targets = getItemTargets(item);
+              const targets = getItemTargets(item, readOnly);
 
               return (
                 <div
@@ -428,7 +433,7 @@ export const CommandPaletteModal: React.FC<CommandPaletteModalProps> = ({
           <div className="flex flex-wrap items-center gap-3 font-mono">
             <span>↑↓ Navigate</span>
             <span>↵ Jump</span>
-            <span className="hidden sm:inline">⇧↵ Code</span>
+            {!readOnly && <span className="hidden sm:inline">⇧↵ Code</span>}
             <span className="hidden sm:inline">⌥↵ Docs</span>
             <span className="hidden sm:inline">Tab Filter</span>
           </div>

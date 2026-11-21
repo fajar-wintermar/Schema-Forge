@@ -56,6 +56,8 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
   focusRequest,
   darkMode,
   readOnly = false,
+  onResetLayout,
+  hasCustomLayout = false,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const filterMenuRef = useRef<HTMLDivElement>(null);
@@ -557,24 +559,26 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
           [drag.posKey]: { x: nx, y: ny },
         });
 
-        setAltPressedDuringDrag(e.altKey || e.ctrlKey || e.metaKey);
+        if (!readOnly) {
+          setAltPressedDuringDrag(e.altKey || e.ctrlKey || e.metaKey);
 
-        const centerX = nx + TABLE_WIDTH / 2;
-        const centerY = ny + 40;
-        let hoveredG: string | null = null;
-        for (const gb of groupBoxes) {
-          if (gb.name === drag.origGroup) continue;
-          if (
-            centerX >= gb.x &&
-            centerX <= gb.x + gb.width &&
-            centerY >= gb.y &&
-            centerY <= gb.y + gb.height
-          ) {
-            hoveredG = gb.name;
-            break;
+          const centerX = nx + TABLE_WIDTH / 2;
+          const centerY = ny + 40;
+          let hoveredG: string | null = null;
+          for (const gb of groupBoxes) {
+            if (gb.name === drag.origGroup) continue;
+            if (
+              centerX >= gb.x &&
+              centerX <= gb.x + gb.width &&
+              centerY >= gb.y &&
+              centerY <= gb.y + gb.height
+            ) {
+              hoveredG = gb.name;
+              break;
+            }
           }
+          setDropTargetGroupName(hoveredG);
         }
-        setDropTargetGroupName(hoveredG);
       } else if (drag.type === 'group') {
         const dx = (e.clientX - drag.startX) / viewport.zoom;
         const dy = (e.clientY - drag.startY) / viewport.zoom;
@@ -606,7 +610,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
 
     const onPointerUp = (e: PointerEvent) => {
       const drag = dragRef.current;
-      if (drag && drag.type === 'table' && dropTargetGroupName) {
+      if (!readOnly && drag && drag.type === 'table' && dropTargetGroupName) {
         const keepInSource = e.altKey || e.ctrlKey || e.metaKey;
         onAssignTableToGroup(
           drag.tableId,
@@ -632,6 +636,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     snapGrid,
     groupBoxes,
     dropTargetGroupName,
+    readOnly,
     onUpdatePositions,
     onUpdateStickyNote,
     onAssignTableToGroup,
@@ -756,7 +761,6 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
               altPressedDuringDrag={altPressedDuringDrag}
               readOnly={readOnly}
               onStartDrag={(e) => {
-                if (readOnly) return;
                 const origPositions: Record<string, TablePosition> = {};
                 for (const pk of gb.posKeys) {
                   origPositions[pk] = positions[pk] || { x: 0, y: 0 };
@@ -830,16 +834,6 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
               onStartDrag={(e) => {
                 onSelectTable(inst.table.id);
                 setColorPickerPosKey(null);
-                if (readOnly) {
-                  dragRef.current = {
-                    type: 'pan',
-                    startX: e.clientX,
-                    startY: e.clientY,
-                    origX: viewport.x,
-                    origY: viewport.y,
-                  };
-                  return;
-                }
                 dragRef.current = {
                   type: 'table',
                   posKey: inst.posKey,
@@ -877,7 +871,6 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
               isDimmed={isNoteDimmed}
               readOnly={readOnly}
               onStartDrag={(e) => {
-                if (readOnly) return;
                 dragRef.current = {
                   type: 'note',
                   noteId: note.id,
@@ -955,6 +948,8 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         }
         onFitView={fitVisibleTables}
         readOnly={readOnly}
+        onResetLayout={onResetLayout}
+        hasCustomLayout={hasCustomLayout}
       />
     </div>
   );

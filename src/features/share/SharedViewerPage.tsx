@@ -2,7 +2,6 @@ import React, { lazy, Suspense, useCallback, useEffect, useMemo, useState } from
 import {
   AlertCircle,
   BookOpen,
-  CopyPlus,
   LayoutGrid,
   Loader2,
   Lock,
@@ -12,7 +11,6 @@ import {
 } from 'lucide-react';
 import { BrandLogo } from '../../components/BrandLogo';
 import { InspectorDrawer } from '../../components/InspectorDrawer';
-import { saveWorkspace, setMetaValue } from '../../db/localDb';
 import {
   CommandItem,
   CommandTargetView,
@@ -20,13 +18,15 @@ import {
 import { DiagramCanvas } from '../diagram/DiagramCanvas';
 import type { DocsSection } from '../docs/types';
 import {
+  DetailLevel,
+  ParsedSchema,
   SharedWorkspacePayload,
+  StickyNote,
+  TablePosition,
   ViewMode,
-  WorkspaceProject,
 } from '../../types/schema';
-import { computeAutoLayout } from '../../utils/autoLayout';
+import { autoLayoutSingleGroup, computeAutoLayout } from '../../utils/autoLayout';
 import { fetchPublicShare } from '../../utils/cloudService';
-import { parseDbml } from '../../utils/dbmlParser';
 
 const CommandPaletteModal = lazy(() =>
   import('../command/CommandPaletteModal').then((m) => ({
@@ -36,6 +36,17 @@ const CommandPaletteModal = lazy(() =>
 const DocsView = lazy(() =>
   import('../docs/DocsView').then((m) => ({ default: m.DocsView }))
 );
+
+const EMPTY_PARSED_SCHEMA: ParsedSchema = {
+  project: {},
+  tables: [],
+  enums: [],
+  refs: [],
+  tableGroups: [],
+  tablePartials: [],
+  notes: [],
+  errors: [],
+};
 
 interface SharedViewerPageProps {
   token: string;
@@ -77,12 +88,30 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
     nonce: number;
   } | null>(null);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
-  const [forking, setForking] = useState(false);
+
+  // Ephemeral view-only layout state (never persisted to server or IndexedDB)
+  const [viewPositions, setViewPositions] = useState<Record<string, TablePosition>>({});
+  const [viewStickyNotes, setViewStickyNotes] = useState<StickyNote[]>([]);
+  const [viewDetailLevel, setViewDetailLevel] = useState<DetailLevel>('full');
+  const [hasCustomLayout, setHasCustomLayout] = useState(false);
 
   const modKey = useMemo(() => {
     if (typeof navigator === 'undefined') return '⌘';
     const platform = navigator.platform || navigator.userAgent || '';
     return /Mac|iPod|iPhone|iPad/i.test(platform) ? '⌘' : 'Ctrl+';
+  }, []);
+
+  const resetEphemeralLayout = useCallback((nextPayload: SharedWorkspacePayload) => {
+    const schema = nextPayload.content.parsedSchema || EMPTY_PARSED_SCHEMA;
+    const detail = nextPayload.content.detailLevel || 'full';
+    const basePositions =
+      Object.keys(nextPayload.content.tablePositions || {}).length > 0
+        ? nextPayload.content.tablePositions
+        : computeAutoLayout(schema, detail);
+    setViewPositions(basePositions);
+    setViewStickyNotes(nextPayload.content.stickyNotes || []);
+    setViewDetailLevel(detail);
+    setHasCustomLayout(false);
   }, []);
 
   const loadShare = useCallback(
@@ -93,6 +122,7 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
         const res = await fetchPublicShare(token, versionTag);
         setPayload(res);
         setViewMode(res.share.defaultView);
+        resetEphemeralLayout(res);
         setFocusRequest({ type: 'fit', nonce: Date.now() });
       } catch (err) {
         setError(
@@ -102,7 +132,7 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
         setLoading(false);
       }
     },
-    [token]
+    [token, resetEphemeralLayout]
   );
 
   useEffect(() => {
@@ -123,17 +153,9 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
   }, [commandPaletteOpen]);
 
   const parsedSchema = useMemo(
-    () => parseDbml(payload?.content.dbml || ''),
-    [payload?.content.dbml]
+    () => payload?.content.parsedSchema || EMPTY_PARSED_SCHEMA,
+    [payload]
   );
-
-  const resolvedPositions = useMemo(() => {
-    if (!payload) return {};
-    if (Object.keys(payload.content.tablePositions || {}).length > 0) {
-      return payload.content.tablePositions;
-    }
-    return computeAutoLayout(parsedSchema, payload.content.detailLevel || 'full');
-  }, [payload, parsedSchema]);
 
   const selectedTable =
     parsedSchema.tables.find((t) => t.id === selectedTableId) || null;
@@ -147,49 +169,55 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
     window.history.replaceState(null, '', nextUrl);
   };
 
-  const handleForkCopy = async () => {
+  const handleUpdateViewPositions = useCallback(
+    (next: Record<string, TablePosition>) => {
+      setViewPositions(next);
+      setHasCustomLayout(true);
+    },
+    []
+  );
+
+  const handleMoveViewStickyNote = useCallback(
+    (noteId: string, patch: Partial<StickyNote>) => {
+      // View-only: allow repositioning sticky notes locally without altering text/colors
+      if (typeof patch.x !== 'number' && typeof patch.y !== 'number') return;
+      setViewStickyNotes((prev) =>
+        prev.map((n) =>
+          n.id === noteId
+            ? {
+                ...n,
+                x: typeof patch.x === 'number' ? patch.x : n.x,
+                y: typeof patch.y === 'number' ? patch.y : n.y,
+              }
+            : n
+        )
+      );
+      setHasCustomLayout(true);
+    },
+    []
+  );
+
+  const handleViewAutoLayout = useCallback(() => {
+    setViewPositions(computeAutoLayout(parsedSchema, viewDetailLevel));
+    setHasCustomLayout(true);
+    setFocusRequest({ type: 'fit', nonce: Date.now() });
+  }, [parsedSchema, viewDetailLevel]);
+
+  const handleViewAutoLayoutGroup = useCallback(
+    (groupName: string) => {
+      setViewPositions((prev) =>
+        autoLayoutSingleGroup(groupName, parsedSchema, prev, viewDetailLevel)
+      );
+      setHasCustomLayout(true);
+    },
+    [parsedSchema, viewDetailLevel]
+  );
+
+  const handleResetViewLayout = useCallback(() => {
     if (!payload) return;
-    setForking(true);
-    try {
-      const now = new Date().toISOString();
-      const versionSuffix = payload.share.activeVersionTag
-        ? ` (${payload.share.activeVersionTag})`
-        : '';
-      const cloned: WorkspaceProject = {
-        id: `ws_fork_${Date.now()}`,
-        name: `${payload.share.workspaceName}${versionSuffix} (Copy)`,
-        description:
-          payload.share.workspaceDescription ||
-          `Forked from shared link by @${payload.share.createdByLogin}`,
-        dbml: payload.content.dbml,
-        tablePositions: resolvedPositions,
-        groupMeta: payload.content.groupMeta || {},
-        stickyNotes: payload.content.stickyNotes || [],
-        detailLevel: payload.content.detailLevel || 'full',
-        versions: [
-          {
-            id: `ver_${Date.now()}`,
-            tag: payload.share.activeVersionTag || 'v1.0.0',
-            title: 'Forked from Read-Only Share',
-            description: `Cloned from shared workspace "${payload.share.workspaceName}"`,
-            dbml: payload.content.dbml,
-            tablePositions: resolvedPositions,
-            stickyNotes: payload.content.stickyNotes || [],
-            createdAt: now,
-            isPublished: true,
-          },
-        ],
-        createdAt: now,
-        updatedAt: now,
-        syncOrigin: 'local',
-      };
-      await saveWorkspace(cloned);
-      await setMetaValue('activeWorkspaceId', cloned.id);
-      onForkToStudio();
-    } finally {
-      setForking(false);
-    }
-  };
+    resetEphemeralLayout(payload);
+    setFocusRequest({ type: 'fit', nonce: Date.now() });
+  }, [payload, resetEphemeralLayout]);
 
   const handleExecuteCommand = (
     item: CommandItem,
@@ -294,9 +322,12 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
             <span className="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate max-w-[200px]">
               {payload.share.workspaceName}
             </span>
-            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] font-medium text-slate-600 dark:text-slate-300 shrink-0">
+            <span
+              title="View-only share link — layout adjustments are temporary and DBML source cannot be copied"
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] font-medium text-slate-600 dark:text-slate-300 shrink-0"
+            >
               <Lock className="w-3 h-3 text-slate-400" />
-              <span>Read-Only</span>
+              <span>View-Only</span>
             </span>
 
             {payload.share.pinnedVersionTag ? (
@@ -371,20 +402,6 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
           >
             {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
           </button>
-
-          <button
-            type="button"
-            onClick={handleForkCopy}
-            disabled={forking}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-60 whitespace-nowrap"
-            title="Clone a local editable copy into SchemaForge Studio"
-          >
-            <CopyPlus className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">
-              {forking ? 'Cloning...' : 'Open Editable Copy'}
-            </span>
-            <span className="sm:hidden">Fork</span>
-          </button>
         </div>
       </header>
 
@@ -399,7 +416,7 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
           >
             <DocsView
               schema={parsedSchema}
-              stickyNotes={payload.content.stickyNotes || []}
+              stickyNotes={viewStickyNotes}
               navOpen={docsNavOpen}
               onToggleNav={() => setDocsNavOpen((o) => !o)}
               modKey={modKey}
@@ -415,10 +432,10 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
           <>
             <DiagramCanvas
               schema={parsedSchema}
-              positions={resolvedPositions}
-              onUpdatePositions={() => {}}
-              detailLevel={payload.content.detailLevel || 'full'}
-              onChangeDetailLevel={() => {}}
+              positions={viewPositions}
+              onUpdatePositions={handleUpdateViewPositions}
+              detailLevel={viewDetailLevel}
+              onChangeDetailLevel={setViewDetailLevel}
               selectedDomains={selectedDomains}
               onChangeSelectedDomains={setSelectedDomains}
               selectedTableId={selectedTableId}
@@ -432,15 +449,17 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
               onChangeTableHeaderColor={() => {}}
               onAssignTableToGroup={() => {}}
               onEditGroup={() => {}}
-              onAutoLayout={() => {}}
-              onAutoLayoutGroup={() => {}}
-              stickyNotes={payload.content.stickyNotes || []}
+              onAutoLayout={handleViewAutoLayout}
+              onAutoLayoutGroup={handleViewAutoLayoutGroup}
+              stickyNotes={viewStickyNotes}
               onAddStickyNote={() => {}}
-              onUpdateStickyNote={() => {}}
+              onUpdateStickyNote={handleMoveViewStickyNote}
               onDeleteStickyNote={() => {}}
               focusRequest={focusRequest}
               darkMode={darkMode}
               readOnly={true}
+              onResetLayout={handleResetViewLayout}
+              hasCustomLayout={hasCustomLayout}
             />
             {selectedTable && (
               <InspectorDrawer
@@ -467,9 +486,10 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
           <CommandPaletteModal
             open={commandPaletteOpen}
             schema={parsedSchema}
-            stickyNotes={payload.content.stickyNotes || []}
+            stickyNotes={viewStickyNotes}
             viewMode={effectiveViewMode}
             modKey={modKey}
+            readOnly={true}
             onClose={() => setCommandPaletteOpen(false)}
             onSelectCommand={handleExecuteCommand}
           />

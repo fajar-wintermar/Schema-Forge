@@ -280,12 +280,11 @@ export interface SharedWorkspacePayload {
     createdByLogin: string;
   };
   content: {
-    dbml: string;
+    parsedSchema: ParsedSchema;
     tablePositions: Record<string, TablePosition>;
     stickyNotes: StickyNote[];
     detailLevel: DetailLevel;
     groupMeta: Record<string, GroupCustomMeta>;
-    schemaFiles?: Array<{ id: string; path: string; content: string }>;
   };
   publishedVersions: Array<{
     id: string;

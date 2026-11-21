@@ -32,13 +32,11 @@ export const StickyNoteCard: React.FC<StickyNoteCardProps> = ({
     >
       <div
         onPointerDown={(e) => {
-          if (cursorMode === 'pan' || readOnly) return;
+          if (cursorMode === 'pan') return;
           e.stopPropagation();
           onStartDrag(e);
         }}
-        className={`px-2.5 py-1.5 rounded-t-[7px] flex items-center justify-between gap-1.5 ${
-          readOnly ? '' : 'cursor-move'
-        } ${style.header}`}
+        className={`px-2.5 py-1.5 rounded-t-[7px] flex items-center justify-between gap-1.5 cursor-move ${style.header}`}
       >
         {readOnly ? (
           <div className="text-xs font-bold flex-1 min-w-0 truncate">
