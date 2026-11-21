@@ -55,6 +55,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
   onDeleteStickyNote,
   focusRequest,
   darkMode,
+  readOnly = false,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const filterMenuRef = useRef<HTMLDivElement>(null);
@@ -753,7 +754,9 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
               isDropTarget={dropTargetGroupName === gb.name}
               isDimmed={isGroupDimmed}
               altPressedDuringDrag={altPressedDuringDrag}
+              readOnly={readOnly}
               onStartDrag={(e) => {
+                if (readOnly) return;
                 const origPositions: Record<string, TablePosition> = {};
                 for (const pk of gb.posKeys) {
                   origPositions[pk] = positions[pk] || { x: 0, y: 0 };
@@ -817,15 +820,26 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
               isHovered={hoveredTableId === inst.table.id}
               focusState={focusState}
               highlightedColumn={highlightedColumn}
-              colorPickerOpen={colorPickerPosKey === inst.posKey}
+              colorPickerOpen={!readOnly && colorPickerPosKey === inst.posKey}
               cursorMode={cursorMode}
               darkMode={darkMode}
+              readOnly={readOnly}
               onHoverChange={(hovered) =>
                 setHoveredTableId(hovered ? inst.table.id : null)
               }
               onStartDrag={(e) => {
                 onSelectTable(inst.table.id);
                 setColorPickerPosKey(null);
+                if (readOnly) {
+                  dragRef.current = {
+                    type: 'pan',
+                    startX: e.clientX,
+                    startY: e.clientY,
+                    origX: viewport.x,
+                    origY: viewport.y,
+                  };
+                  return;
+                }
                 dragRef.current = {
                   type: 'table',
                   posKey: inst.posKey,
@@ -861,7 +875,9 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
               note={note}
               cursorMode={cursorMode}
               isDimmed={isNoteDimmed}
+              readOnly={readOnly}
               onStartDrag={(e) => {
+                if (readOnly) return;
                 dragRef.current = {
                   type: 'note',
                   noteId: note.id,
@@ -938,6 +954,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
           setViewport((v) => ({ ...v, zoom: Math.min(2, v.zoom + 0.12) }))
         }
         onFitView={fitVisibleTables}
+        readOnly={readOnly}
       />
     </div>
   );

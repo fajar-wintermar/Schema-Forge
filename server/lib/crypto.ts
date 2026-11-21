@@ -25,12 +25,38 @@ export function getCallbackUrl(c: ApiContext): string {
   return `${getAppUrl(c)}/api/auth/github/callback`;
 }
 
+let ephemeralFallbackSecret: string | null = null;
+
 export function getSessionSecret(c: ApiContext): string {
-  return (
-    getEnv(c, 'SESSION_SECRET') ||
-    getEnv(c, 'GITHUB_CLIENT_SECRET') ||
-    'schemaforge-ephemeral-session-key'
-  );
+  const configured =
+    getEnv(c, 'SESSION_SECRET') || getEnv(c, 'GITHUB_CLIENT_SECRET');
+  if (configured) return configured;
+  if (!ephemeralFallbackSecret) {
+    ephemeralFallbackSecret = randomHex(32);
+  }
+  return ephemeralFallbackSecret;
+}
+
+export function verifyMutatingRequestOrigin(c: ApiContext): boolean {
+  // Requests carrying an encrypted session token header or explicit custom header are not simple cross-site form submits
+  if (c.req.header('x-github-session') || c.req.header('x-requested-with')) {
+    return true;
+  }
+  const origin = c.req.header('origin');
+  if (!origin) return false;
+  try {
+    const originHost = new URL(origin).host;
+    const forwardedHost = c.req.header('x-forwarded-host');
+    const host = forwardedHost || c.req.header('host') || new URL(c.req.url).host;
+    if (originHost === host) return true;
+    const appUrl = getEnv(c, 'APP_URL');
+    if (appUrl && appUrl !== 'MY_APP_URL') {
+      return new URL(appUrl).host === originHost;
+    }
+    return false;
+  } catch {
+    return false;
+  }
 }
 
 // ---------- Web-Standard Base64 & Web Crypto Helpers (Node + Cloudflare Edge) ----------

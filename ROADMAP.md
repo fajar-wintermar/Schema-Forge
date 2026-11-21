@@ -59,9 +59,9 @@
 
 - [ ] **Git-Tracked Layout & Sticky Metadata (`.schemaforge/layout.json`)**
   - Optionally include `.schemaforge/layout.json` (table coordinates, sticky notes, view settings) in GitHub batch pushes and folder pulls so teammates share identical diagram layouts with zero cloud lock-in.
-- [ ] **Optional Cloud Workspaces & Authentication**
+- [x] **Optional Cloud Workspaces & Authentication**
   - Sync workspaces, layout coordinates, sticky notes, and published versions across devices while keeping local `IndexedDB` mode available for offline/anonymous work.
-- [ ] **Shareable Read-Only Docs & Diagram Links**
+- [x] **Shareable Read-Only Docs & Diagram Links**
   - Generate clean, shareable links for specific workspaces or published schema versions (e.g., `v1.2.0`) for product, data, and backend teams.
 - [ ] **Anchored Review Comments**
   - Evolve sticky notes into threaded, resolvable review comments anchored to specific tables, columns, or PR branches.

@@ -2,6 +2,7 @@ import React from 'react';
 import {
   BookOpen,
   ChevronDown,
+  Cloud,
   Columns2,
   Download,
   FolderGit2,
@@ -9,12 +10,15 @@ import {
   Keyboard,
   LayoutGrid,
   Link2,
+  Loader2,
   Moon,
   PanelLeft,
   Search,
+  Share2,
   Sun,
 } from 'lucide-react';
 import {
+  CloudSyncStatus,
   GithubFileLink,
   GithubRepoLink,
   ViewMode,
@@ -33,10 +37,13 @@ interface TopBarProps {
   onOpenGithubModal: () => void;
   onOpenImportExport: () => void;
   onOpenSaveVersion: () => void;
+  onOpenShareModal: () => void;
   onOpenShortcuts: () => void;
   githubLink?: GithubFileLink;
   githubRepoLink?: GithubRepoLink;
   hasGithubChanges?: boolean;
+  isCloudWorkspace?: boolean;
+  cloudSyncStatus?: CloudSyncStatus;
   modKey: string;
   darkMode: boolean;
   onToggleDarkMode: () => void;
@@ -65,10 +72,13 @@ export const TopBar: React.FC<TopBarProps> = ({
   onOpenGithubModal,
   onOpenImportExport,
   onOpenSaveVersion,
+  onOpenShareModal,
   onOpenShortcuts,
   githubLink,
   githubRepoLink,
   hasGithubChanges = false,
+  isCloudWorkspace = false,
+  cloudSyncStatus = 'local',
   modKey,
   darkMode,
   onToggleDarkMode,
@@ -115,9 +125,26 @@ export const TopBar: React.FC<TopBarProps> = ({
         <button
           type="button"
           onClick={onOpenWorkspaces}
-          className="hidden sm:flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors min-w-0 max-w-[190px]"
-          title="Switch or create local workspace"
+          className="hidden sm:flex items-center gap-1.5 px-2 py-1.5 rounded-lg text-sm font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors min-w-0 max-w-[210px]"
+          title={
+            isCloudWorkspace
+              ? `Cloud workspace (${cloudSyncStatus}) — click to switch or sync`
+              : 'Local IndexedDB workspace — click to switch or enable Cloud Sync'
+          }
         >
+          {isCloudWorkspace && (
+            cloudSyncStatus === 'syncing' ? (
+              <Loader2 className="w-3.5 h-3.5 text-blue-500 animate-spin shrink-0" />
+            ) : (
+              <Cloud
+                className={`w-3.5 h-3.5 shrink-0 ${
+                  cloudSyncStatus === 'error' || cloudSyncStatus === 'offline'
+                    ? 'text-amber-500'
+                    : 'text-blue-600 dark:text-blue-400'
+                }`}
+              />
+            )
+          )}
           <span className="truncate">{projectName}</span>
           <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" />
         </button>
@@ -253,6 +280,16 @@ export const TopBar: React.FC<TopBarProps> = ({
           <Download className="w-3.5 h-3.5" />
           <span className="hidden xl:inline">Import / Export</span>
           <span className="xl:hidden">Export</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={onOpenShareModal}
+          title="Share read-only docs & diagram link"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0"
+        >
+          <Share2 className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+          <span className="hidden xl:inline">Share</span>
         </button>
 
         <button

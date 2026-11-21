@@ -39,6 +39,7 @@ export interface DiagramCanvasProps {
     nonce: number;
   } | null;
   darkMode: boolean;
+  readOnly?: boolean;
 }
 
 export type CursorMode = 'select' | 'pan';

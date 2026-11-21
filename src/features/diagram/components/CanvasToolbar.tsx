@@ -43,6 +43,7 @@ export interface CanvasToolbarProps {
   onZoomOut: () => void;
   onZoomIn: () => void;
   onFitView: () => void;
+  readOnly?: boolean;
 }
 
 export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
@@ -68,6 +69,7 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
   onZoomOut,
   onZoomIn,
   onFitView,
+  readOnly = false,
 }) => (
   <div
     onPointerDown={(e) => e.stopPropagation()}
@@ -253,29 +255,33 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
       <span>{routingMode === 'orthogonal' ? 'Ortho' : 'Curved'}</span>
     </button>
 
-    <div className="w-px h-5 bg-slate-200 dark:bg-slate-700" />
+    {!readOnly && (
+      <>
+        <div className="w-px h-5 bg-slate-200 dark:bg-slate-700" />
 
-    <button
-      type="button"
-      onClick={onAutoLayout}
-      title="Auto-arrange TableGroups and tables to minimize edge overlaps"
-      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors whitespace-nowrap"
-    >
-      <Sparkles className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
-      <span>Auto Layout</span>
-    </button>
+        <button
+          type="button"
+          onClick={onAutoLayout}
+          title="Auto-arrange TableGroups and tables to minimize edge overlaps"
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors whitespace-nowrap"
+        >
+          <Sparkles className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+          <span>Auto Layout</span>
+        </button>
 
-    <div className="w-px h-5 bg-slate-200 dark:bg-slate-700" />
+        <div className="w-px h-5 bg-slate-200 dark:bg-slate-700" />
 
-    <button
-      type="button"
-      onClick={onAddNoteAtCenter}
-      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-amber-800 dark:text-amber-200 bg-amber-100/80 dark:bg-amber-900/40 hover:bg-amber-200/80 dark:hover:bg-amber-900/70 transition-colors"
-      title="Add a Sticky Note annotation to the diagram"
-    >
-      <StickyNoteIcon className="w-3.5 h-3.5" />
-      <span>Add Note</span>
-    </button>
+        <button
+          type="button"
+          onClick={onAddNoteAtCenter}
+          className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-amber-800 dark:text-amber-200 bg-amber-100/80 dark:bg-amber-900/40 hover:bg-amber-200/80 dark:hover:bg-amber-900/70 transition-colors"
+          title="Add a Sticky Note annotation to the diagram"
+        >
+          <StickyNoteIcon className="w-3.5 h-3.5" />
+          <span>Add Note</span>
+        </button>
+      </>
+    )}
 
     <div className="w-px h-5 bg-slate-200 dark:bg-slate-700" />
 

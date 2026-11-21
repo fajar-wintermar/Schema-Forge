@@ -6,10 +6,26 @@ import {
   saveWorkspace,
   setMetaValue,
 } from '../../../db/localDb';
-import { ViewMode, WorkspaceProject } from '../../../types/schema';
+import {
+  CloudAuthStatusResponse,
+  CloudSyncStatus,
+  ViewMode,
+  WorkspaceProject,
+} from '../../../types/schema';
 import { computeAutoLayout } from '../../../utils/autoLayout';
+import {
+  connectWithGithubOAuth,
+  deleteCloudWorkspace,
+  getCloudAuthStatus,
+  listCloudWorkspaces,
+  saveCloudWorkspace,
+  signOutCloud,
+} from '../../../utils/cloudService';
 import { parseDbml } from '../../../utils/dbmlParser';
-import { fetchDbmlFromUrl } from '../../../utils/remoteService';
+import {
+  AUTH_CHANGED_EVENT,
+  fetchDbmlFromUrl,
+} from '../../../utils/remoteService';
 import { createInitialWorkspace } from '../../../utils/sampleSchemas';
 
 interface UseWorkspaceStoreOptions {
@@ -32,7 +48,118 @@ export function useWorkspaceStore({
   const [loading, setLoading] = useState(true);
   const [darkMode, setDarkMode] = useState(false);
 
+  const [cloudAuth, setCloudAuth] = useState<CloudAuthStatusResponse | null>(
+    null
+  );
+  const [cloudSyncStatus, setCloudSyncStatus] =
+    useState<CloudSyncStatus>('local');
+
   const saveTimerRef = useRef<number | null>(null);
+  const cloudSaveTimerRef = useRef<number | null>(null);
+  const workspacesRef = useRef<WorkspaceProject[]>([]);
+  const cloudAuthRef = useRef<CloudAuthStatusResponse | null>(null);
+
+  useEffect(() => {
+    workspacesRef.current = workspaces;
+  }, [workspaces]);
+
+  useEffect(() => {
+    cloudAuthRef.current = cloudAuth;
+  }, [cloudAuth]);
+
+  const mergeAndReconcileCloud = useCallback(
+    async (
+      auth: CloudAuthStatusResponse,
+      baseLocalList?: WorkspaceProject[]
+    ) => {
+      if (!auth.cloudEnabled || !auth.authenticated) {
+        setCloudSyncStatus('local');
+        return;
+      }
+
+      setCloudSyncStatus('syncing');
+      try {
+        const { workspaces: cloudList } = await listCloudWorkspaces();
+        const localList = baseLocalList || (await loadAllWorkspaces());
+        const localById = new Map(localList.map((w) => [w.id, w]));
+        const mergedMap = new Map<string, WorkspaceProject>();
+
+        for (const lws of localList) {
+          mergedMap.set(lws.id, lws);
+        }
+
+        for (const cws of cloudList) {
+          const existing = localById.get(cws.id);
+          if (!existing) {
+            await saveWorkspace(cws);
+            mergedMap.set(cws.id, cws);
+            continue;
+          }
+
+          const localTime = new Date(existing.updatedAt).getTime();
+          const cloudTime = new Date(cws.updatedAt).getTime();
+
+          if (cloudTime > localTime + 500) {
+            await saveWorkspace(cws);
+            mergedMap.set(cws.id, cws);
+          } else if (existing.syncOrigin === 'cloud' && localTime > cloudTime + 500) {
+            // Local cloud workspace has newer offline edits; push to cloud
+            try {
+              const res = await saveCloudWorkspace(existing);
+              const synced: WorkspaceProject = {
+                ...existing,
+                syncOrigin: 'cloud',
+                cloudSyncedAt: res.syncedAt,
+                cloudRevision: res.revision,
+              };
+              await saveWorkspace(synced);
+              mergedMap.set(cws.id, synced);
+            } catch {
+              mergedMap.set(cws.id, existing);
+            }
+          } else {
+            const linked: WorkspaceProject = {
+              ...existing,
+              syncOrigin: 'cloud',
+              cloudSyncedAt: cws.cloudSyncedAt || cws.updatedAt,
+              cloudRevision: cws.cloudRevision,
+            };
+            await saveWorkspace(linked);
+            mergedMap.set(cws.id, linked);
+          }
+        }
+
+        const sorted = Array.from(mergedMap.values()).sort(
+          (a, b) =>
+            new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+        );
+        setWorkspaces(sorted);
+        setCloudSyncStatus('synced');
+      } catch {
+        setCloudSyncStatus(
+          typeof navigator !== 'undefined' && !navigator.onLine
+            ? 'offline'
+            : 'error'
+        );
+      }
+    },
+    []
+  );
+
+  const refreshCloudSync = useCallback(async () => {
+    try {
+      const auth = await getCloudAuthStatus();
+      setCloudAuth(auth);
+      cloudAuthRef.current = auth;
+      await mergeAndReconcileCloud(auth);
+    } catch {
+      setCloudSyncStatus(
+        typeof navigator !== 'undefined' && !navigator.onLine
+          ? 'offline'
+          : 'local'
+      );
+    }
+  }, [mergeAndReconcileCloud]);
 
   useEffect(() => {
     let mounted = true;
@@ -115,6 +242,7 @@ export function useWorkspaceStore({
                 : undefined,
             createdAt: now,
             updatedAt: now,
+            syncOrigin: 'local',
           };
           await saveWorkspace(remoteWs);
           await setMetaValue('activeWorkspaceId', remoteWs.id);
@@ -140,9 +268,29 @@ export function useWorkspaceStore({
         setLoading(false);
         onFocusFit();
       }
+
+      // Check cloud auth & reconcile in background without blocking local-first render
+      try {
+        const auth = await getCloudAuthStatus();
+        if (!mounted) return;
+        setCloudAuth(auth);
+        cloudAuthRef.current = auth;
+        if (auth.cloudEnabled && auth.authenticated) {
+          await mergeAndReconcileCloud(auth, list);
+        }
+      } catch {
+        // Keep local IndexedDB mode seamlessly
+      }
     })();
+
+    const onAuthChanged = () => {
+      void refreshCloudSync();
+    };
+    window.addEventListener(AUTH_CHANGED_EVENT, onAuthChanged);
+
     return () => {
       mounted = false;
+      window.removeEventListener(AUTH_CHANGED_EVENT, onAuthChanged);
     };
     // Initial bootstrap runs once cleanly on mount
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -161,24 +309,93 @@ export function useWorkspaceStore({
     [workspaces, activeId]
   );
 
+  // Sync active status indicator when switching between local and cloud workspaces
+  useEffect(() => {
+    if (!activeWorkspace) return;
+    if (
+      activeWorkspace.syncOrigin === 'cloud' &&
+      cloudAuth?.authenticated &&
+      cloudAuth?.cloudEnabled
+    ) {
+      setCloudSyncStatus((prev) =>
+        prev === 'syncing' || prev === 'error' || prev === 'offline'
+          ? prev
+          : 'synced'
+      );
+    } else {
+      setCloudSyncStatus('local');
+    }
+  }, [activeWorkspace, cloudAuth?.authenticated, cloudAuth?.cloudEnabled]);
+
+  const pushWorkspaceToCloud = useCallback(
+    async (ws: WorkspaceProject): Promise<WorkspaceProject | null> => {
+      const auth = cloudAuthRef.current;
+      if (!auth?.cloudEnabled || !auth?.authenticated) return null;
+      setCloudSyncStatus('syncing');
+      try {
+        const res = await saveCloudWorkspace(ws);
+        const syncedWs: WorkspaceProject = {
+          ...ws,
+          syncOrigin: 'cloud',
+          cloudSyncedAt: res.syncedAt,
+          cloudRevision: res.revision,
+        };
+        await saveWorkspace(syncedWs);
+        setWorkspaces((prev) =>
+          prev.map((item) => (item.id === ws.id ? syncedWs : item))
+        );
+        setCloudSyncStatus('synced');
+        return syncedWs;
+      } catch {
+        setCloudSyncStatus(
+          typeof navigator !== 'undefined' && !navigator.onLine
+            ? 'offline'
+            : 'error'
+        );
+        return null;
+      }
+    },
+    []
+  );
+
   const updateActiveWorkspace = useCallback(
     (updater: (prev: WorkspaceProject) => WorkspaceProject) => {
+      let updatedSnapshot: WorkspaceProject | null = null;
       setWorkspaces((prevList) =>
         prevList.map((ws) => {
           if (ws.id !== activeId) return ws;
-          const next = {
+          const next: WorkspaceProject = {
             ...updater(ws),
             updatedAt: new Date().toISOString(),
           };
+          updatedSnapshot = next;
           if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
           saveTimerRef.current = window.setTimeout(() => {
             saveWorkspace(next);
           }, 250);
+
+          const auth = cloudAuthRef.current;
+          if (
+            next.syncOrigin === 'cloud' &&
+            auth?.cloudEnabled &&
+            auth?.authenticated
+          ) {
+            setCloudSyncStatus('syncing');
+            if (cloudSaveTimerRef.current) {
+              window.clearTimeout(cloudSaveTimerRef.current);
+            }
+            cloudSaveTimerRef.current = window.setTimeout(() => {
+              if (updatedSnapshot) {
+                void pushWorkspaceToCloud(updatedSnapshot);
+              }
+            }, 900);
+          }
+
           return next;
         })
       );
     },
-    [activeId]
+    [activeId, pushWorkspaceToCloud]
   );
 
   const selectWorkspace = useCallback(
@@ -193,15 +410,24 @@ export function useWorkspaceStore({
 
   const addAndSelectWorkspace = useCallback(
     async (ws: WorkspaceProject) => {
-      await saveWorkspace(ws);
-      setWorkspaces((prev) => [ws, ...prev]);
-      selectWorkspace(ws.id);
+      const auth = cloudAuthRef.current;
+      const shouldAutoCloud = Boolean(auth?.cloudEnabled && auth?.authenticated);
+      const initialWs: WorkspaceProject = shouldAutoCloud
+        ? { ...ws, syncOrigin: 'cloud' }
+        : { ...ws, syncOrigin: ws.syncOrigin || 'local' };
+      await saveWorkspace(initialWs);
+      setWorkspaces((prev) => [initialWs, ...prev]);
+      selectWorkspace(initialWs.id);
+      if (shouldAutoCloud) {
+        void pushWorkspaceToCloud(initialWs);
+      }
     },
-    [selectWorkspace]
+    [selectWorkspace, pushWorkspaceToCloud]
   );
 
   const removeWorkspace = useCallback(
     async (id: string) => {
+      const target = workspacesRef.current.find((w) => w.id === id);
       await deleteWorkspace(id);
       setWorkspaces((prev) => {
         const next = prev.filter((w) => w.id !== id);
@@ -211,9 +437,65 @@ export function useWorkspaceStore({
         }
         return next;
       });
+      const auth = cloudAuthRef.current;
+      if (
+        target?.syncOrigin === 'cloud' &&
+        auth?.cloudEnabled &&
+        auth?.authenticated
+      ) {
+        void deleteCloudWorkspace(id).catch(() => {});
+      }
     },
     [activeId]
   );
+
+  const syncWorkspaceToCloud = useCallback(
+    async (workspaceId?: string): Promise<WorkspaceProject | null> => {
+      const targetId = workspaceId || activeId;
+      const ws = workspacesRef.current.find((w) => w.id === targetId);
+      if (!ws) return null;
+      const synced = await pushWorkspaceToCloud({
+        ...ws,
+        syncOrigin: 'cloud',
+      });
+      if (synced) {
+        showToast(`Synced "${synced.name}" to cloud`);
+      }
+      return synced;
+    },
+    [activeId, pushWorkspaceToCloud, showToast]
+  );
+
+  const syncAllLocalWorkspacesToCloud = useCallback(async () => {
+    const locals = workspacesRef.current.filter(
+      (w) => w.syncOrigin !== 'cloud'
+    );
+    let count = 0;
+    for (const ws of locals) {
+      const synced = await pushWorkspaceToCloud({ ...ws, syncOrigin: 'cloud' });
+      if (synced) count++;
+    }
+    if (count > 0) {
+      showToast(
+        `Synced ${count} local ${count === 1 ? 'workspace' : 'workspaces'} to cloud`
+      );
+    }
+    return count;
+  }, [pushWorkspaceToCloud, showToast]);
+
+  const connectCloudAccount = useCallback(async () => {
+    await connectWithGithubOAuth();
+    await refreshCloudSync();
+  }, [refreshCloudSync]);
+
+  const logoutCloudAccount = useCallback(async () => {
+    await signOutCloud();
+    setCloudAuth((prev) =>
+      prev ? { ...prev, authenticated: false, user: null } : prev
+    );
+    setCloudSyncStatus('local');
+    showToast('Signed out of cloud sync (local IndexedDB kept intact)');
+  }, [showToast]);
 
   return {
     workspaces,
@@ -221,9 +503,16 @@ export function useWorkspaceStore({
     loading,
     darkMode,
     setDarkMode,
+    cloudAuth,
+    cloudSyncStatus,
     updateActiveWorkspace,
     selectWorkspace,
     addAndSelectWorkspace,
     removeWorkspace,
+    syncWorkspaceToCloud,
+    syncAllLocalWorkspacesToCloud,
+    refreshCloudSync,
+    connectCloudAccount,
+    logoutCloudAccount,
   };
 }

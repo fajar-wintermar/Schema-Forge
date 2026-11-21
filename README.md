@@ -181,13 +181,20 @@ The repository includes `wrangler.jsonc` (`name: "schema-forge"`, `main: "worker
    - `GITHUB_CLIENT_SECRET` — Your GitHub OAuth App Client Secret
    - `SESSION_SECRET` *(optional, recommended)* — Random string used to sign/encrypt session cookies across deployments
    - `APP_URL` *(optional)* — Only needed if using a custom proxy domain; otherwise automatically derived from the request origin
-4. Update `"name"` in `wrangler.jsonc` if your Worker uses a different name in Cloudflare.
-5. Register your Cloudflare callback URL in **GitHub Developer Settings → OAuth Apps** (<https://github.com/settings/developers>):
+4. **(Optional — Cloud Sync & Shareable Links)** Provision **Cloudflare D1**:
+   ```bash
+   npx wrangler d1 create schema-forge-db
+   # Paste the returned database_id into wrangler.jsonc under "d1_databases"
+   npx wrangler d1 migrations apply schema-forge-db --remote
+   ```
+5. Update `"name"` in `wrangler.jsonc` if your Worker uses a different name in Cloudflare.
+6. Register your Cloudflare callback URL in **GitHub Developer Settings → OAuth Apps** (<https://github.com/settings/developers>):
    - `https://<your-worker-subdomain-or-custom-domain>/api/auth/github/callback`
 
 #### Option B: Deploy from CLI with Wrangler
 ```bash
 npm run build
+npx wrangler d1 migrations apply schema-forge-db --remote
 npx wrangler secret put GITHUB_CLIENT_ID
 npx wrangler secret put GITHUB_CLIENT_SECRET
 npx wrangler secret put SESSION_SECRET

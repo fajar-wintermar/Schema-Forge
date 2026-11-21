@@ -1,0 +1,480 @@
+import React, { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  AlertCircle,
+  BookOpen,
+  CopyPlus,
+  LayoutGrid,
+  Loader2,
+  Lock,
+  Moon,
+  Search,
+  Sun,
+} from 'lucide-react';
+import { BrandLogo } from '../../components/BrandLogo';
+import { InspectorDrawer } from '../../components/InspectorDrawer';
+import { saveWorkspace, setMetaValue } from '../../db/localDb';
+import {
+  CommandItem,
+  CommandTargetView,
+} from '../command/commandSearch';
+import { DiagramCanvas } from '../diagram/DiagramCanvas';
+import type { DocsSection } from '../docs/types';
+import {
+  SharedWorkspacePayload,
+  ViewMode,
+  WorkspaceProject,
+} from '../../types/schema';
+import { computeAutoLayout } from '../../utils/autoLayout';
+import { fetchPublicShare } from '../../utils/cloudService';
+import { parseDbml } from '../../utils/dbmlParser';
+
+const CommandPaletteModal = lazy(() =>
+  import('../command/CommandPaletteModal').then((m) => ({
+    default: m.CommandPaletteModal,
+  }))
+);
+const DocsView = lazy(() =>
+  import('../docs/DocsView').then((m) => ({ default: m.DocsView }))
+);
+
+interface SharedViewerPageProps {
+  token: string;
+  initialVersionTag?: string | null;
+  darkMode: boolean;
+  onToggleDarkMode: () => void;
+  onForkToStudio: () => void;
+}
+
+export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
+  token,
+  initialVersionTag = null,
+  darkMode,
+  onToggleDarkMode,
+  onForkToStudio,
+}) => {
+  const [payload, setPayload] = useState<SharedWorkspacePayload | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [selectedVersionTag, setSelectedVersionTag] = useState<string | null>(
+    initialVersionTag || null
+  );
+
+  const [viewMode, setViewMode] = useState<'docs' | 'diagram'>('docs');
+  const [docsNavOpen, setDocsNavOpen] = useState(true);
+  const [selectedDomains, setSelectedDomains] = useState<string[]>([]);
+  const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
+  const [highlightedColumn, setHighlightedColumn] = useState<{
+    tableId: string;
+    columnName: string;
+  } | null>(null);
+  const [focusRequest, setFocusRequest] = useState<{
+    type: 'table' | 'group' | 'fit';
+    id?: string;
+    nonce: number;
+  } | null>(null);
+  const [docsSectionRequest, setDocsSectionRequest] = useState<{
+    section: DocsSection;
+    nonce: number;
+  } | null>(null);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [forking, setForking] = useState(false);
+
+  const modKey = useMemo(() => {
+    if (typeof navigator === 'undefined') return '⌘';
+    const platform = navigator.platform || navigator.userAgent || '';
+    return /Mac|iPod|iPhone|iPad/i.test(platform) ? '⌘' : 'Ctrl+';
+  }, []);
+
+  const loadShare = useCallback(
+    async (versionTag: string | null) => {
+      setLoading(true);
+      setError(null);
+      try {
+        const res = await fetchPublicShare(token, versionTag);
+        setPayload(res);
+        setViewMode(res.share.defaultView);
+        setFocusRequest({ type: 'fit', nonce: Date.now() });
+      } catch (err) {
+        setError(
+          err instanceof Error ? err.message : 'Unable to load shared schema.'
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [token]
+  );
+
+  useEffect(() => {
+    void loadShare(selectedVersionTag);
+  }, [loadShare, selectedVersionTag]);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setCommandPaletteOpen((o) => !o);
+      } else if (e.key === 'Escape' && commandPaletteOpen) {
+        setCommandPaletteOpen(false);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [commandPaletteOpen]);
+
+  const parsedSchema = useMemo(
+    () => parseDbml(payload?.content.dbml || ''),
+    [payload?.content.dbml]
+  );
+
+  const resolvedPositions = useMemo(() => {
+    if (!payload) return {};
+    if (Object.keys(payload.content.tablePositions || {}).length > 0) {
+      return payload.content.tablePositions;
+    }
+    return computeAutoLayout(parsedSchema, payload.content.detailLevel || 'full');
+  }, [payload, parsedSchema]);
+
+  const selectedTable =
+    parsedSchema.tables.find((t) => t.id === selectedTableId) || null;
+
+  const handleVersionChange = (nextTag: string) => {
+    const resolvedTag = nextTag === 'live' ? null : nextTag;
+    setSelectedVersionTag(resolvedTag);
+    const nextUrl = resolvedTag
+      ? `/share/${encodeURIComponent(token)}/${encodeURIComponent(resolvedTag)}`
+      : `/share/${encodeURIComponent(token)}`;
+    window.history.replaceState(null, '', nextUrl);
+  };
+
+  const handleForkCopy = async () => {
+    if (!payload) return;
+    setForking(true);
+    try {
+      const now = new Date().toISOString();
+      const versionSuffix = payload.share.activeVersionTag
+        ? ` (${payload.share.activeVersionTag})`
+        : '';
+      const cloned: WorkspaceProject = {
+        id: `ws_fork_${Date.now()}`,
+        name: `${payload.share.workspaceName}${versionSuffix} (Copy)`,
+        description:
+          payload.share.workspaceDescription ||
+          `Forked from shared link by @${payload.share.createdByLogin}`,
+        dbml: payload.content.dbml,
+        tablePositions: resolvedPositions,
+        groupMeta: payload.content.groupMeta || {},
+        stickyNotes: payload.content.stickyNotes || [],
+        detailLevel: payload.content.detailLevel || 'full',
+        versions: [
+          {
+            id: `ver_${Date.now()}`,
+            tag: payload.share.activeVersionTag || 'v1.0.0',
+            title: 'Forked from Read-Only Share',
+            description: `Cloned from shared workspace "${payload.share.workspaceName}"`,
+            dbml: payload.content.dbml,
+            tablePositions: resolvedPositions,
+            stickyNotes: payload.content.stickyNotes || [],
+            createdAt: now,
+            isPublished: true,
+          },
+        ],
+        createdAt: now,
+        updatedAt: now,
+        syncOrigin: 'local',
+      };
+      await saveWorkspace(cloned);
+      await setMetaValue('activeWorkspaceId', cloned.id);
+      onForkToStudio();
+    } finally {
+      setForking(false);
+    }
+  };
+
+  const handleExecuteCommand = (
+    item: CommandItem,
+    target: CommandTargetView = 'auto'
+  ) => {
+    if (item.kind === 'action' && item.actionId) {
+      if (item.actionId === 'view-diagram') setViewMode('diagram');
+      else if (item.actionId === 'view-docs') setViewMode('docs');
+      else if (item.actionId === 'toggle-theme') onToggleDarkMode();
+      return;
+    }
+
+    if (
+      (target === 'docs' || (target === 'auto' && viewMode === 'docs')) &&
+      item.docsSection
+    ) {
+      setViewMode('docs');
+      setDocsSectionRequest({ section: item.docsSection, nonce: Date.now() });
+      return;
+    }
+
+    if (item.kind === 'group' && item.groupName) {
+      setViewMode('diagram');
+      setSelectedTableId(null);
+      setHighlightedColumn(null);
+      setSelectedDomains([item.groupName]);
+      setFocusRequest({ type: 'group', id: item.groupName, nonce: Date.now() });
+      return;
+    }
+
+    if (item.tableId) {
+      setViewMode('diagram');
+      setSelectedTableId(item.tableId);
+      if (item.kind === 'column' && item.columnName) {
+        setHighlightedColumn({
+          tableId: item.tableId,
+          columnName: item.columnName,
+        });
+      } else {
+        setHighlightedColumn(null);
+      }
+      setFocusRequest({ type: 'table', id: item.tableId, nonce: Date.now() });
+      return;
+    }
+
+    if (item.docsSection) {
+      setViewMode('docs');
+      setDocsSectionRequest({ section: item.docsSection, nonce: Date.now() });
+    }
+  };
+
+  if (loading && !payload) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 text-sm text-slate-500 gap-2">
+        <Loader2 className="w-4 h-4 animate-spin text-blue-600" />
+        <span>Loading shared schema...</span>
+      </div>
+    );
+  }
+
+  if (error || !payload) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 p-4">
+        <div className="max-w-md w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 space-y-4 shadow-sm">
+          <div className="flex items-center gap-2.5 text-rose-600 dark:text-rose-400">
+            <AlertCircle className="w-5 h-5 shrink-0" />
+            <h1 className="text-base font-bold">Share Link Unavailable</h1>
+          </div>
+          <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+            {error || 'This shareable link could not be found or has been revoked.'}
+          </p>
+          <button
+            type="button"
+            onClick={onForkToStudio}
+            className="px-4 py-2 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white"
+          >
+            Open SchemaForge Studio
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  const effectiveViewMode: ViewMode = viewMode === 'docs' ? 'docs' : 'diagram';
+
+  return (
+    <div className="h-screen w-screen flex flex-col overflow-hidden bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
+      <header className="h-14 shrink-0 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 flex items-center justify-between gap-3 select-none z-30">
+        <div className="flex items-center gap-2.5 min-w-0 flex-1">
+          <div className="flex items-center gap-2 shrink-0">
+            <BrandLogo className="w-7 h-7 shrink-0" />
+            <span className="text-base font-bold tracking-tight text-slate-900 dark:text-slate-50 hidden sm:inline">
+              SchemaForge
+            </span>
+          </div>
+
+          <span className="text-slate-300 dark:text-slate-700 hidden sm:inline">
+            /
+          </span>
+
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate max-w-[200px]">
+              {payload.share.workspaceName}
+            </span>
+            <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] font-medium text-slate-600 dark:text-slate-300 shrink-0">
+              <Lock className="w-3 h-3 text-slate-400" />
+              <span>Read-Only</span>
+            </span>
+
+            {payload.share.pinnedVersionTag ? (
+              <span className="px-2 py-0.5 rounded-md bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 font-mono text-[11px] font-semibold text-blue-700 dark:text-blue-300 shrink-0">
+                {payload.share.pinnedVersionTag}
+              </span>
+            ) : payload.publishedVersions.length > 0 ? (
+              <select
+                value={selectedVersionTag || 'live'}
+                onChange={(e) => handleVersionChange(e.target.value)}
+                aria-label="Schema version"
+                className="px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono text-[11px] text-slate-700 dark:text-slate-200 shrink-0"
+              >
+                <option value="live">Latest Live</option>
+                {payload.publishedVersions.map((v) => (
+                  <option key={v.id} value={v.tag}>
+                    {v.tag} — {v.title}
+                  </option>
+                ))}
+              </select>
+            ) : null}
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setCommandPaletteOpen(true)}
+            className="hidden md:flex flex-1 max-w-[260px] ml-2 items-center justify-between gap-2 px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 text-slate-500 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-600"
+          >
+            <span className="flex items-center gap-2 truncate">
+              <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+              <span className="truncate">Search tables, notes...</span>
+            </span>
+            <kbd className="px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-[10px] font-mono text-slate-400">
+              {modKey}K
+            </kbd>
+          </button>
+        </div>
+
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center p-1 rounded-lg bg-slate-100 dark:bg-slate-800/80 border border-slate-200/70 dark:border-slate-700/70">
+            <button
+              type="button"
+              onClick={() => setViewMode('docs')}
+              className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
+                viewMode === 'docs'
+                  ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-50 shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+              }`}
+            >
+              <BookOpen className="w-3.5 h-3.5" />
+              <span>Docs</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode('diagram')}
+              className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md transition-colors ${
+                viewMode === 'diagram'
+                  ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-50 shadow-xs'
+                  : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
+              }`}
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+              <span>Diagram</span>
+            </button>
+          </div>
+
+          <button
+            type="button"
+            onClick={onToggleDarkMode}
+            title={darkMode ? 'Switch to Light Mode' : 'Switch to Dark Mode'}
+            className="p-2 rounded-lg text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
+          >
+            {darkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleForkCopy}
+            disabled={forking}
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-60 whitespace-nowrap"
+            title="Clone a local editable copy into SchemaForge Studio"
+          >
+            <CopyPlus className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">
+              {forking ? 'Cloning...' : 'Open Editable Copy'}
+            </span>
+            <span className="sm:hidden">Fork</span>
+          </button>
+        </div>
+      </header>
+
+      <div className="flex-1 flex min-h-0 overflow-hidden relative">
+        {viewMode === 'docs' ? (
+          <Suspense
+            fallback={
+              <div className="flex-1 flex items-center justify-center text-sm text-slate-500">
+                Loading documentation...
+              </div>
+            }
+          >
+            <DocsView
+              schema={parsedSchema}
+              stickyNotes={payload.content.stickyNotes || []}
+              navOpen={docsNavOpen}
+              onToggleNav={() => setDocsNavOpen((o) => !o)}
+              modKey={modKey}
+              sectionRequest={docsSectionRequest}
+              onSelectTable={(id) => {
+                setSelectedTableId(id);
+                setViewMode('diagram');
+                setFocusRequest({ type: 'table', id, nonce: Date.now() });
+              }}
+            />
+          </Suspense>
+        ) : (
+          <>
+            <DiagramCanvas
+              schema={parsedSchema}
+              positions={resolvedPositions}
+              onUpdatePositions={() => {}}
+              detailLevel={payload.content.detailLevel || 'full'}
+              onChangeDetailLevel={() => {}}
+              selectedDomains={selectedDomains}
+              onChangeSelectedDomains={setSelectedDomains}
+              selectedTableId={selectedTableId}
+              highlightedColumn={highlightedColumn}
+              onSelectTable={(id) => {
+                setSelectedTableId(id);
+                if (!id || id !== highlightedColumn?.tableId) {
+                  setHighlightedColumn(null);
+                }
+              }}
+              onChangeTableHeaderColor={() => {}}
+              onAssignTableToGroup={() => {}}
+              onEditGroup={() => {}}
+              onAutoLayout={() => {}}
+              onAutoLayoutGroup={() => {}}
+              stickyNotes={payload.content.stickyNotes || []}
+              onAddStickyNote={() => {}}
+              onUpdateStickyNote={() => {}}
+              onDeleteStickyNote={() => {}}
+              focusRequest={focusRequest}
+              darkMode={darkMode}
+              readOnly={true}
+            />
+            {selectedTable && (
+              <InspectorDrawer
+                table={selectedTable}
+                schema={parsedSchema}
+                onClose={() => setSelectedTableId(null)}
+                onSelectTable={(id) => {
+                  setSelectedTableId(id);
+                  setFocusRequest({ type: 'table', id, nonce: Date.now() });
+                }}
+                onSetTableGroups={() => {}}
+                onChangeTableHeaderColor={() => {}}
+                onJumpToCode={() => {}}
+                onAddLinkedStickyNote={() => {}}
+                readOnly={true}
+              />
+            )}
+          </>
+        )}
+      </div>
+
+      <Suspense fallback={null}>
+        {commandPaletteOpen && (
+          <CommandPaletteModal
+            open={commandPaletteOpen}
+            schema={parsedSchema}
+            stickyNotes={payload.content.stickyNotes || []}
+            viewMode={effectiveViewMode}
+            modKey={modKey}
+            onClose={() => setCommandPaletteOpen(false)}
+            onSelectCommand={handleExecuteCommand}
+          />
+        )}
+      </Suspense>
+    </div>
+  );
+};

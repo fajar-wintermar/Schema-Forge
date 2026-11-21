@@ -17,8 +17,36 @@ import {
   randomHex,
 } from '../lib/crypto';
 import { githubApiFetch } from '../lib/githubClient';
+import { resolveUserId, upsertCloudUser } from '../lib/dbHelpers';
 
 export const authRoutes = new Hono<{ Bindings: AppEnv }>();
+
+authRoutes.get('/api/auth/me', async (c) => {
+  const session = await getGithubSession(c);
+  const clientId = getEnv(c, 'GITHUB_CLIENT_ID');
+  const clientSecret = getEnv(c, 'GITHUB_CLIENT_SECRET');
+  const db = c.env?.DB;
+
+  let userId: string | null = null;
+  if (session) {
+    userId = resolveUserId(session.user);
+    if (db) {
+      try {
+        await upsertCloudUser(db, session.user);
+      } catch {
+        // Non-fatal: table may not exist yet if migrations have not been applied on Cloudflare D1
+      }
+    }
+  }
+
+  return c.json({
+    cloudEnabled: Boolean(db),
+    githubConfigured: Boolean(clientId && clientSecret),
+    authenticated: Boolean(session),
+    user: session ? { ...session.user, id: userId } : null,
+    callbackUrl: getCallbackUrl(c),
+  });
+});
 
 authRoutes.get('/api/auth/github/status', async (c) => {
   const session = await getGithubSession(c);
@@ -145,6 +173,7 @@ async function handleGithubCallback(c: ApiContext) {
     }
 
     const userRaw = (await userRes.json()) as {
+      id?: number;
       login: string;
       name: string | null;
       avatar_url: string;
@@ -152,11 +181,20 @@ async function handleGithubCallback(c: ApiContext) {
     };
 
     const user: GithubUserSummary = {
+      id: userRaw.id,
       login: userRaw.login,
       name: userRaw.name,
       avatar_url: userRaw.avatar_url,
       html_url: userRaw.html_url,
     };
+
+    if (c.env?.DB) {
+      try {
+        await upsertCloudUser(c.env.DB, user);
+      } catch {
+        // Non-fatal if D1 migrations haven't run yet
+      }
+    }
 
     const sessionToken = await encryptToken<GithubSessionPayload>(
       {
@@ -171,6 +209,7 @@ async function handleGithubCallback(c: ApiContext) {
       httpOnly: true,
       secure: true,
       sameSite: 'None',
+      partitioned: true,
       maxAge: 7 * 24 * 60 * 60,
       path: '/',
     });
@@ -210,6 +249,7 @@ authRoutes.post('/api/auth/github/logout', (c) => {
   deleteCookie(c, 'sf_gh_session', {
     secure: true,
     sameSite: 'None',
+    partitioned: true,
     path: '/',
   });
   return c.json({ ok: true });

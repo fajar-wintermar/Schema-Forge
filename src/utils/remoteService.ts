@@ -89,6 +89,14 @@ export function getStoredGithubSessionToken(): string | null {
   }
 }
 
+export const AUTH_CHANGED_EVENT = 'schemaforge:auth-changed';
+
+export function notifyAuthChanged(): void {
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
+  }
+}
+
 export function setStoredGithubSessionToken(token: string | null): void {
   try {
     if (token) sessionStorage.setItem(SESSION_STORAGE_KEY, token);
@@ -96,14 +104,16 @@ export function setStoredGithubSessionToken(token: string | null): void {
   } catch {
     // Ignore storage quota / private mode restrictions
   }
+  notifyAuthChanged();
 }
 
-async function apiRequest<T>(
+export async function apiRequest<T>(
   url: string,
   init: RequestInit = {}
 ): Promise<T> {
   const token = getStoredGithubSessionToken();
   const headers: Record<string, string> = {
+    'X-Requested-With': 'SchemaForge',
     ...(init.headers as Record<string, string> | undefined),
   };
   if (token) {
@@ -148,6 +158,7 @@ export async function logoutGithub(): Promise<void> {
   await apiRequest<{ ok: boolean }>('/api/auth/github/logout', {
     method: 'POST',
   });
+  notifyAuthChanged();
 }
 
 export interface GithubInitBranchResult {

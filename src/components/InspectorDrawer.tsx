@@ -20,6 +20,7 @@ interface InspectorDrawerProps {
   onChangeTableHeaderColor: (tableId: string, color: string | null) => void;
   onJumpToCode: (line?: number) => void;
   onAddLinkedStickyNote: (tableId: string) => void;
+  readOnly?: boolean;
 }
 
 const SWATCHES = [
@@ -42,6 +43,7 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
   onChangeTableHeaderColor,
   onJumpToCode,
   onAddLinkedStickyNote,
+  readOnly = false,
 }) => {
   if (!table) return null;
 
@@ -81,24 +83,26 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
 
       <div className="flex-1 overflow-y-auto p-4 space-y-5">
         {/* Quick Actions */}
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => onJumpToCode(table.line)}
-            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"
-          >
-            <Code2 className="w-3.5 h-3.5" />
-            <span>View DBML</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => onAddLinkedStickyNote(table.id)}
-            className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-950/40 text-xs font-medium text-amber-800 dark:text-amber-200 hover:bg-amber-100/70 dark:hover:bg-amber-900/50"
-          >
-            <StickyNoteIcon className="w-3.5 h-3.5" />
-            <span>Attach Note</span>
-          </button>
-        </div>
+        {!readOnly && (
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onJumpToCode(table.line)}
+              className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"
+            >
+              <Code2 className="w-3.5 h-3.5" />
+              <span>View DBML</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => onAddLinkedStickyNote(table.id)}
+              className="flex-1 flex items-center justify-center gap-1.5 py-1.5 px-2.5 rounded-lg border border-amber-200 dark:border-amber-800 bg-amber-50/70 dark:bg-amber-950/40 text-xs font-medium text-amber-800 dark:text-amber-200 hover:bg-amber-100/70 dark:hover:bg-amber-900/50"
+            >
+              <StickyNoteIcon className="w-3.5 h-3.5" />
+              <span>Attach Note</span>
+            </button>
+          </div>
+        )}
 
         {/* Business Domain Multi-Assignment */}
         <div className="space-y-2">
@@ -113,7 +117,29 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
                 : `${assignedGroups.length} assigned`}
             </span>
           </div>
-          {schema.tableGroups.length === 0 ? (
+          {readOnly ? (
+            assignedGroups.length === 0 ? (
+              <p className="text-xs text-slate-400">Ungrouped</p>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {assignedGroups.map((gName) => {
+                  const group = schema.tableGroups.find((g) => g.name === gName);
+                  return (
+                    <span
+                      key={gName}
+                      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-xs text-slate-700 dark:text-slate-200"
+                    >
+                      <span
+                        className="w-2 h-2 rounded-xs shrink-0"
+                        style={{ backgroundColor: group?.color || '#2563EB' }}
+                      />
+                      <span>{gName}</span>
+                    </span>
+                  );
+                })}
+              </div>
+            )
+          ) : schema.tableGroups.length === 0 ? (
             <p className="text-xs text-slate-400">
               No business domains defined yet.
             </p>
@@ -146,44 +172,48 @@ export const InspectorDrawer: React.FC<InspectorDrawerProps> = ({
               })}
             </div>
           )}
-          <p className="text-[11px] text-slate-400">
-            Tables can belong to multiple domains when shared across business flows.
-          </p>
+          {!readOnly && (
+            <p className="text-[11px] text-slate-400">
+              Tables can belong to multiple domains when shared across business flows.
+            </p>
+          )}
         </div>
 
         {/* Header Color */}
-        <div className="space-y-2">
-          <div className="flex items-center justify-between text-xs">
-            <span className="font-semibold text-slate-700 dark:text-slate-300">
-              Header Color
-            </span>
-            {table.headerColor && (
-              <button
-                type="button"
-                onClick={() => onChangeTableHeaderColor(table.id, null)}
-                className="text-[11px] text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
-              >
-                Reset
-              </button>
-            )}
+        {!readOnly && (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-semibold text-slate-700 dark:text-slate-300">
+                Header Color
+              </span>
+              {table.headerColor && (
+                <button
+                  type="button"
+                  onClick={() => onChangeTableHeaderColor(table.id, null)}
+                  className="text-[11px] text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                >
+                  Reset
+                </button>
+              )}
+            </div>
+            <div className="grid grid-cols-8 gap-1.5">
+              {SWATCHES.map((sw) => (
+                <button
+                  key={sw}
+                  type="button"
+                  onClick={() => onChangeTableHeaderColor(table.id, sw)}
+                  style={{ backgroundColor: sw }}
+                  className={`h-6 rounded border border-black/15 ${
+                    table.headerColor?.toLowerCase() === sw
+                      ? 'ring-2 ring-blue-500 ring-offset-1 dark:ring-offset-slate-900'
+                      : ''
+                  }`}
+                  title={sw}
+                />
+              ))}
+            </div>
           </div>
-          <div className="grid grid-cols-8 gap-1.5">
-            {SWATCHES.map((sw) => (
-              <button
-                key={sw}
-                type="button"
-                onClick={() => onChangeTableHeaderColor(table.id, sw)}
-                style={{ backgroundColor: sw }}
-                className={`h-6 rounded border border-black/15 ${
-                  table.headerColor?.toLowerCase() === sw
-                    ? 'ring-2 ring-blue-500 ring-offset-1 dark:ring-offset-slate-900'
-                    : ''
-                }`}
-                title={sw}
-              />
-            ))}
-          </div>
-        </div>
+        )}
 
         {/* Note */}
         {table.note && (

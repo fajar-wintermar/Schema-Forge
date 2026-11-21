@@ -4,6 +4,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { getRequestListener } from '@hono/node-server';
 import { api } from './server/api';
+import { getLocalD1Database } from './server/lib/localSqliteD1';
 
 function readCliFlag(flag: string): string | undefined {
   const args = process.argv.slice(2);
@@ -40,7 +41,10 @@ const MIME_TYPES: Record<string, string> = {
 };
 
 async function startServer() {
-  const honoListener = getRequestListener(api.fetch);
+  const localDb = getLocalD1Database();
+  const honoListener = getRequestListener((request) =>
+    api.fetch(request, { DB: localDb })
+  );
 
   if (process.env.NODE_ENV !== 'production') {
     const { createServer: createViteServer } = await import('vite');

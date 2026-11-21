@@ -2,6 +2,7 @@ import React, {
   lazy,
   Suspense,
   useCallback,
+  useEffect,
   useMemo,
   useRef,
   useState,
@@ -65,6 +66,31 @@ const ShortcutsModal = lazy(() =>
     default: m.ShortcutsModal,
   }))
 );
+const ShareModal = lazy(() =>
+  import('./features/workspace/modals/ShareModal').then((m) => ({
+    default: m.ShareModal,
+  }))
+);
+const SharedViewerPage = lazy(() =>
+  import('./features/share/SharedViewerPage').then((m) => ({
+    default: m.SharedViewerPage,
+  }))
+);
+
+function parseShareRouteFromLocation(): {
+  token: string;
+  versionTag: string | null;
+} | null {
+  if (typeof window === 'undefined') return null;
+  const match = window.location.pathname.match(
+    /^\/share\/([a-zA-Z0-9_-]+)(?:\/([^/]+))?\/?$/
+  );
+  if (!match) return null;
+  return {
+    token: decodeURIComponent(match[1]),
+    versionTag: match[2] ? decodeURIComponent(match[2]) : null,
+  };
+}
 
 export default function App() {
   // Layout & navigation UI state
@@ -94,7 +120,11 @@ export default function App() {
     nonce: number;
   } | null>(null);
 
-  // Modal visibility state
+  // Modal & share route state
+  const [shareRoute, setShareRoute] = useState<{
+    token: string;
+    versionTag: string | null;
+  } | null>(() => parseShareRouteFromLocation());
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [groupModalState, setGroupModalState] = useState<{
     open: boolean;
@@ -103,9 +133,18 @@ export default function App() {
   const [saveVersionOpen, setSaveVersionOpen] = useState(false);
   const [importExportOpen, setImportExportOpen] = useState(false);
   const [workspacesModalOpen, setWorkspacesModalOpen] = useState(false);
+  const [shareModalOpen, setShareModalOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [openUrlOpen, setOpenUrlOpen] = useState(false);
   const [githubModalOpen, setGithubModalOpen] = useState(false);
+
+  useEffect(() => {
+    const onPopState = () => {
+      setShareRoute(parseShareRouteFromLocation());
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
 
   const modKey = useMemo(() => {
     if (typeof navigator === 'undefined') return '⌘';
@@ -141,10 +180,17 @@ export default function App() {
     loading,
     darkMode,
     setDarkMode,
+    cloudAuth,
+    cloudSyncStatus,
     updateActiveWorkspace,
     selectWorkspace,
     addAndSelectWorkspace,
     removeWorkspace,
+    syncWorkspaceToCloud,
+    syncAllLocalWorkspacesToCloud,
+    refreshCloudSync,
+    connectCloudAccount,
+    logoutCloudAccount,
   } = useWorkspaceStore({
     onInitViewMode: setViewMode,
     onInitSidebarOpen: setSidebarOpen,
@@ -173,6 +219,8 @@ export default function App() {
     setImportExportOpen,
     workspacesModalOpen,
     setWorkspacesModalOpen,
+    shareModalOpen,
+    setShareModalOpen,
     commandPaletteOpen,
     setCommandPaletteOpen,
   });
@@ -227,6 +275,30 @@ export default function App() {
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
   };
+
+  if (shareRoute) {
+    return (
+      <Suspense
+        fallback={
+          <div className="h-screen w-screen flex items-center justify-center bg-slate-50 dark:bg-slate-950 text-sm text-slate-500">
+            Loading shared SchemaForge view...
+          </div>
+        }
+      >
+        <SharedViewerPage
+          token={shareRoute.token}
+          initialVersionTag={shareRoute.versionTag}
+          darkMode={darkMode}
+          onToggleDarkMode={() => setDarkMode((d) => !d)}
+          onForkToStudio={() => {
+            window.history.pushState(null, '', '/');
+            setShareRoute(null);
+            window.location.reload();
+          }}
+        />
+      </Suspense>
+    );
+  }
 
   if (loading || !activeWorkspace) {
     return (
@@ -435,10 +507,13 @@ export default function App() {
         onOpenGithubModal={() => setGithubModalOpen(true)}
         onOpenImportExport={() => setImportExportOpen(true)}
         onOpenSaveVersion={() => setSaveVersionOpen(true)}
+        onOpenShareModal={() => setShareModalOpen(true)}
         onOpenShortcuts={() => setShortcutsOpen(true)}
         githubLink={activeWorkspace.githubLink}
         githubRepoLink={activeWorkspace.githubRepoLink}
         hasGithubChanges={schemaActions.hasGithubChanges}
+        isCloudWorkspace={activeWorkspace.syncOrigin === 'cloud'}
+        cloudSyncStatus={cloudSyncStatus}
         modKey={modKey}
         darkMode={darkMode}
         onToggleDarkMode={() => setDarkMode((d) => !d)}
@@ -754,12 +829,41 @@ export default function App() {
           <WorkspacesModal
             workspaces={workspaces}
             activeId={activeWorkspace.id}
+            cloudAuth={cloudAuth}
             onSelectWorkspace={selectWorkspace}
             onCreateBlank={remoteSync.handleCreateBlankWorkspace}
             onLoadSampleTelemetry={remoteSync.handleLoadSampleTelemetry}
             onCreateModularProject={remoteSync.handleCreateModularWorkspace}
             onDeleteWorkspace={removeWorkspace}
+            onConnectCloud={connectCloudAccount}
+            onLogoutCloud={logoutCloudAccount}
+            onSyncWorkspace={(id) => syncWorkspaceToCloud(id)}
+            onSyncAllLocal={syncAllLocalWorkspacesToCloud}
             onClose={() => setWorkspacesModalOpen(false)}
+          />
+        )}
+
+        {shareModalOpen && (
+          <ShareModal
+            workspace={activeWorkspace}
+            cloudAuth={cloudAuth}
+            onConnectCloud={async () => {
+              await connectCloudAccount();
+              await refreshCloudSync();
+            }}
+            onSyncWorkspaceToCloud={() => syncWorkspaceToCloud(activeWorkspace.id)}
+            onOpenPreviewShare={(token, pinnedVersionTag) => {
+              const path = pinnedVersionTag
+                ? `/share/${encodeURIComponent(token)}/${encodeURIComponent(
+                    pinnedVersionTag
+                  )}`
+                : `/share/${encodeURIComponent(token)}`;
+              setShareModalOpen(false);
+              window.history.pushState(null, '', path);
+              setShareRoute({ token, versionTag: pinnedVersionTag || null });
+            }}
+            onClose={() => setShareModalOpen(false)}
+            onShowToast={showToast}
           />
         )}
 

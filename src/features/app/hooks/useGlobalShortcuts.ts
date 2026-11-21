@@ -23,6 +23,8 @@ interface UseGlobalShortcutsOptions {
   setImportExportOpen: React.Dispatch<React.SetStateAction<boolean>>;
   workspacesModalOpen: boolean;
   setWorkspacesModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  shareModalOpen: boolean;
+  setShareModalOpen: React.Dispatch<React.SetStateAction<boolean>>;
   commandPaletteOpen: boolean;
   setCommandPaletteOpen: React.Dispatch<React.SetStateAction<boolean>>;
 }
@@ -47,6 +49,8 @@ export function useGlobalShortcuts({
   setImportExportOpen,
   workspacesModalOpen,
   setWorkspacesModalOpen,
+  shareModalOpen,
+  setShareModalOpen,
   commandPaletteOpen,
   setCommandPaletteOpen,
 }: UseGlobalShortcutsOptions): void {
@@ -61,6 +65,7 @@ export function useGlobalShortcuts({
         else if (saveVersionOpen) setSaveVersionOpen(false);
         else if (importExportOpen) setImportExportOpen(false);
         else if (workspacesModalOpen) setWorkspacesModalOpen(false);
+        else if (shareModalOpen) setShareModalOpen(false);
         return;
       }
 
@@ -84,7 +89,8 @@ export function useGlobalShortcuts({
         groupModalOpen ||
         saveVersionOpen ||
         importExportOpen ||
-        workspacesModalOpen;
+        workspacesModalOpen ||
+        shareModalOpen;
 
       // Mod + I: Toggle Import / Export
       if (!e.shiftKey && key === 'i') {
@@ -174,6 +180,8 @@ export function useGlobalShortcuts({
     setImportExportOpen,
     workspacesModalOpen,
     setWorkspacesModalOpen,
+    shareModalOpen,
+    setShareModalOpen,
     commandPaletteOpen,
     setCommandPaletteOpen,
   ]);

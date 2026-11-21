@@ -23,6 +23,7 @@ export interface TableCardProps {
   onToggleColorPicker: () => void;
   onCloseColorPicker: () => void;
   onChangeTableHeaderColor: (tableId: string, color: string | null) => void;
+  readOnly?: boolean;
 }
 
 export const TableCard: React.FC<TableCardProps> = ({
@@ -42,6 +43,7 @@ export const TableCard: React.FC<TableCardProps> = ({
   onToggleColorPicker,
   onCloseColorPicker,
   onChangeTableHeaderColor,
+  readOnly = false,
 }) => {
   const table = inst.table;
   const headerBg = table.headerColor || (darkMode ? '#1e293b' : '#0f172a');
@@ -92,7 +94,9 @@ export const TableCard: React.FC<TableCardProps> = ({
       {/* Table Header */}
       <div
         style={{ backgroundColor: headerBg, color: headerText }}
-        className="h-10 px-3 rounded-t-[7px] flex items-center justify-between gap-2 cursor-move"
+        className={`h-10 px-3 rounded-t-[7px] flex items-center justify-between gap-2 ${
+          readOnly ? 'cursor-pointer' : 'cursor-move'
+        }`}
       >
         <div className="flex items-center gap-1.5 min-w-0">
           <span className="text-[13px] font-semibold truncate">{table.id}</span>
@@ -107,19 +111,21 @@ export const TableCard: React.FC<TableCardProps> = ({
             </span>
           )}
         </div>
-        <div
-          className="flex items-center gap-1 shrink-0"
-          onPointerDown={(e) => e.stopPropagation()}
-        >
-          <button
-            type="button"
-            onClick={onToggleColorPicker}
-            title="Customize table header color"
-            className="p-1 rounded hover:bg-black/15 transition-colors"
+        {!readOnly && (
+          <div
+            className="flex items-center gap-1 shrink-0"
+            onPointerDown={(e) => e.stopPropagation()}
           >
-            <Palette className="w-3.5 h-3.5" />
-          </button>
-        </div>
+            <button
+              type="button"
+              onClick={onToggleColorPicker}
+              title="Customize table header color"
+              className="p-1 rounded hover:bg-black/15 transition-colors"
+            >
+              <Palette className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Header Color Picker Popover */}

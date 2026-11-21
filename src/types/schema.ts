@@ -225,6 +225,75 @@ export interface WorkspaceProject {
   urlLink?: UrlFileLink;
   createdAt: string;
   updatedAt: string;
+  syncOrigin?: 'local' | 'cloud';
+  cloudSyncedAt?: string;
+  cloudRevision?: number;
+}
+
+export interface CloudUser {
+  id: string;
+  login: string;
+  name: string | null;
+  avatar_url: string;
+  html_url: string;
+}
+
+export interface CloudAuthStatusResponse {
+  cloudEnabled: boolean;
+  githubConfigured: boolean;
+  authenticated: boolean;
+  user: CloudUser | null;
+  callbackUrl: string;
+}
+
+export type CloudSyncStatus =
+  | 'local'
+  | 'syncing'
+  | 'synced'
+  | 'offline'
+  | 'error';
+
+export interface ShareLinkRecord {
+  id: string;
+  token: string;
+  workspaceId: string;
+  label: string;
+  pinnedVersionTag: string | null;
+  defaultView: 'docs' | 'diagram';
+  createdByLogin: string;
+  createdAt: string;
+  expiresAt: string | null;
+  revokedAt: string | null;
+}
+
+export interface SharedWorkspacePayload {
+  share: {
+    id: string;
+    token: string;
+    label: string;
+    pinnedVersionTag: string | null;
+    activeVersionTag: string | null;
+    defaultView: 'docs' | 'diagram';
+    workspaceName: string;
+    workspaceDescription: string;
+    updatedAt: string;
+    createdByLogin: string;
+  };
+  content: {
+    dbml: string;
+    tablePositions: Record<string, TablePosition>;
+    stickyNotes: StickyNote[];
+    detailLevel: DetailLevel;
+    groupMeta: Record<string, GroupCustomMeta>;
+    schemaFiles?: Array<{ id: string; path: string; content: string }>;
+  };
+  publishedVersions: Array<{
+    id: string;
+    tag: string;
+    title: string;
+    description: string;
+    createdAt: string;
+  }>;
 }
 
 export interface ColumnDiff {
