@@ -5,6 +5,7 @@ import path from 'node:path';
 import { getRequestListener } from '@hono/node-server';
 import { api } from './server/api';
 import { getLocalD1Database } from './server/lib/localSqliteD1';
+import { ensureMigrations } from './server/lib/migrator';
 
 function readCliFlag(flag: string): string | undefined {
   const args = process.argv.slice(2);
@@ -42,6 +43,7 @@ const MIME_TYPES: Record<string, string> = {
 
 async function startServer() {
   const localDb = getLocalD1Database();
+  await ensureMigrations(localDb);
   const honoListener = getRequestListener((request) =>
     api.fetch(request, { DB: localDb })
   );

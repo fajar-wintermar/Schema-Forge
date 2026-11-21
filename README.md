@@ -76,20 +76,25 @@
 ├── server.ts                         # Node.js entry point (@hono/node-server + local SQLite D1 shim)
 ├── .env.example                      # Environment variable template
 ├── migrations/
-│   └── 0001_init.sql                 # D1 / SQLite schema (users, workspaces, versions, share_links)
+│   └── 0001_init.sql                 # Source-of-truth SQL migrations (auto-synced at build/dev)
+├── scripts/
+│   └── sync-migrations.mjs           # Reads migrations/*.sql and generates server/migrations/registry.ts
 ├── public/
 │   └── favicon.svg                   # Application SVG favicon
 ├── functions/
 │   └── api/
 │       └── [[route]].ts              # Cloudflare Pages Functions catch-all adapter for Hono
 ├── server/
-│   ├── api.ts                        # Shared Hono API app mounting all route modules
+│   ├── api.ts                        # Shared Hono API app + automatic D1 migration middleware
 │   ├── types.ts                      # Edge-compatible Bindings, Env, and D1 interface types
+│   ├── migrations/
+│   │   └── registry.ts               # Auto-generated from migrations/*.sql by sync-migrations.mjs
 │   ├── lib/
 │   │   ├── crypto.ts                 # AES-GCM token encryption & mutating request origin verification
 │   │   ├── dbHelpers.ts              # Parameterized user upsert & workspace/share row serializers
 │   │   ├── githubClient.ts           # GitHub REST API wrapper with timeout & error handling
-│   │   └── localSqliteD1.ts          # Node.js 22+ built-in node:sqlite adapter implementing D1DatabaseLike
+│   │   ├── localSqliteD1.ts          # Node.js 22+ built-in node:sqlite adapter implementing D1DatabaseLike
+│   │   └── migrator.ts               # EF Core-style auto-migrator with _schema_migrations history tracking
 │   └── routes/
 │       ├── auth.ts                   # GitHub OAuth login, callback, logout & /api/auth/me
 │       ├── fetchUrl.ts               # Safe remote DBML URL / GitHub blob / Gist proxy
@@ -157,7 +162,7 @@ Core editing, diagramming, docs, local IndexedDB workspaces, and loading public 
 
 2. Create a GitHub OAuth App at <https://github.com/settings/developers> with callback URL:
    - `http://localhost:3000/api/auth/github/callback`
-3. Set `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` (and optionally `SESSION_SECRET` and `LOCAL_SQLITE_PATH`, which defaults to `.data/schema-forge.sqlite`) in `.env`.
+3. Set `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` (and optionally `SESSION_SECRET`) in `.env`.
 
 ### 3. Start the Development Server
 
@@ -165,7 +170,7 @@ Core editing, diagramming, docs, local IndexedDB workspaces, and loading public 
 npm run dev
 ```
 
-This runs `tsx server.ts`, starting the Hono API (with automatic local SQLite migration initialization from `migrations/0001_init.sql`) and Vite dev middleware at **`http://localhost:3000`**.
+This runs `tsx server.ts`, starting the Hono API (auto-applying pending migrations from `server/migrations/registry.ts` into `.data/schemaforge-dev.sqlite` with `_schema_migrations` tracking) and Vite dev middleware at **`http://localhost:3000`**.
 
 ### 4. Type-Check & Lint
 
@@ -224,14 +229,8 @@ npm run build
 `wrangler.jsonc` is preconfigured for **Cloudflare Workers with Static Assets** and **Cloudflare D1** (`run_worker_first: ["/api/*"]`, `not_found_handling: "single-page-application"`, and `migrations_dir: "migrations"`).
 
 #### A. Provision D1 (if deploying a new fork/account)
-1. Create your D1 database and update `database_id` in `wrangler.jsonc` if needed:
-   ```bash
-   npx wrangler d1 create schema-forge-db
-   ```
-2. Apply the D1 schema migration to your remote database:
-   ```bash
-   npx wrangler d1 migrations apply schema-forge-db --remote
-   ```
+1. Create a D1 database (`npx wrangler d1 create schema-forge-db` or via **Cloudflare Dashboard → Storage & Databases → D1 SQL Database**) and set its `database_id` in `wrangler.jsonc` (or bind `DB` in Worker Settings).
+2. **SQL-Driven Automatic Migrations (`migrations/*.sql` → `_schema_migrations`)**: Simply add numbered `.sql` files in `migrations/` (e.g., `0002_add_feature.sql`). Running `npm run build` (including inside Cloudflare Workers Builds) automatically parses `migrations/*.sql` into `server/migrations/registry.ts`, and on the first request after deploy, pending migrations apply atomically and record themselves in `_schema_migrations`. You can also optionally run `npx wrangler d1 migrations apply schema-forge-db --remote` if using Wrangler CLI.
 
 #### B. Configure Secrets & GitHub OAuth Callback
 Add the following **Variables and Secrets** in the Cloudflare Dashboard (**Worker → Settings → Variables and Secrets**) or via Wrangler CLI:
@@ -243,17 +242,16 @@ Add the following **Variables and Secrets** in the Cloudflare Dashboard (**Worke
 Register your production callback URL in **GitHub Developer Settings → OAuth Apps**:
 - `https://<your-worker-subdomain-or-custom-domain>/api/auth/github/callback`
 
-#### C. Deploy via CLI or Cloudflare Workers Builds
-```bash
-npm run build
-npx wrangler d1 migrations apply schema-forge-db --remote
-npx wrangler secret put GITHUB_CLIENT_ID
-npx wrangler secret put GITHUB_CLIENT_SECRET
-npx wrangler secret put SESSION_SECRET
-npx wrangler deploy
-```
-
-> If using **Cloudflare Workers Builds** (Git integration), set the build command to `npm run build` and deploy command to `npx wrangler deploy`.
+#### C. Deploy via Cloudflare Workers Builds (Git) or CLI
+- **Cloudflare Workers Builds (No CLI needed)**: Connect your Git repository with Build command `npm run build` and Deploy command `npx wrangler deploy`.
+- **CLI**:
+  ```bash
+  npm run build
+  npx wrangler secret put GITHUB_CLIENT_ID
+  npx wrangler secret put GITHUB_CLIENT_SECRET
+  npx wrangler secret put SESSION_SECRET
+  npx wrangler deploy
+  ```
 
 ---
 

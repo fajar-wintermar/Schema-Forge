@@ -4,12 +4,13 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "tsx server.ts",
+    "sync:migrations": "node scripts/sync-migrations.mjs",
+    "dev": "node scripts/sync-migrations.mjs && tsx server.ts",
     "start": "node server.ts",
-    "build": "vite build",
+    "build": "node scripts/sync-migrations.mjs && vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "lint": "node scripts/sync-migrations.mjs && tsc --noEmit"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.20.4",

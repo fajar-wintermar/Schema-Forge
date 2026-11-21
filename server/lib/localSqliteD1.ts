@@ -81,16 +81,6 @@ export function getLocalD1Database(): D1DatabaseLike {
   sqlite.exec('PRAGMA journal_mode = WAL;');
   sqlite.exec('PRAGMA foreign_keys = ON;');
 
-  const migrationPath = path.resolve(
-    process.cwd(),
-    'migrations',
-    '0001_init.sql'
-  );
-  if (fs.existsSync(migrationPath)) {
-    const sql = fs.readFileSync(migrationPath, 'utf8');
-    sqlite.exec(sql);
-  }
-
   cachedDb = {
     prepare(query: string): D1PreparedStatementLike {
       return new LocalSqlitePreparedStatement(sqlite, query);
