@@ -59,12 +59,36 @@ export function createWorkspaceShare(
     pinnedVersionTag?: string | null;
     defaultView?: 'docs' | 'diagram';
     expiresInDays?: number | null;
+    expiresAt?: string | null;
   }
 ): Promise<{ share: ShareLinkRecord }> {
   return apiRequest<{ share: ShareLinkRecord }>(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/shares`,
     {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    }
+  );
+}
+
+export function updateWorkspaceShare(
+  workspaceId: string,
+  shareId: string,
+  payload: {
+    label?: string;
+    pinnedVersionTag?: string | null;
+    defaultView?: 'docs' | 'diagram';
+    expiresInDays?: number | null;
+    expiresAt?: string | null;
+  }
+): Promise<{ share: ShareLinkRecord }> {
+  return apiRequest<{ share: ShareLinkRecord }>(
+    `/api/workspaces/${encodeURIComponent(
+      workspaceId
+    )}/shares/${encodeURIComponent(shareId)}`,
+    {
+      method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     }

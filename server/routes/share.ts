@@ -67,6 +67,71 @@ shareRoutes.get('/api/workspaces/:id/shares', async (c) => {
   });
 });
 
+const MAX_EXPIRY_MS = 3650 * 24 * 60 * 60 * 1000;
+
+function resolveExpirationInput(body: {
+  expiresAt?: unknown;
+  expiresInDays?: unknown;
+}): { ok: true; provided: boolean; value: string | null } | { ok: false; error: string } {
+  const hasExpiresAt = Object.prototype.hasOwnProperty.call(body, 'expiresAt');
+  const hasExpiresInDays = Object.prototype.hasOwnProperty.call(
+    body,
+    'expiresInDays'
+  );
+
+  if (!hasExpiresAt && !hasExpiresInDays) {
+    return { ok: true, provided: false, value: null };
+  }
+
+  if (body.expiresAt !== undefined) {
+    if (body.expiresAt === null || body.expiresAt === '') {
+      return { ok: true, provided: true, value: null };
+    }
+    if (typeof body.expiresAt !== 'string') {
+      return { ok: false, error: 'Invalid expiration date.' };
+    }
+    const parsedMs = Date.parse(body.expiresAt.trim());
+    if (!Number.isFinite(parsedMs)) {
+      return { ok: false, error: 'Invalid expiration date.' };
+    }
+    const nowMs = Date.now();
+    if (parsedMs <= nowMs) {
+      return { ok: false, error: 'Expiration date must be in the future.' };
+    }
+    if (parsedMs > nowMs + MAX_EXPIRY_MS) {
+      return {
+        ok: false,
+        error: 'Expiration date cannot be more than 10 years in the future.',
+      };
+    }
+    return { ok: true, provided: true, value: new Date(parsedMs).toISOString() };
+  }
+
+  if (body.expiresInDays === null) {
+    return { ok: true, provided: true, value: null };
+  }
+
+  if (
+    typeof body.expiresInDays === 'number' &&
+    Number.isFinite(body.expiresInDays) &&
+    body.expiresInDays > 0 &&
+    body.expiresInDays <= 3650
+  ) {
+    return {
+      ok: true,
+      provided: true,
+      value: new Date(
+        Date.now() + body.expiresInDays * 24 * 60 * 60 * 1000
+      ).toISOString(),
+    };
+  }
+
+  return {
+    ok: false,
+    error: 'Expiration days must be between 1 and 3650.',
+  };
+}
+
 // Create a shareable read-only link (owner only)
 shareRoutes.post('/api/workspaces/:id/shares', async (c) => {
   if (!verifyMutatingRequestOrigin(c)) {
@@ -108,6 +173,7 @@ shareRoutes.post('/api/workspaces/:id/shares', async (c) => {
       pinnedVersionTag?: unknown;
       defaultView?: unknown;
       expiresInDays?: unknown;
+      expiresAt?: unknown;
     }>()
     .catch(() => ({} as Record<string, unknown>));
 
@@ -140,17 +206,11 @@ shareRoutes.post('/api/workspaces/:id/shares', async (c) => {
     pinnedVersionTag = ver.tag;
   }
 
-  let expiresAt: string | null = null;
-  if (
-    typeof body.expiresInDays === 'number' &&
-    Number.isFinite(body.expiresInDays) &&
-    body.expiresInDays > 0 &&
-    body.expiresInDays <= 3650
-  ) {
-    expiresAt = new Date(
-      Date.now() + body.expiresInDays * 24 * 60 * 60 * 1000
-    ).toISOString();
+  const expirationResult = resolveExpirationInput(body);
+  if (expirationResult.ok === false) {
+    return c.json({ error: expirationResult.error }, 400);
   }
+  const expiresAt = expirationResult.provided ? expirationResult.value : null;
 
   const id = `shr_${randomHex(8)}`;
   const token = `sf_${randomHex(10)}`;
@@ -191,6 +251,143 @@ shareRoutes.post('/api/workspaces/:id/shares', async (c) => {
       expiresAt,
       revokedAt: null,
     },
+  });
+});
+
+// Update an existing share link's version target, expiration, label, or landing view (owner only)
+shareRoutes.patch('/api/workspaces/:id/shares/:shareId', async (c) => {
+  if (!verifyMutatingRequestOrigin(c)) {
+    return c.json({ error: 'Invalid request origin.' }, 403);
+  }
+  const db = c.env?.DB;
+  if (!db) {
+    return c.json({ error: 'Cloud database (D1) is not configured.' }, 503);
+  }
+  const session = await getGithubSession(c);
+  if (!session) {
+    return c.json({ error: 'Authentication required.' }, 401);
+  }
+
+  const workspaceId = sanitizeId(c.req.param('id'));
+  const shareId = sanitizeId(c.req.param('shareId'));
+  if (!workspaceId || !shareId) {
+    return c.json({ error: 'Invalid identifier.' }, 400);
+  }
+
+  const userId = resolveUserId(session.user);
+  const existing = await db
+    .prepare(
+      `SELECT * FROM share_links
+       WHERE id = ? AND workspace_id = ? AND owner_user_id = ?`
+    )
+    .bind(shareId, workspaceId, userId)
+    .first<ShareLinkRow>();
+
+  if (!existing) {
+    return c.json({ error: 'Share link not found.' }, 404);
+  }
+  if (existing.revoked_at) {
+    return c.json(
+      { error: 'Revoked share links cannot be edited.' },
+      409
+    );
+  }
+
+  const body = await c.req
+    .json<{
+      label?: unknown;
+      pinnedVersionTag?: unknown;
+      defaultView?: unknown;
+      expiresInDays?: unknown;
+      expiresAt?: unknown;
+    }>()
+    .catch(() => null);
+
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return c.json({ error: 'Invalid JSON payload.' }, 400);
+  }
+
+  let nextLabel = existing.label;
+  if (Object.prototype.hasOwnProperty.call(body, 'label')) {
+    if (typeof body.label !== 'string') {
+      return c.json({ error: 'Invalid share label.' }, 400);
+    }
+    nextLabel = body.label.trim().slice(0, 120);
+  }
+
+  let nextDefaultView = existing.default_view === 'diagram' ? 'diagram' : 'docs';
+  if (Object.prototype.hasOwnProperty.call(body, 'defaultView')) {
+    if (body.defaultView !== 'docs' && body.defaultView !== 'diagram') {
+      return c.json({ error: 'Invalid default view.' }, 400);
+    }
+    nextDefaultView = body.defaultView;
+  }
+
+  let nextPinnedVersionTag = existing.pinned_version_tag;
+  if (Object.prototype.hasOwnProperty.call(body, 'pinnedVersionTag')) {
+    if (
+      body.pinnedVersionTag === null ||
+      (typeof body.pinnedVersionTag === 'string' && !body.pinnedVersionTag.trim())
+    ) {
+      nextPinnedVersionTag = null;
+    } else if (typeof body.pinnedVersionTag === 'string') {
+      const requestedTag = body.pinnedVersionTag.trim().slice(0, 64);
+      const ver = await db
+        .prepare(
+          `SELECT tag FROM workspace_versions
+           WHERE workspace_id = ? AND owner_user_id = ? AND tag = ?`
+        )
+        .bind(workspaceId, userId, requestedTag)
+        .first<{ tag: string }>();
+      if (!ver) {
+        return c.json(
+          {
+            error: `Version "${requestedTag}" has not been synced yet. Save & sync first.`,
+          },
+          400
+        );
+      }
+      nextPinnedVersionTag = ver.tag;
+    } else {
+      return c.json({ error: 'Invalid version tag.' }, 400);
+    }
+  }
+
+  const expirationResult = resolveExpirationInput(body);
+  if (expirationResult.ok === false) {
+    return c.json({ error: expirationResult.error }, 400);
+  }
+  const nextExpiresAt = expirationResult.provided
+    ? expirationResult.value
+    : existing.expires_at;
+
+  await db
+    .prepare(
+      `UPDATE share_links
+       SET label = ?, pinned_version_tag = ?, default_view = ?, expires_at = ?
+       WHERE id = ? AND workspace_id = ? AND owner_user_id = ?`
+    )
+    .bind(
+      nextLabel,
+      nextPinnedVersionTag,
+      nextDefaultView,
+      nextExpiresAt,
+      shareId,
+      workspaceId,
+      userId
+    )
+    .run();
+
+  const updatedRow: ShareLinkRow = {
+    ...existing,
+    label: nextLabel,
+    pinned_version_tag: nextPinnedVersionTag,
+    default_view: nextDefaultView,
+    expires_at: nextExpiresAt,
+  };
+
+  return c.json({
+    share: shareRowToClient(updatedRow),
   });
 });
 

@@ -3,6 +3,7 @@ import {
   AlertCircle,
   BookOpen,
   Check,
+  Clock,
   Cloud,
   Copy,
   Eye,
@@ -10,6 +11,7 @@ import {
   Link2,
   Loader2,
   Lock,
+  Pencil,
   Plus,
   Share2,
   Trash2,
@@ -25,6 +27,7 @@ import {
   createWorkspaceShare,
   listWorkspaceShares,
   revokeWorkspaceShare,
+  updateWorkspaceShare,
 } from '../../../utils/cloudService';
 
 interface ShareModalProps {
@@ -35,6 +38,73 @@ interface ShareModalProps {
   onOpenPreviewShare: (token: string, pinnedVersionTag?: string | null) => void;
   onClose: () => void;
   onShowToast: (msg: string) => void;
+}
+
+type ExpirationMode = 'never' | '1' | '7' | '30' | '90' | 'custom';
+
+function formatLocalDateTimeInput(date: Date): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
+    date.getDate()
+  )}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function getDefaultCustomExpirationValue(existingIso?: string | null): string {
+  if (existingIso) {
+    const parsed = new Date(existingIso);
+    if (!Number.isNaN(parsed.getTime())) {
+      return formatLocalDateTimeInput(parsed);
+    }
+  }
+  const nextWeek = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  nextWeek.setSeconds(0, 0);
+  return formatLocalDateTimeInput(nextWeek);
+}
+
+function getMinDateTimeLocalValue(): string {
+  const soon = new Date(Date.now() + 60 * 1000);
+  soon.setSeconds(0, 0);
+  return formatLocalDateTimeInput(soon);
+}
+
+function formatExpirationSummary(expiresAt: string | null): string {
+  if (!expiresAt) return 'Never expires';
+  const ms = Date.parse(expiresAt);
+  if (!Number.isFinite(ms)) return 'Invalid expiration';
+  const formatted = new Date(ms).toLocaleString(undefined, {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  });
+  return ms <= Date.now()
+    ? `Expired ${formatted}`
+    : `Expires ${formatted}`;
+}
+
+function buildExpirationPayload(
+  mode: ExpirationMode,
+  customDateTime: string
+): { expiresInDays?: number | null; expiresAt?: string | null } {
+  if (mode === 'never') {
+    return { expiresAt: null };
+  }
+  if (mode === 'custom') {
+    if (!customDateTime.trim()) {
+      throw new Error('Please choose a custom expiration date and time.');
+    }
+    const ms = new Date(customDateTime).getTime();
+    if (!Number.isFinite(ms)) {
+      throw new Error('Invalid custom expiration date and time.');
+    }
+    if (ms <= Date.now()) {
+      throw new Error('Custom expiration date must be in the future.');
+    }
+    return { expiresAt: new Date(ms).toISOString() };
+  }
+  const days = Number.parseInt(mode, 10);
+  if (!Number.isFinite(days) || days <= 0) {
+    return { expiresAt: null };
+  }
+  return { expiresInDays: days };
 }
 
 export const ShareModal: React.FC<ShareModalProps> = ({
@@ -57,7 +127,25 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   const [label, setLabel] = useState('');
   const [pinnedVersionTag, setPinnedVersionTag] = useState<string>('live');
   const [defaultView, setDefaultView] = useState<'docs' | 'diagram'>('docs');
-  const [expiresInDays, setExpiresInDays] = useState<string>('never');
+  const [expiresMode, setExpiresMode] = useState<ExpirationMode>('never');
+  const [customExpiresAt, setCustomExpiresAt] = useState<string>(() =>
+    getDefaultCustomExpirationValue()
+  );
+
+  // Inline edit state for an existing share link
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [savingEdit, setSavingEdit] = useState(false);
+  const [editLabel, setEditLabel] = useState('');
+  const [editPinnedVersionTag, setEditPinnedVersionTag] =
+    useState<string>('live');
+  const [editDefaultView, setEditDefaultView] = useState<'docs' | 'diagram'>(
+    'docs'
+  );
+  const [editExpiresMode, setEditExpiresMode] =
+    useState<ExpirationMode>('never');
+  const [editCustomExpiresAt, setEditCustomExpiresAt] = useState<string>(() =>
+    getDefaultCustomExpirationValue()
+  );
 
   const isCloudSynced = workspace.syncOrigin === 'cloud';
   const canLoadShares = Boolean(
@@ -122,20 +210,22 @@ export const ShareModal: React.FC<ShareModalProps> = ({
     setCreating(true);
     setError(null);
     try {
+      const expirationPayload = buildExpirationPayload(
+        expiresMode,
+        customExpiresAt
+      );
+
       // Ensure latest workspace & version snapshots are in D1 before issuing the share link
       const synced = await onSyncWorkspaceToCloud();
       if (!synced) {
         throw new Error('Failed to sync workspace to cloud before sharing.');
       }
 
-      const daysNum =
-        expiresInDays === 'never' ? null : Number.parseInt(expiresInDays, 10);
-
       const { share } = await createWorkspaceShare(workspace.id, {
         label: label.trim() || `${workspace.name} Read-Only`,
         pinnedVersionTag: pinnedVersionTag === 'live' ? null : pinnedVersionTag,
         defaultView,
-        expiresInDays: Number.isFinite(daysNum) ? daysNum : null,
+        ...expirationPayload,
       });
 
       setShares((prev) => [share, ...prev]);
@@ -152,6 +242,73 @@ export const ShareModal: React.FC<ShareModalProps> = ({
       );
     } finally {
       setCreating(false);
+    }
+  };
+
+  const handleStartEdit = (share: ShareLinkRecord) => {
+    setError(null);
+    setEditingId(share.id);
+    setEditLabel(share.label);
+    setEditPinnedVersionTag(share.pinnedVersionTag || 'live');
+    setEditDefaultView(share.defaultView);
+    if (share.expiresAt) {
+      setEditExpiresMode('custom');
+      setEditCustomExpiresAt(getDefaultCustomExpirationValue(share.expiresAt));
+    } else {
+      setEditExpiresMode('never');
+      setEditCustomExpiresAt(getDefaultCustomExpirationValue());
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setEditingId(null);
+    setError(null);
+  };
+
+  const handleSaveEdit = async (e: React.FormEvent, shareId: string) => {
+    e.preventDefault();
+    if (!cloudAuth?.authenticated) return;
+
+    setSavingEdit(true);
+    setError(null);
+    try {
+      const expirationPayload = buildExpirationPayload(
+        editExpiresMode,
+        editCustomExpiresAt
+      );
+
+      if (editPinnedVersionTag !== 'live') {
+        const synced = await onSyncWorkspaceToCloud();
+        if (!synced) {
+          throw new Error(
+            'Failed to sync latest workspace versions before updating share link.'
+          );
+        }
+      }
+
+      const { share: updated } = await updateWorkspaceShare(
+        workspace.id,
+        shareId,
+        {
+          label: editLabel.trim() || `${workspace.name} Read-Only`,
+          pinnedVersionTag:
+            editPinnedVersionTag === 'live' ? null : editPinnedVersionTag,
+          defaultView: editDefaultView,
+          ...expirationPayload,
+        }
+      );
+
+      setShares((prev) =>
+        prev.map((item) => (item.id === shareId ? updated : item))
+      );
+      setEditingId(null);
+      onShowToast('Share link updated');
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : 'Failed to update share link.'
+      );
+    } finally {
+      setSavingEdit(false);
     }
   };
 
@@ -176,6 +333,9 @@ export const ShareModal: React.FC<ShareModalProps> = ({
           s.id === shareId ? { ...s, revokedAt: res.revokedAt } : s
         )
       );
+      if (editingId === shareId) {
+        setEditingId(null);
+      }
       onShowToast('Share link revoked');
     } catch (err) {
       setError(
@@ -373,16 +533,40 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                       Expiration
                     </label>
                     <select
-                      value={expiresInDays}
-                      onChange={(e) => setExpiresInDays(e.target.value)}
+                      value={expiresMode}
+                      onChange={(e) => {
+                        const mode = e.target.value as ExpirationMode;
+                        setExpiresMode(mode);
+                        if (mode === 'custom' && !customExpiresAt) {
+                          setCustomExpiresAt(getDefaultCustomExpirationValue());
+                        }
+                      }}
                       className="w-full px-3 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
                     >
                       <option value="never">Never expires</option>
+                      <option value="1">1 day</option>
                       <option value="7">7 days</option>
                       <option value="30">30 days</option>
                       <option value="90">90 days</option>
+                      <option value="custom">Custom date &amp; time...</option>
                     </select>
                   </div>
+
+                  {expiresMode === 'custom' && (
+                    <div className="sm:col-span-2 space-y-1">
+                      <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                        Custom Expiration Date &amp; Time
+                      </label>
+                      <input
+                        type="datetime-local"
+                        value={customExpiresAt}
+                        min={getMinDateTimeLocalValue()}
+                        onChange={(e) => setCustomExpiresAt(e.target.value)}
+                        required
+                        className="w-full px-3 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+                      />
+                    </div>
+                  )}
                 </div>
 
                 <div className="flex justify-end pt-1">
@@ -436,18 +620,24 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                           new Date(share.expiresAt).getTime() <= Date.now()
                       );
                       const inactive = isRevoked || isExpired;
+                      const isEditing = editingId === share.id;
+                      const hasPinnedOutsidePublished =
+                        Boolean(share.pinnedVersionTag) &&
+                        !publishedVersions.some(
+                          (v) => v.tag === share.pinnedVersionTag
+                        );
 
                       return (
                         <div
                           key={share.id}
                           className={`p-3 rounded-xl border space-y-2 ${
-                            inactive
-                              ? 'border-slate-200/70 dark:border-slate-800/70 bg-slate-50/40 dark:bg-slate-900/40 opacity-65'
+                            inactive && !isEditing
+                              ? 'border-slate-200/70 dark:border-slate-800/70 bg-slate-50/40 dark:bg-slate-900/40 opacity-75'
                               : 'border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900'
                           }`}
                         >
                           <div className="flex flex-wrap items-center justify-between gap-2">
-                            <div className="flex items-center gap-2 min-w-0">
+                            <div className="flex items-center gap-2 min-w-0 flex-wrap">
                               <Link2 className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
                               <span className="text-xs font-semibold text-slate-900 dark:text-slate-100 truncate">
                                 {share.label || 'Read-Only Share Link'}
@@ -469,35 +659,56 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                               ) : null}
                             </div>
 
-                            {!inactive && (
+                            {!isRevoked && (
                               <div className="flex items-center gap-1.5 shrink-0">
-                                <button
-                                  type="button"
-                                  onClick={() => handleCopy(share)}
-                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-slate-200 dark:border-slate-700 text-[11px] font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"
-                                >
-                                  {copiedId === share.id ? (
-                                    <Check className="w-3 h-3 text-emerald-500" />
-                                  ) : (
-                                    <Copy className="w-3 h-3" />
-                                  )}
-                                  <span>
-                                    {copiedId === share.id ? 'Copied' : 'Copy'}
-                                  </span>
-                                </button>
+                                {!isExpired && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleCopy(share)}
+                                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-slate-200 dark:border-slate-700 text-[11px] font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"
+                                    >
+                                      {copiedId === share.id ? (
+                                        <Check className="w-3 h-3 text-emerald-500" />
+                                      ) : (
+                                        <Copy className="w-3 h-3" />
+                                      )}
+                                      <span>
+                                        {copiedId === share.id ? 'Copied' : 'Copy'}
+                                      </span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        onOpenPreviewShare(
+                                          share.token,
+                                          share.pinnedVersionTag
+                                        )
+                                      }
+                                      className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-slate-200 dark:border-slate-700 text-[11px] font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"
+                                      title="Open read-only viewer"
+                                    >
+                                      <Eye className="w-3 h-3" />
+                                      <span>Preview</span>
+                                    </button>
+                                  </>
+                                )}
                                 <button
                                   type="button"
                                   onClick={() =>
-                                    onOpenPreviewShare(
-                                      share.token,
-                                      share.pinnedVersionTag
-                                    )
+                                    isEditing
+                                      ? handleCancelEdit()
+                                      : handleStartEdit(share)
                                   }
-                                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-slate-200 dark:border-slate-700 text-[11px] font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800"
-                                  title="Open read-only viewer"
+                                  className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md border text-[11px] font-medium transition-colors ${
+                                    isEditing
+                                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300'
+                                      : 'border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800'
+                                  }`}
+                                  title="Edit version target & expiration"
                                 >
-                                  <Eye className="w-3 h-3" />
-                                  <span>Preview</span>
+                                  <Pencil className="w-3 h-3" />
+                                  <span>{isEditing ? 'Editing' : 'Edit'}</span>
                                 </button>
                                 <button
                                   type="button"
@@ -510,6 +721,175 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                               </div>
                             )}
                           </div>
+
+                          <div className="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+                            <Clock className="w-3 h-3 shrink-0" />
+                            <span>
+                              {formatExpirationSummary(share.expiresAt)}
+                            </span>
+                          </div>
+
+                          {isEditing && (
+                            <form
+                              onSubmit={(e) => handleSaveEdit(e, share.id)}
+                              className="p-3 rounded-lg border border-blue-200 dark:border-blue-900/60 bg-blue-50/40 dark:bg-blue-950/20 space-y-3"
+                            >
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                                <div className="space-y-1">
+                                  <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                                    Link Label
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={editLabel}
+                                    onChange={(e) =>
+                                      setEditLabel(e.target.value)
+                                    }
+                                    placeholder="e.g. Product & Backend Team"
+                                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+                                  />
+                                </div>
+
+                                <div className="space-y-1">
+                                  <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                                    Schema Target (Version)
+                                  </label>
+                                  <select
+                                    value={editPinnedVersionTag}
+                                    onChange={(e) =>
+                                      setEditPinnedVersionTag(e.target.value)
+                                    }
+                                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+                                  >
+                                    <option value="live">
+                                      Latest Live Workspace (+ Published Versions)
+                                    </option>
+                                    {hasPinnedOutsidePublished &&
+                                      share.pinnedVersionTag && (
+                                        <option value={share.pinnedVersionTag}>
+                                          Pinned Snapshot:{' '}
+                                          {share.pinnedVersionTag}
+                                        </option>
+                                      )}
+                                    {publishedVersions.map((v) => (
+                                      <option key={v.id} value={v.tag}>
+                                        Pinned Snapshot: {v.tag} — {v.title}
+                                      </option>
+                                    ))}
+                                  </select>
+                                </div>
+
+                                <div className="space-y-1">
+                                  <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                                    Landing View
+                                  </label>
+                                  <div className="grid grid-cols-2 gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={() => setEditDefaultView('docs')}
+                                      className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg border text-xs font-medium transition-colors ${
+                                        editDefaultView === 'docs'
+                                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300'
+                                          : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300'
+                                      }`}
+                                    >
+                                      <BookOpen className="w-3.5 h-3.5" />
+                                      <span>Docs</span>
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        setEditDefaultView('diagram')
+                                      }
+                                      className={`flex items-center justify-center gap-1.5 py-1.5 px-2 rounded-lg border text-xs font-medium transition-colors ${
+                                        editDefaultView === 'diagram'
+                                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300'
+                                          : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300'
+                                      }`}
+                                    >
+                                      <LayoutGrid className="w-3.5 h-3.5" />
+                                      <span>Diagram</span>
+                                    </button>
+                                  </div>
+                                </div>
+
+                                <div className="space-y-1">
+                                  <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                                    Expiration
+                                  </label>
+                                  <select
+                                    value={editExpiresMode}
+                                    onChange={(e) => {
+                                      const mode = e.target
+                                        .value as ExpirationMode;
+                                      setEditExpiresMode(mode);
+                                      if (
+                                        mode === 'custom' &&
+                                        !editCustomExpiresAt
+                                      ) {
+                                        setEditCustomExpiresAt(
+                                          getDefaultCustomExpirationValue(
+                                            share.expiresAt
+                                          )
+                                        );
+                                      }
+                                    }}
+                                    className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+                                  >
+                                    <option value="never">Never expires</option>
+                                    <option value="1">1 day from now</option>
+                                    <option value="7">7 days from now</option>
+                                    <option value="30">30 days from now</option>
+                                    <option value="90">90 days from now</option>
+                                    <option value="custom">
+                                      Custom date &amp; time...
+                                    </option>
+                                  </select>
+                                </div>
+
+                                {editExpiresMode === 'custom' && (
+                                  <div className="sm:col-span-2 space-y-1">
+                                    <label className="block text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                                      Custom Expiration Date &amp; Time
+                                    </label>
+                                    <input
+                                      type="datetime-local"
+                                      value={editCustomExpiresAt}
+                                      min={getMinDateTimeLocalValue()}
+                                      onChange={(e) =>
+                                        setEditCustomExpiresAt(e.target.value)
+                                      }
+                                      required
+                                      className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100"
+                                    />
+                                  </div>
+                                )}
+                              </div>
+
+                              <div className="flex items-center justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={handleCancelEdit}
+                                  disabled={savingEdit}
+                                  className="px-3 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-white dark:hover:bg-slate-800"
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  type="submit"
+                                  disabled={savingEdit}
+                                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-60"
+                                >
+                                  {savingEdit && (
+                                    <Loader2 className="w-3 h-3 animate-spin" />
+                                  )}
+                                  <span>
+                                    {savingEdit ? 'Saving...' : 'Save Changes'}
+                                  </span>
+                                </button>
+                              </div>
+                            </form>
+                          )}
 
                           <div className="font-mono text-[11px] text-slate-500 dark:text-slate-400 bg-slate-50 dark:bg-slate-800/60 px-2.5 py-1.5 rounded border border-slate-200/70 dark:border-slate-700/60 truncate">
                             {shareUrl}
