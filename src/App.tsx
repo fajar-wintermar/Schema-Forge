@@ -22,6 +22,7 @@ import { DbmlEditor } from './features/editor/DbmlEditor';
 import { useRemoteWorkspaceSync } from './features/workspace/hooks/useRemoteWorkspaceSync';
 import { useSchemaActions } from './features/workspace/hooks/useSchemaActions';
 import { useWorkspaceStore } from './features/workspace/hooks/useWorkspaceStore';
+import { OfflineIndicator } from './features/pwa/OfflineIndicator';
 import { TableGroupDef, ViewMode } from './types/schema';
 import { MERGED_SCHEMA_VIEW_ID } from './utils/schemaModules';
 
@@ -762,6 +763,9 @@ export default function App() {
             />
           )}
       </div>
+
+      {/* Offline Connectivity Banner */}
+      <OfflineIndicator />
 
       {/* Toast Notification */}
       {toast && (

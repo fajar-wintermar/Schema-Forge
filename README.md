@@ -32,7 +32,8 @@
 - **dbdocs-Style Documentation**: Collapsible left navigation tree (`⌘J` / `Ctrl+J` for `All Tables` or `By Domain`), paginated **Schema Overview**, **Table** and **Domain** detail pages, **Partials** explorer, **Enumerated Types** usage matrix, **Foreign Key Relationships** matrix, and **All Notes** hub.
 - **GitHub-Flavored Markdown**: Supports tables, syntax-highlighted fenced code blocks, callout alerts, read-time estimates, and sticky section outlines.
 
-### Local-First Persistence, Cloud Sync & Shareable Links
+### Local-First Persistence, Offline PWA, Cloud Sync & Shareable Links
+- **Installable Offline PWA**: Includes Web App Manifest, Service Worker app-shell precaching (`vite-plugin-pwa`), desktop/mobile **Install App** prompt (plus iOS Safari Add to Home Screen guide), and live offline connectivity indicator—so you can install SchemaForge to your computer and keep editing, diagramming, and exporting even without internet.
 - **Local-First IndexedDB Storage**: Works offline out of the box—automatically persists workspaces, diagram coordinates, sticky notes, GitHub link metadata, and version snapshots in browser **IndexedDB** (`SchemaForgeLocalDB`).
 - **Optional Cloud Workspaces (Cloudflare D1)**: Sign in with GitHub to sync workspaces, layout positions, sticky notes, and saved versions across devices via **Cloudflare D1** (or local SQLite in Node.js development).
 - **Shareable Read-Only Links (`/share/:token` & `/share/:token/:versionTag`)**: Generate clean read-only Docs and ER Diagram URLs pointing either to the live workspace or pinned to a published version (e.g., `v1.2.0`), with optional expiration and one-click revocation. Viewers can inspect the diagram/docs safely and click **Open Editable Copy** to fork into their own workspace.
@@ -52,7 +53,7 @@
 | Layer | Technology | Purpose |
 | --- | --- | --- |
 | **UI Framework** | [React 19](https://react.dev/) + [TypeScript](https://www.typescriptlang.org/) | Modular feature architecture and strict static typing |
-| **Build Tool & Dev Server** | [Vite 8](https://vite.dev/) (`@vitejs/plugin-react`) | Fast bundling, dev middleware integration, and static production build |
+| **Build Tool & PWA** | [Vite 8](https://vite.dev/) (`@vitejs/plugin-react`, `vite-plugin-pwa`) | Fast bundling, dev middleware integration, Web App Manifest, and offline Service Worker precaching |
 | **Styling & Motion** | [Tailwind CSS v4](https://tailwindcss.com/) (`@tailwindcss/vite`) + [Motion](https://motion.dev/) | Utility-first styling, dark/light themes, and smooth UI transitions |
 | **Code Editor** | [CodeMirror 6](https://codemirror.net/) (`@codemirror/*`, `@lezer/highlight`) | Multi-cursor DBML editor, custom syntax highlighting, folding, linting, and search |
 | **Icons** | [Lucide React](https://lucide.dev/) | Vector icons across editor, canvas, docs, and modals |
@@ -80,7 +81,11 @@
 ├── scripts/
 │   └── sync-migrations.mjs           # Reads migrations/*.sql and generates server/migrations/registry.ts
 ├── public/
-│   └── favicon.svg                   # Application SVG favicon
+│   ├── favicon.svg                   # Application SVG favicon
+│   ├── pwa-192x192.png               # PWA home screen icon (192x192)
+│   ├── pwa-512x512.png               # PWA splash/launcher icon (512x512)
+│   ├── pwa-maskable-512x512.png      # Maskable Android adaptive icon (safe-zone padded)
+│   └── apple-touch-icon.png          # iOS Safari home screen icon (180x180)
 ├── functions/
 │   └── api/
 │       └── [[route]].ts              # Cloudflare Pages Functions catch-all adapter for Hono
@@ -122,6 +127,7 @@
     │   ├── editor/                   # CodeMirror 6 DBML editor, custom grammar/highlighter, diagnostics, folder explorer
     │   ├── github/                   # GitHub OAuth modal, repo/branch/folder browser, diff preview & push
     │   ├── markdown/                 # GFM Markdown parser, callouts, read-time & syntax highlighter
+    │   ├── pwa/                      # PWA install prompt hook/button & offline connectivity banner
     │   ├── share/                    # Read-only SharedViewerPage (/share/:token & /share/:token/:versionTag)
     │   ├── sidebar/                  # Left sidebar for Domains, Modules, Version History & Schema Changelog
     │   └── workspace/                # IndexedDB + Cloud D1 workspace store & modals (Workspaces, Share, Export, Shortcuts)

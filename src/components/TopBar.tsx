@@ -24,6 +24,7 @@ import {
   ViewMode,
 } from '../types/schema';
 import { BrandLogo } from './BrandLogo';
+import { PWAInstallButton } from '../features/pwa/PWAInstallButton';
 
 interface TopBarProps {
   projectName: string;
@@ -201,8 +202,10 @@ export const TopBar: React.FC<TopBarProps> = ({
         </div>
       </div>
 
-      {/* Right: Shortcuts, Theme, Open URL, GitHub, Import/Export, Primary Save Version CTA */}
+      {/* Right: Install, Shortcuts, Theme, Open URL, GitHub, Import/Export, Primary Save Version CTA */}
       <div className="flex items-center gap-2 shrink-0">
+        <PWAInstallButton />
+
         <button
           type="button"
           onClick={onOpenShortcuts}
