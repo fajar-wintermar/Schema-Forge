@@ -7,6 +7,7 @@ import {
   Cloud,
   Copy,
   Eye,
+  Image as ImageIcon,
   LayoutGrid,
   Link2,
   Loader2,
@@ -127,6 +128,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   const [label, setLabel] = useState('');
   const [pinnedVersionTag, setPinnedVersionTag] = useState<string>('live');
   const [defaultView, setDefaultView] = useState<'docs' | 'diagram'>('docs');
+  const [allowDiagramExport, setAllowDiagramExport] = useState(false);
   const [expiresMode, setExpiresMode] = useState<ExpirationMode>('never');
   const [customExpiresAt, setCustomExpiresAt] = useState<string>(() =>
     getDefaultCustomExpirationValue()
@@ -135,12 +137,14 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   // Inline edit state for an existing share link
   const [editingId, setEditingId] = useState<string | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
+  const [togglingExportId, setTogglingExportId] = useState<string | null>(null);
   const [editLabel, setEditLabel] = useState('');
   const [editPinnedVersionTag, setEditPinnedVersionTag] =
     useState<string>('live');
   const [editDefaultView, setEditDefaultView] = useState<'docs' | 'diagram'>(
     'docs'
   );
+  const [editAllowDiagramExport, setEditAllowDiagramExport] = useState(false);
   const [editExpiresMode, setEditExpiresMode] =
     useState<ExpirationMode>('never');
   const [editCustomExpiresAt, setEditCustomExpiresAt] = useState<string>(() =>
@@ -225,6 +229,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
         label: label.trim() || `${workspace.name} Read-Only`,
         pinnedVersionTag: pinnedVersionTag === 'live' ? null : pinnedVersionTag,
         defaultView,
+        allowDiagramExport,
         ...expirationPayload,
       });
 
@@ -251,12 +256,46 @@ export const ShareModal: React.FC<ShareModalProps> = ({
     setEditLabel(share.label);
     setEditPinnedVersionTag(share.pinnedVersionTag || 'live');
     setEditDefaultView(share.defaultView);
+    setEditAllowDiagramExport(Boolean(share.allowDiagramExport));
     if (share.expiresAt) {
       setEditExpiresMode('custom');
       setEditCustomExpiresAt(getDefaultCustomExpirationValue(share.expiresAt));
     } else {
       setEditExpiresMode('never');
       setEditCustomExpiresAt(getDefaultCustomExpirationValue());
+    }
+  };
+
+  const handleToggleDiagramExport = async (share: ShareLinkRecord) => {
+    if (!cloudAuth?.authenticated || share.revokedAt) return;
+    const nextValue = !share.allowDiagramExport;
+    setTogglingExportId(share.id);
+    setError(null);
+    try {
+      const { share: updated } = await updateWorkspaceShare(
+        workspace.id,
+        share.id,
+        { allowDiagramExport: nextValue }
+      );
+      setShares((prev) =>
+        prev.map((item) => (item.id === share.id ? updated : item))
+      );
+      if (editingId === share.id) {
+        setEditAllowDiagramExport(updated.allowDiagramExport);
+      }
+      onShowToast(
+        updated.allowDiagramExport
+          ? 'PNG/SVG diagram export enabled for link'
+          : 'PNG/SVG diagram export disabled for link'
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : 'Failed to update diagram export setting.'
+      );
+    } finally {
+      setTogglingExportId(null);
     }
   };
 
@@ -294,6 +333,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
           pinnedVersionTag:
             editPinnedVersionTag === 'live' ? null : editPinnedVersionTag,
           defaultView: editDefaultView,
+          allowDiagramExport: editAllowDiagramExport,
           ...expirationPayload,
         }
       );
@@ -567,6 +607,38 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                       />
                     </div>
                   )}
+
+                  <div className="sm:col-span-2 flex items-center justify-between gap-3 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <ImageIcon className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+                      <div className="min-w-0">
+                        <div className="text-xs font-semibold text-slate-800 dark:text-slate-100">
+                          Allow Diagram Export (PNG / SVG)
+                        </div>
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                          Let viewers download PNG or SVG snapshots of the diagram
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      role="switch"
+                      aria-checked={allowDiagramExport}
+                      aria-label="Allow Diagram Export (PNG / SVG)"
+                      onClick={() => setAllowDiagramExport((v) => !v)}
+                      className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500/40 ${
+                        allowDiagramExport
+                          ? 'bg-blue-600'
+                          : 'bg-slate-300 dark:bg-slate-700'
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-xs transition-transform ${
+                          allowDiagramExport ? 'translate-x-4' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
                 </div>
 
                 <div className="flex justify-end pt-1">
@@ -722,11 +794,49 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                             )}
                           </div>
 
-                          <div className="flex items-center gap-1.5 text-[11px] text-slate-500 dark:text-slate-400">
-                            <Clock className="w-3 h-3 shrink-0" />
-                            <span>
-                              {formatExpirationSummary(share.expiresAt)}
-                            </span>
+                          <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                            <div className="flex items-center gap-1.5">
+                              <Clock className="w-3 h-3 shrink-0" />
+                              <span>
+                                {formatExpirationSummary(share.expiresAt)}
+                              </span>
+                            </div>
+
+                            {!isRevoked ? (
+                              <div className="flex items-center gap-2">
+                                <span className="inline-flex items-center gap-1 text-[11px] text-slate-600 dark:text-slate-300">
+                                  <ImageIcon className="w-3 h-3 text-slate-400" />
+                                  <span>PNG/SVG Export</span>
+                                </span>
+                                <button
+                                  type="button"
+                                  role="switch"
+                                  aria-checked={Boolean(share.allowDiagramExport)}
+                                  aria-label={`Toggle PNG/SVG diagram export for ${share.label || 'share link'}`}
+                                  disabled={togglingExportId === share.id}
+                                  onClick={() => handleToggleDiagramExport(share)}
+                                  className={`relative inline-flex h-4 w-7 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors disabled:opacity-50 ${
+                                    share.allowDiagramExport
+                                      ? 'bg-blue-600'
+                                      : 'bg-slate-300 dark:bg-slate-700'
+                                  }`}
+                                >
+                                  <span
+                                    className={`pointer-events-none inline-block h-3 w-3 transform rounded-full bg-white shadow-xs transition-transform ${
+                                      share.allowDiagramExport
+                                        ? 'translate-x-3'
+                                        : 'translate-x-0'
+                                    }`}
+                                  />
+                                </button>
+                              </div>
+                            ) : (
+                              <span className="text-[11px] text-slate-400">
+                                {share.allowDiagramExport
+                                  ? 'PNG/SVG export was enabled'
+                                  : 'PNG/SVG export disabled'}
+                              </span>
+                            )}
                           </div>
 
                           {isEditing && (
@@ -864,6 +974,37 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                                     />
                                   </div>
                                 )}
+
+                                <div className="sm:col-span-2 flex items-center justify-between gap-3 px-2.5 py-2 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900">
+                                  <div className="flex items-center gap-2 min-w-0">
+                                    <ImageIcon className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+                                    <span className="text-xs font-medium text-slate-700 dark:text-slate-200">
+                                      Allow Diagram Export (PNG / SVG)
+                                    </span>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    role="switch"
+                                    aria-checked={editAllowDiagramExport}
+                                    aria-label="Allow Diagram Export (PNG / SVG)"
+                                    onClick={() =>
+                                      setEditAllowDiagramExport((v) => !v)
+                                    }
+                                    className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors ${
+                                      editAllowDiagramExport
+                                        ? 'bg-blue-600'
+                                        : 'bg-slate-300 dark:bg-slate-700'
+                                    }`}
+                                  >
+                                    <span
+                                      className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow-xs transition-transform ${
+                                        editAllowDiagramExport
+                                          ? 'translate-x-4'
+                                          : 'translate-x-0'
+                                      }`}
+                                    />
+                                  </button>
+                                </div>
                               </div>
 
                               <div className="flex items-center justify-end gap-2">

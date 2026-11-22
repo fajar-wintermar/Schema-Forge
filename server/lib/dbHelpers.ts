@@ -44,6 +44,7 @@ export interface ShareLinkRow {
   label: string;
   pinned_version_tag: string | null;
   default_view: string;
+  allow_diagram_export: number;
   created_by_login: string;
   created_at: string;
   expires_at: string | null;
@@ -149,6 +150,7 @@ export function shareRowToClient(row: ShareLinkRow) {
     label: row.label,
     pinnedVersionTag: row.pinned_version_tag,
     defaultView: row.default_view === 'diagram' ? 'diagram' : 'docs',
+    allowDiagramExport: Boolean(row.allow_diagram_export),
     createdByLogin: row.created_by_login,
     createdAt: row.created_at,
     expiresAt: row.expires_at,

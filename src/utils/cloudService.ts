@@ -58,6 +58,7 @@ export function createWorkspaceShare(
     label?: string;
     pinnedVersionTag?: string | null;
     defaultView?: 'docs' | 'diagram';
+    allowDiagramExport?: boolean;
     expiresInDays?: number | null;
     expiresAt?: string | null;
   }
@@ -79,6 +80,7 @@ export function updateWorkspaceShare(
     label?: string;
     pinnedVersionTag?: string | null;
     defaultView?: 'docs' | 'diagram';
+    allowDiagramExport?: boolean;
     expiresInDays?: number | null;
     expiresAt?: string | null;
   }

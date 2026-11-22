@@ -260,6 +260,7 @@ export interface ShareLinkRecord {
   label: string;
   pinnedVersionTag: string | null;
   defaultView: 'docs' | 'diagram';
+  allowDiagramExport: boolean;
   createdByLogin: string;
   createdAt: string;
   expiresAt: string | null;
@@ -274,6 +275,7 @@ export interface SharedWorkspacePayload {
     pinnedVersionTag: string | null;
     activeVersionTag: string | null;
     defaultView: 'docs' | 'diagram';
+    allowDiagramExport: boolean;
     workspaceName: string;
     workspaceDescription: string;
     updatedAt: string;

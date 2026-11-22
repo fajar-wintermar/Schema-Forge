@@ -172,6 +172,7 @@ shareRoutes.post('/api/workspaces/:id/shares', async (c) => {
       label?: unknown;
       pinnedVersionTag?: unknown;
       defaultView?: unknown;
+      allowDiagramExport?: unknown;
       expiresInDays?: unknown;
       expiresAt?: unknown;
     }>()
@@ -181,6 +182,13 @@ shareRoutes.post('/api/workspaces/:id/shares', async (c) => {
     typeof body.label === 'string' ? body.label.trim().slice(0, 120) : '';
   const defaultView =
     body.defaultView === 'diagram' ? 'diagram' : 'docs';
+  if (
+    body.allowDiagramExport !== undefined &&
+    typeof body.allowDiagramExport !== 'boolean'
+  ) {
+    return c.json({ error: 'Invalid diagram export setting.' }, 400);
+  }
+  const allowDiagramExport = body.allowDiagramExport === true;
 
   let pinnedVersionTag: string | null = null;
   if (
@@ -220,9 +228,9 @@ shareRoutes.post('/api/workspaces/:id/shares', async (c) => {
     .prepare(
       `INSERT INTO share_links (
          id, token, workspace_id, owner_user_id, label,
-         pinned_version_tag, default_view, created_by_login,
-         created_at, expires_at, revoked_at
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`
+         pinned_version_tag, default_view, allow_diagram_export,
+         created_by_login, created_at, expires_at, revoked_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`
     )
     .bind(
       id,
@@ -232,6 +240,7 @@ shareRoutes.post('/api/workspaces/:id/shares', async (c) => {
       label,
       pinnedVersionTag,
       defaultView,
+      allowDiagramExport ? 1 : 0,
       session.user.login,
       now,
       expiresAt
@@ -246,6 +255,7 @@ shareRoutes.post('/api/workspaces/:id/shares', async (c) => {
       label,
       pinnedVersionTag,
       defaultView,
+      allowDiagramExport,
       createdByLogin: session.user.login,
       createdAt: now,
       expiresAt,
@@ -298,6 +308,7 @@ shareRoutes.patch('/api/workspaces/:id/shares/:shareId', async (c) => {
       label?: unknown;
       pinnedVersionTag?: unknown;
       defaultView?: unknown;
+      allowDiagramExport?: unknown;
       expiresInDays?: unknown;
       expiresAt?: unknown;
     }>()
@@ -321,6 +332,14 @@ shareRoutes.patch('/api/workspaces/:id/shares/:shareId', async (c) => {
       return c.json({ error: 'Invalid default view.' }, 400);
     }
     nextDefaultView = body.defaultView;
+  }
+
+  let nextAllowDiagramExport = existing.allow_diagram_export ? 1 : 0;
+  if (Object.prototype.hasOwnProperty.call(body, 'allowDiagramExport')) {
+    if (typeof body.allowDiagramExport !== 'boolean') {
+      return c.json({ error: 'Invalid diagram export setting.' }, 400);
+    }
+    nextAllowDiagramExport = body.allowDiagramExport ? 1 : 0;
   }
 
   let nextPinnedVersionTag = existing.pinned_version_tag;
@@ -364,13 +383,14 @@ shareRoutes.patch('/api/workspaces/:id/shares/:shareId', async (c) => {
   await db
     .prepare(
       `UPDATE share_links
-       SET label = ?, pinned_version_tag = ?, default_view = ?, expires_at = ?
+       SET label = ?, pinned_version_tag = ?, default_view = ?, allow_diagram_export = ?, expires_at = ?
        WHERE id = ? AND workspace_id = ? AND owner_user_id = ?`
     )
     .bind(
       nextLabel,
       nextPinnedVersionTag,
       nextDefaultView,
+      nextAllowDiagramExport,
       nextExpiresAt,
       shareId,
       workspaceId,
@@ -383,6 +403,7 @@ shareRoutes.patch('/api/workspaces/:id/shares/:shareId', async (c) => {
     label: nextLabel,
     pinned_version_tag: nextPinnedVersionTag,
     default_view: nextDefaultView,
+    allow_diagram_export: nextAllowDiagramExport,
     expires_at: nextExpiresAt,
   };
 
@@ -534,6 +555,7 @@ async function handleResolvePublicShare(c: ApiContext, versionParam?: string) {
       pinnedVersionTag: share.pinned_version_tag,
       activeVersionTag,
       defaultView: share.default_view === 'diagram' ? 'diagram' : 'docs',
+      allowDiagramExport: Boolean(share.allow_diagram_export),
       workspaceName: ws.name,
       workspaceDescription: ws.description,
       updatedAt: ws.updated_at,

@@ -2,6 +2,9 @@ import React, { lazy, Suspense, useCallback, useEffect, useMemo, useState } from
 import {
   AlertCircle,
   BookOpen,
+  ChevronDown,
+  Download,
+  Image as ImageIcon,
   LayoutGrid,
   Loader2,
   Lock,
@@ -27,6 +30,11 @@ import {
 } from '../../types/schema';
 import { autoLayoutSingleGroup, computeAutoLayout } from '../../utils/autoLayout';
 import { fetchPublicShare } from '../../utils/cloudService';
+import {
+  buildDiagramSvg,
+  downloadTextFile,
+  exportDiagramAsPng,
+} from '../../utils/importExport';
 
 const CommandPaletteModal = lazy(() =>
   import('../command/CommandPaletteModal').then((m) => ({
@@ -94,6 +102,10 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
   const [viewStickyNotes, setViewStickyNotes] = useState<StickyNote[]>([]);
   const [viewDetailLevel, setViewDetailLevel] = useState<DetailLevel>('full');
   const [hasCustomLayout, setHasCustomLayout] = useState(false);
+
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [exportingPng, setExportingPng] = useState(false);
+  const [exportFeedback, setExportFeedback] = useState<string | null>(null);
 
   const modKey = useMemo(() => {
     if (typeof navigator === 'undefined') return '⌘';
@@ -218,6 +230,85 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
     resetEphemeralLayout(payload);
     setFocusRequest({ type: 'fit', nonce: Date.now() });
   }, [payload, resetEphemeralLayout]);
+
+  const safeExportBaseName = useMemo(() => {
+    const rawName = payload?.share.workspaceName || 'schema-diagram';
+    const versionSuffix = payload?.share.activeVersionTag
+      ? `-${payload.share.activeVersionTag}`
+      : '';
+    return (
+      `${rawName}${versionSuffix}`
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '') || 'schema-diagram'
+    );
+  }, [payload?.share.workspaceName, payload?.share.activeVersionTag]);
+
+  const handleExportSharedPng = useCallback(
+    async (scale: number) => {
+      if (!payload?.share.allowDiagramExport) return;
+      setExportingPng(true);
+      setExportMenuOpen(false);
+      try {
+        await exportDiagramAsPng({
+          filename: `${safeExportBaseName}-${scale}x.png`,
+          schema: parsedSchema,
+          positions: viewPositions,
+          detailLevel: viewDetailLevel,
+          stickyNotes: viewStickyNotes,
+          darkMode,
+          title: payload.share.workspaceName,
+          scale,
+        });
+        setExportFeedback(`Exported ${scale}x PNG`);
+        setTimeout(() => setExportFeedback(null), 2200);
+      } catch (err) {
+        setExportFeedback(
+          err instanceof Error ? err.message : 'Failed to export PNG'
+        );
+        setTimeout(() => setExportFeedback(null), 3000);
+      } finally {
+        setExportingPng(false);
+      }
+    },
+    [
+      payload,
+      safeExportBaseName,
+      parsedSchema,
+      viewPositions,
+      viewDetailLevel,
+      viewStickyNotes,
+      darkMode,
+    ]
+  );
+
+  const handleExportSharedSvg = useCallback(() => {
+    if (!payload?.share.allowDiagramExport) return;
+    setExportMenuOpen(false);
+    const { svg } = buildDiagramSvg({
+      schema: parsedSchema,
+      positions: viewPositions,
+      detailLevel: viewDetailLevel,
+      stickyNotes: viewStickyNotes,
+      darkMode,
+      title: payload.share.workspaceName,
+    });
+    downloadTextFile(
+      `${safeExportBaseName}.svg`,
+      svg,
+      'image/svg+xml;charset=utf-8'
+    );
+    setExportFeedback('Exported SVG');
+    setTimeout(() => setExportFeedback(null), 2200);
+  }, [
+    payload,
+    parsedSchema,
+    viewPositions,
+    viewDetailLevel,
+    viewStickyNotes,
+    darkMode,
+    safeExportBaseName,
+  ]);
 
   const handleExecuteCommand = (
     item: CommandItem,
@@ -393,6 +484,95 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
               <span>Diagram</span>
             </button>
           </div>
+
+          {payload.share.allowDiagramExport && (
+            <div className="relative">
+              <button
+                type="button"
+                disabled={exportingPng}
+                onClick={() => setExportMenuOpen((o) => !o)}
+                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/80 disabled:opacity-60"
+                title="Export diagram as PNG or SVG"
+              >
+                {exportingPng ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />
+                ) : (
+                  <Download className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                )}
+                <span className="hidden sm:inline">
+                  {exportFeedback || (exportingPng ? 'Exporting...' : 'Export')}
+                </span>
+                <ChevronDown className="w-3 h-3 text-slate-400" />
+              </button>
+
+              {exportMenuOpen && (
+                <>
+                  <div
+                    className="fixed inset-0 z-40"
+                    onClick={() => setExportMenuOpen(false)}
+                  />
+                  <div className="absolute right-0 mt-1.5 w-52 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-lg py-1.5 z-50">
+                    <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
+                      Diagram Export
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void handleExportSharedPng(2)}
+                      className="w-full px-3 py-1.5 text-left text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center justify-between"
+                    >
+                      <span className="flex items-center gap-2">
+                        <ImageIcon className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                        <span>Download PNG</span>
+                      </span>
+                      <span className="font-mono text-[10px] text-slate-400">
+                        2x Hi-Res
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleExportSharedPng(3)}
+                      className="w-full px-3 py-1.5 text-left text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center justify-between"
+                    >
+                      <span className="flex items-center gap-2">
+                        <ImageIcon className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                        <span>Download PNG</span>
+                      </span>
+                      <span className="font-mono text-[10px] text-slate-400">
+                        3x Ultra
+                      </span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void handleExportSharedPng(1)}
+                      className="w-full px-3 py-1.5 text-left text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center justify-between"
+                    >
+                      <span className="flex items-center gap-2">
+                        <ImageIcon className="w-3.5 h-3.5 text-slate-400" />
+                        <span>Download PNG</span>
+                      </span>
+                      <span className="font-mono text-[10px] text-slate-400">
+                        1x Std
+                      </span>
+                    </button>
+                    <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
+                    <button
+                      type="button"
+                      onClick={handleExportSharedSvg}
+                      className="w-full px-3 py-1.5 text-left text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center justify-between"
+                    >
+                      <span className="flex items-center gap-2">
+                        <Download className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+                        <span>Download SVG</span>
+                      </span>
+                      <span className="font-mono text-[10px] text-slate-400">
+                        Vector
+                      </span>
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
 
           <button
             type="button"
