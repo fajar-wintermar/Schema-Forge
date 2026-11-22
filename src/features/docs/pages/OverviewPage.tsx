@@ -8,7 +8,12 @@ import {
   Search,
   Table2,
 } from 'lucide-react';
-import { ParsedSchema, TableDef, TableGroupDef } from '../../../types/schema';
+import {
+  formatDomainLabel,
+  ParsedSchema,
+  TableDef,
+  TableGroupDef,
+} from '../../../types/schema';
 import {
   isRichMarkdownNote,
   stripMarkdownToPlainText,
@@ -292,7 +297,8 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({
       <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 text-xs">
         <span className="text-blue-900 dark:text-blue-100 font-medium">
           Showing tables in selected domain
-          {selectedDomains.length > 1 ? 's' : ''}: {selectedDomains.join(', ')}
+          {selectedDomains.length > 1 ? 's' : ''}:{' '}
+          {selectedDomains.map(formatDomainLabel).join(', ')}
         </span>
         {onClearDomainFilter && (
           <button

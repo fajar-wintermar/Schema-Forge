@@ -1,5 +1,6 @@
 import {
   DetailLevel,
+  formatDomainLabel,
   ParsedSchema,
   SchemaModuleFile,
   StickyNote,
@@ -88,7 +89,7 @@ export function useDiagramSchemaActions({
       ...ws,
       tablePositions: nextPositions,
     }));
-    showToast(`Re-arranged tables in "${groupName}"`);
+    showToast(`Re-arranged tables in "${formatDomainLabel(groupName)}"`);
   };
 
   const handleChangeTableHeaderColor = (

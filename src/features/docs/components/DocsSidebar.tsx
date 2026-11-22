@@ -31,7 +31,7 @@ export interface DocsSidebarProps {
   tableMap: Map<string, TableDef>;
   fkLookup: Map<string, { targetTable: string; targetCol: string; label: string }>;
   allNotesCount: number;
-  isFilteringDomains: boolean;
+  includeUngrouped: boolean;
   navSearch: string;
   nq: string;
   treeMode: TreeFilterMode;
@@ -59,7 +59,7 @@ export const DocsSidebar: React.FC<DocsSidebarProps> = ({
   tableMap,
   fkLookup,
   allNotesCount,
-  isFilteringDomains,
+  includeUngrouped,
   navSearch,
   nq,
   treeMode,
@@ -465,7 +465,7 @@ export const DocsSidebar: React.FC<DocsSidebarProps> = ({
               );
             })}
 
-            {!isFilteringDomains &&
+            {includeUngrouped &&
               ungroupedTables.filter((t) => matchesSearch(t, nq)).length > 0 && (
                 <div className="space-y-0.5 pt-1">
                   <button

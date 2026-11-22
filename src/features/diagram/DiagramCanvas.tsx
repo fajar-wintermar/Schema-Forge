@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { TablePosition } from '../../types/schema';
+import { TablePosition, UNGROUPED_DOMAIN_ID } from '../../types/schema';
 import {
   buildTableInstances,
   computeGroupBoundingBoxes,
@@ -199,6 +199,19 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     [selectedDomains]
   );
 
+  const ungroupedCount = useMemo(
+    () => instances.filter((inst) => inst.groupName === null).length,
+    [instances]
+  );
+
+  const isInstanceInSelectedDomains = useCallback(
+    (inst: (typeof instances)[number]) =>
+      inst.groupName === null
+        ? selectedDomainSet.has(UNGROUPED_DOMAIN_ID)
+        : selectedDomainSet.has(inst.groupName),
+    [selectedDomainSet]
+  );
+
   const visibleGroupBoxes = useMemo(
     () =>
       isFilteringDomains
@@ -210,12 +223,9 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
   const visibleInstances = useMemo(
     () =>
       isFilteringDomains
-        ? instances.filter(
-            (inst) =>
-              inst.groupName !== null && selectedDomainSet.has(inst.groupName)
-          )
+        ? instances.filter((inst) => isInstanceInSelectedDomains(inst))
         : instances,
-    [instances, isFilteringDomains, selectedDomainSet]
+    [instances, isFilteringDomains, isInstanceInSelectedDomains]
   );
 
   const visibleTableIdSet = useMemo(
@@ -228,13 +238,11 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
       isFilteringDomains
         ? resolvedEdges.filter(
             (edge) =>
-              edge.fromInst.groupName !== null &&
-              edge.toInst.groupName !== null &&
-              selectedDomainSet.has(edge.fromInst.groupName) &&
-              selectedDomainSet.has(edge.toInst.groupName)
+              isInstanceInSelectedDomains(edge.fromInst) &&
+              isInstanceInSelectedDomains(edge.toInst)
           )
         : resolvedEdges,
-    [resolvedEdges, isFilteringDomains, selectedDomainSet]
+    [resolvedEdges, isFilteringDomains, isInstanceInSelectedDomains]
   );
 
   const visibleStickyNotes = useMemo(
@@ -529,8 +537,29 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         y: rect.height / 2 - (p.y + h / 2) * zoom,
       });
     } else if (focusRequest.type === 'group' && focusRequest.id) {
-      const gb = groupBoxes.find((b) => b.name === focusRequest.id);
-      if (gb) fitBounds([gb]);
+      if (focusRequest.id === UNGROUPED_DOMAIN_ID) {
+        const ungroupedBoxes = instances
+          .filter((i) => i.groupName === null)
+          .map((inst) => {
+            const p =
+              positions[inst.posKey] || positions[inst.table.id] || { x: 0, y: 0 };
+            return {
+              x: p.x,
+              y: p.y,
+              width: TABLE_WIDTH,
+              height: getTableHeight(
+                inst.table,
+                detailLevel,
+                fkColsByTable.get(inst.table.id),
+                false
+              ),
+            };
+          });
+        if (ungroupedBoxes.length > 0) fitBounds(ungroupedBoxes);
+      } else {
+        const gb = groupBoxes.find((b) => b.name === focusRequest.id);
+        if (gb) fitBounds([gb]);
+      }
     }
   }, [focusRequest]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -889,6 +918,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
 
       <DomainFilterBar
         tableGroups={schema.tableGroups}
+        ungroupedCount={ungroupedCount}
         selectedDomains={selectedDomains}
         selectedDomainSet={selectedDomainSet}
         isFilteringDomains={isFilteringDomains}

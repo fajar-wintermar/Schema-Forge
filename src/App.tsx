@@ -23,7 +23,7 @@ import { useRemoteWorkspaceSync } from './features/workspace/hooks/useRemoteWork
 import { useSchemaActions } from './features/workspace/hooks/useSchemaActions';
 import { useWorkspaceStore } from './features/workspace/hooks/useWorkspaceStore';
 import { OfflineIndicator } from './features/pwa/OfflineIndicator';
-import { TableGroupDef, ViewMode } from './types/schema';
+import { TableGroupDef, UNGROUPED_DOMAIN_ID, ViewMode } from './types/schema';
 import { MERGED_SCHEMA_VIEW_ID } from './utils/schemaModules';
 
 const CommandPaletteModal = lazy(() =>
@@ -255,8 +255,15 @@ export default function App() {
   const effectiveSelectedDomains = useMemo(() => {
     if (selectedDomains.length === 0) return [];
     const existing = new Set(parsedSchema.tableGroups.map((g) => g.name));
+    const groupedTableIds = new Set<string>();
+    for (const g of parsedSchema.tableGroups) {
+      for (const t of g.tables) groupedTableIds.add(t);
+    }
+    if (parsedSchema.tables.some((t) => !groupedTableIds.has(t.id))) {
+      existing.add(UNGROUPED_DOMAIN_ID);
+    }
     return selectedDomains.filter((d) => existing.has(d));
-  }, [selectedDomains, parsedSchema.tableGroups]);
+  }, [selectedDomains, parsedSchema.tableGroups, parsedSchema.tables]);
 
   const startSplitResize = (e: React.MouseEvent) => {
     e.preventDefault();

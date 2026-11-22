@@ -4,6 +4,12 @@ export type ViewMode = 'split' | 'diagram' | 'docs';
 
 export type RefRelation = '>' | '<' | '-' | '<>';
 
+export const UNGROUPED_DOMAIN_ID = '__ungrouped__';
+
+export function formatDomainLabel(domainId: string): string {
+  return domainId === UNGROUPED_DOMAIN_ID ? 'Ungrouped' : domainId;
+}
+
 export interface ColumnDef {
   name: string;
   type: string;

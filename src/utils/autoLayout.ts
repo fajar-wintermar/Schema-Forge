@@ -643,7 +643,10 @@ export function autoLayoutSingleGroup(
   detailLevel: DetailLevel
 ): Record<string, TablePosition> {
   const { instances } = buildTableInstances(schema);
-  const subset = instances.filter((i) => i.groupName === groupName);
+  const subset =
+    groupName === '__ungrouped__'
+      ? instances.filter((i) => i.groupName === null)
+      : instances.filter((i) => i.groupName === groupName);
   if (subset.length === 0) return currentPositions;
 
   const fkColsByTable = new Map<string, Set<string>>();

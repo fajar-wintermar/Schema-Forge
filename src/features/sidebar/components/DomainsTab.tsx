@@ -14,7 +14,12 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { ParsedSchema, TableGroupDef } from '../../../types/schema';
+import {
+  formatDomainLabel,
+  ParsedSchema,
+  TableGroupDef,
+  UNGROUPED_DOMAIN_ID,
+} from '../../../types/schema';
 
 export interface DomainsTabProps {
   schema: ParsedSchema;
@@ -119,7 +124,7 @@ export const DomainsTab: React.FC<DomainsTabProps> = ({
           Drag tables to move · Hold Alt + drop to share in multiple domains
         </p>
 
-        {schema.tableGroups.length > 0 && (
+        {(schema.tableGroups.length > 0 || ungroupedTables.length > 0) && (
           <div className="space-y-1.5">
             <div className="grid grid-cols-2 gap-1 p-0.5 rounded-lg bg-slate-100 dark:bg-slate-800/80">
               <button
@@ -136,9 +141,14 @@ export const DomainsTab: React.FC<DomainsTabProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  if (selectedDomains.length === 0 && schema.tableGroups[0]) {
-                    onChangeSelectedDomains([schema.tableGroups[0].name]);
-                    onFocusGroupOnCanvas(schema.tableGroups[0].name);
+                  if (selectedDomains.length === 0) {
+                    const firstTarget =
+                      schema.tableGroups[0]?.name ||
+                      (ungroupedTables.length > 0 ? UNGROUPED_DOMAIN_ID : null);
+                    if (firstTarget) {
+                      onChangeSelectedDomains([firstTarget]);
+                      onFocusGroupOnCanvas(firstTarget);
+                    }
                   }
                 }}
                 className={`py-1 px-2 rounded-md text-[11px] font-medium transition-colors whitespace-nowrap ${
@@ -156,7 +166,7 @@ export const DomainsTab: React.FC<DomainsTabProps> = ({
             {selectedDomains.length > 0 && (
               <div className="flex items-center justify-between px-2.5 py-1.5 rounded-lg bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800 text-xs">
                 <span className="text-blue-800 dark:text-blue-200 truncate font-medium">
-                  {selectedDomains.join(', ')}
+                  {selectedDomains.map(formatDomainLabel).join(', ')}
                 </span>
                 <button
                   type="button"
@@ -454,13 +464,18 @@ export const DomainsTab: React.FC<DomainsTabProps> = ({
         })}
 
         {/* Ungrouped Tables Drop Zone */}
+        {(() => {
+          const isFiltering = selectedDomains.length > 0;
+          const isUngroupedSelected = selectedDomains.includes(UNGROUPED_DOMAIN_ID);
+          const isUngroupedVisible = !isFiltering || isUngroupedSelected;
+          return (
         <div
           onDragOver={(e) => {
             e.preventDefault();
-            setDropHoverGroup('__ungrouped__');
+            setDropHoverGroup(UNGROUPED_DOMAIN_ID);
           }}
           onDragLeave={() => {
-            if (dropHoverGroup === '__ungrouped__') setDropHoverGroup(null);
+            if (dropHoverGroup === UNGROUPED_DOMAIN_ID) setDropHoverGroup(null);
           }}
           onDrop={(e) => {
             e.preventDefault();
@@ -474,18 +489,85 @@ export const DomainsTab: React.FC<DomainsTabProps> = ({
               setDraggedTable(null);
             }
           }}
-          className={`rounded-lg border border-dashed p-2 transition-colors ${
-            dropHoverGroup === '__ungrouped__'
+          className={`rounded-lg border border-dashed p-2 transition-all ${
+            dropHoverGroup === UNGROUPED_DOMAIN_ID
               ? 'border-blue-500 bg-blue-50/40 dark:bg-blue-950/20'
+              : isUngroupedSelected
+              ? 'border-blue-400 dark:border-blue-600 bg-blue-50/30 dark:bg-blue-950/20'
               : 'border-slate-200 dark:border-slate-800'
-          }`}
+          } ${!isUngroupedVisible ? 'opacity-55' : ''}`}
         >
-          <div className="flex items-center justify-between px-1 pb-1.5 text-xs font-medium text-slate-500 dark:text-slate-400">
-            <span className="flex items-center gap-1.5">
-              <LayoutGrid className="w-3.5 h-3.5" />
-              <span>Ungrouped Tables</span>
+          <div className="flex items-center gap-1.5 px-1 pb-1.5 text-xs font-medium text-slate-600 dark:text-slate-300">
+            <button
+              type="button"
+              onClick={() => {
+                if (ungroupedTables.length > 0) {
+                  onFocusGroupOnCanvas(UNGROUPED_DOMAIN_ID);
+                }
+              }}
+              disabled={ungroupedTables.length === 0}
+              title={
+                ungroupedTables.length > 0
+                  ? 'Focus ungrouped tables on canvas'
+                  : 'No ungrouped tables'
+              }
+              className="flex-1 min-w-0 flex items-center gap-1.5 text-left truncate hover:text-blue-600 dark:hover:text-blue-400 disabled:hover:text-inherit disabled:cursor-default"
+            >
+              <LayoutGrid className="w-3.5 h-3.5 shrink-0 text-slate-400" />
+              <span className="truncate font-semibold">Ungrouped Tables</span>
+            </button>
+            <span className="text-[11px] text-slate-400 tabular-nums shrink-0">
+              {ungroupedTables.length}
             </span>
-            <span className="tabular-nums">{ungroupedTables.length}</span>
+            {ungroupedTables.length > 0 && (
+              <div className="flex items-center gap-0.5 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!isFiltering) {
+                      onChangeSelectedDomains([UNGROUPED_DOMAIN_ID]);
+                      onFocusGroupOnCanvas(UNGROUPED_DOMAIN_ID);
+                    } else if (isUngroupedSelected) {
+                      onChangeSelectedDomains(
+                        selectedDomains.filter((d) => d !== UNGROUPED_DOMAIN_ID)
+                      );
+                    } else {
+                      onChangeSelectedDomains([
+                        ...selectedDomains,
+                        UNGROUPED_DOMAIN_ID,
+                      ]);
+                      onFocusGroupOnCanvas(UNGROUPED_DOMAIN_ID);
+                    }
+                  }}
+                  title={
+                    !isFiltering
+                      ? 'Show only ungrouped tables'
+                      : isUngroupedSelected
+                      ? 'Hide ungrouped tables from selection'
+                      : 'Include ungrouped tables in selection'
+                  }
+                  className={`p-1 rounded hover:bg-slate-200/70 dark:hover:bg-slate-700/70 ${
+                    isUngroupedSelected
+                      ? 'text-blue-600 dark:text-blue-400'
+                      : 'text-slate-400'
+                  }`}
+                >
+                  {isUngroupedVisible ? (
+                    <Eye className="w-3 h-3" />
+                  ) : (
+                    <EyeOff className="w-3 h-3" />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onAutoLayoutGroup(UNGROUPED_DOMAIN_ID)}
+                  title="Auto-layout ungrouped tables"
+                  className="p-1 rounded text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-slate-200/70 dark:hover:bg-slate-700/70"
+                >
+                  <Sparkles className="w-3 h-3" />
+                </button>
+              </div>
+            )}
           </div>
           {ungroupedTables.length === 0 ? (
             <p className="text-[11px] text-slate-400 text-center py-1">
@@ -528,6 +610,8 @@ export const DomainsTab: React.FC<DomainsTabProps> = ({
             </div>
           )}
         </div>
+          );
+        })()}
       </div>
     </div>
   );

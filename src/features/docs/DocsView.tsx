@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowUp, ChevronLeft, ChevronRight } from 'lucide-react';
+import { UNGROUPED_DOMAIN_ID } from '../../types/schema';
 import { DocsSidebar } from './components/DocsSidebar';
 import { buildAllNoteEntries, matchesTableQuery } from './noteUtils';
 import { AllNotesPage } from './pages/AllNotesPage';
@@ -182,6 +183,9 @@ export const DocsView: React.FC<DocsViewProps> = ({
   );
 
   const isFilteringDomains = selectedDomains.length > 0;
+  const includeUngrouped =
+    !isFilteringDomains || selectedDomains.includes(UNGROUPED_DOMAIN_ID);
+
   const visibleGroups = useMemo(
     () =>
       schema.tableGroups.filter(
@@ -195,8 +199,11 @@ export const DocsView: React.FC<DocsViewProps> = ({
     for (const g of visibleGroups) {
       for (const t of g.tables) s.add(t);
     }
+    if (includeUngrouped) {
+      for (const t of ungroupedTables) s.add(t.id);
+    }
     return s;
-  }, [visibleGroups]);
+  }, [visibleGroups, includeUngrouped, ungroupedTables]);
 
   const orderedAllTables = useMemo(() => {
     const base = isFilteringDomains
@@ -432,7 +439,7 @@ export const DocsView: React.FC<DocsViewProps> = ({
           tableMap={tableMap}
           fkLookup={fkLookup}
           allNotesCount={allNoteEntries.length}
-          isFilteringDomains={isFilteringDomains}
+          includeUngrouped={includeUngrouped}
           navSearch={navSearch}
           nq={nq}
           treeMode={treeMode}

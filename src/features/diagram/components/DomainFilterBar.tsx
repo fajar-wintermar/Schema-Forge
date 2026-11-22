@@ -1,10 +1,15 @@
 import React from 'react';
 import { Check, ChevronDown, Crosshair, Filter, X } from 'lucide-react';
-import { TableGroupDef } from '../../../types/schema';
+import {
+  formatDomainLabel,
+  TableGroupDef,
+  UNGROUPED_DOMAIN_ID,
+} from '../../../types/schema';
 import type { CrossDomainEdgeMode } from '../types';
 
 export interface DomainFilterBarProps {
   tableGroups: TableGroupDef[];
+  ungroupedCount: number;
   selectedDomains: string[];
   selectedDomainSet: Set<string>;
   isFilteringDomains: boolean;
@@ -25,6 +30,7 @@ export interface DomainFilterBarProps {
 
 export const DomainFilterBar: React.FC<DomainFilterBarProps> = ({
   tableGroups,
+  ungroupedCount,
   selectedDomains,
   selectedDomainSet,
   isFilteringDomains,
@@ -42,13 +48,19 @@ export const DomainFilterBar: React.FC<DomainFilterBarProps> = ({
   onClearFocusSelection,
   onExitFocusMode,
 }) => {
+  const showDomainFilter = tableGroups.length > 0 || isFilteringDomains;
+  const showUngroupedOption =
+    ungroupedCount > 0 || selectedDomainSet.has(UNGROUPED_DOMAIN_ID);
+
   const showBar =
-    tableGroups.length > 0 ||
+    showDomainFilter ||
     hasCrossDomainEdges ||
     crossDomainMode !== 'show' ||
     focusMode;
 
   if (!showBar) return null;
+
+  const isUngroupedChecked = selectedDomainSet.has(UNGROUPED_DOMAIN_ID);
 
   return (
     <div
@@ -57,7 +69,7 @@ export const DomainFilterBar: React.FC<DomainFilterBarProps> = ({
       className="absolute top-3 left-3 z-20 flex flex-col items-start gap-1.5 max-w-[calc(100%-1.5rem)]"
     >
       <div className="flex flex-wrap items-center gap-1.5">
-        {tableGroups.length > 0 && (
+        {showDomainFilter && (
           <div className="flex items-center gap-1 p-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xs shadow-sm">
             <button
               type="button"
@@ -78,6 +90,11 @@ export const DomainFilterBar: React.FC<DomainFilterBarProps> = ({
               <button
                 type="button"
                 onClick={() => onSetDomainMenuOpen((o) => !o)}
+                title={
+                  selectedDomains.length > 0
+                    ? selectedDomains.map(formatDomainLabel).join(', ')
+                    : 'Filter visible domains or ungrouped tables'
+                }
                 className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
                   isFilteringDomains
                     ? 'bg-blue-600 text-white'
@@ -89,7 +106,7 @@ export const DomainFilterBar: React.FC<DomainFilterBarProps> = ({
                   {selectedDomains.length === 0
                     ? 'Only Selected'
                     : selectedDomains.length === 1
-                    ? selectedDomains[0]
+                    ? formatDomainLabel(selectedDomains[0])
                     : `${selectedDomains.length} Domains`}
                 </span>
                 <ChevronDown className="w-3 h-3 shrink-0 opacity-80" />
@@ -190,6 +207,68 @@ export const DomainFilterBar: React.FC<DomainFilterBarProps> = ({
                         </div>
                       );
                     })}
+
+                    {showUngroupedOption && (
+                      <>
+                        {tableGroups.length > 0 && (
+                          <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
+                        )}
+                        <div
+                          className={`flex items-center gap-2 px-2 py-1.5 rounded-lg text-xs transition-colors ${
+                            isUngroupedChecked
+                              ? 'bg-blue-50 dark:bg-blue-950/40 text-blue-900 dark:text-blue-100 font-medium'
+                              : 'text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/50'
+                          }`}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (isUngroupedChecked) {
+                                onChangeSelectedDomains(
+                                  selectedDomains.filter(
+                                    (d) => d !== UNGROUPED_DOMAIN_ID
+                                  )
+                                );
+                              } else {
+                                onChangeSelectedDomains([
+                                  ...selectedDomains,
+                                  UNGROUPED_DOMAIN_ID,
+                                ]);
+                              }
+                            }}
+                            className="flex items-center gap-2 flex-1 min-w-0 text-left"
+                          >
+                            <span
+                              className={`w-3.5 h-3.5 rounded border flex items-center justify-center shrink-0 ${
+                                isUngroupedChecked
+                                  ? 'bg-blue-600 border-blue-600 text-white'
+                                  : 'border-slate-300 dark:border-slate-600'
+                              }`}
+                            >
+                              {isUngroupedChecked && (
+                                <Check className="w-2.5 h-2.5" />
+                              )}
+                            </span>
+                            <span className="w-2.5 h-2.5 rounded-xs border border-dashed border-slate-400 dark:border-slate-500 bg-slate-200/80 dark:bg-slate-700 shrink-0" />
+                            <span className="truncate flex-1">Ungrouped</span>
+                            <span className="text-[10px] text-slate-400 tabular-nums shrink-0">
+                              {ungroupedCount}
+                            </span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              onChangeSelectedDomains([UNGROUPED_DOMAIN_ID]);
+                              onSetDomainMenuOpen(false);
+                            }}
+                            title="Show only ungrouped tables"
+                            className="text-[10px] font-medium text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 px-1 py-0.5 rounded shrink-0"
+                          >
+                            Only
+                          </button>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
               )}
