@@ -36,7 +36,7 @@
 - **Installable Offline PWA**: Includes Web App Manifest, Service Worker app-shell precaching (`vite-plugin-pwa`), desktop/mobile **Install App** prompt (plus iOS Safari Add to Home Screen guide), and live offline connectivity indicator—so you can install SchemaForge to your computer and keep editing, diagramming, and exporting even without internet.
 - **Local-First Encrypted IndexedDB Storage**: Works offline out of the box—persists workspaces, diagram coordinates, sticky notes, GitHub link metadata, and version snapshots in browser **IndexedDB** (`SchemaForgeLocalDB`), encrypted at rest with non-extractable **AES-256-GCM** Web Crypto keys.
 - **Optional Cloud Workspaces (Cloudflare D1)**: Sign in with GitHub to sync workspaces, layout positions, sticky notes, and saved versions across devices via **Cloudflare D1** (or local SQLite in Node.js development).
-- **Shareable View-Only Links (`/share/:token` & `/share/:token/:versionTag`)**: Generate clean view-only Docs and ER Diagram URLs pointing either to the live workspace or pinned to a published version (e.g., `v1.2.0`), with optional expiration and one-click revocation. Viewers can inspect docs, browse the diagram, and temporarily adjust the layout for viewing without copying or accessing the underlying DBML source.
+- **Shareable View-Only Links (`/share/:token` & `/share/:token/:versionTag`)**: Generate and edit clean view-only Docs and ER Diagram URLs pointing either to the live workspace or pinned to a published version (e.g., `v1.2.0`), with preset or custom date/time expiration, one-click revocation, and a per-link toggle to enable or disable **PNG / SVG** diagram exports. Viewers can inspect docs, browse and temporarily rearrange the diagram layout, and export PNG/SVG snapshots (when enabled) without copying or accessing the underlying DBML source.
 - **Version History & Changelog**: Save draft or published snapshots (`⌘S` / `Ctrl+S`), revert with automatic pre-revert checkpoints, and inspect semantic or raw line-by-line diffs between any two versions.
 
 ### GitHub Sync, URL Loader & Import/Export
@@ -77,7 +77,8 @@
 ├── server.ts                         # Node.js entry point (@hono/node-server + local SQLite D1 shim)
 ├── .env.example                      # Environment variable template
 ├── migrations/
-│   └── 0001_init.sql                 # Source-of-truth SQL migrations (auto-synced at build/dev)
+│   ├── 0001_init.sql                 # Initial D1 schema (users, workspaces, versions, share_links)
+│   └── 0002_share_export_toggle.sql  # Per-share PNG/SVG diagram export toggle column
 ├── scripts/
 │   └── sync-migrations.mjs           # Reads migrations/*.sql and generates server/migrations/registry.ts
 ├── public/
@@ -119,7 +120,7 @@
     │   ├── BrandLogo.tsx             # Brand mark component
     │   ├── InspectorDrawer.tsx       # Table, domain, header-color, and sticky-note inspector
     │   ├── OpenUrlModal.tsx          # Load DBML from raw URL / GitHub / Gist & build ?url= links
-    │   └── TopBar.tsx                # Navigation, workspace switcher, Cmd+K trigger, cloud status, share & export
+    │   └── TopBar.tsx                # Grouped navigation: workspace switcher, Cmd+K palette, Sync & I/O menu, Share & Save CTA
     ├── features/
     │   ├── app/                      # Global shortcut hook & root app helpers
     │   ├── command/                  # Global Command Palette modal & fuzzy search engine

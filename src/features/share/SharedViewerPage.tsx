@@ -400,22 +400,22 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
         <div className="flex items-center gap-2.5 min-w-0 flex-1">
           <div className="flex items-center gap-2 shrink-0">
             <BrandLogo className="w-7 h-7 shrink-0" />
-            <span className="text-base font-bold tracking-tight text-slate-900 dark:text-slate-50 hidden sm:inline">
+            <span className="text-base font-bold tracking-tight text-slate-900 dark:text-slate-50 hidden xl:inline whitespace-nowrap">
               SchemaForge
             </span>
           </div>
 
-          <span className="text-slate-300 dark:text-slate-700 hidden sm:inline">
+          <span className="text-slate-300 dark:text-slate-700 shrink-0">
             /
           </span>
 
-          <div className="flex items-center gap-2 min-w-0">
-            <span className="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate max-w-[200px]">
+          <div className="flex items-center gap-2 min-w-0 shrink">
+            <span className="text-sm font-semibold text-slate-800 dark:text-slate-100 truncate min-w-0 max-w-[240px]">
               {payload.share.workspaceName}
             </span>
             <span
               title="View-only share link — layout adjustments are temporary and DBML source cannot be copied"
-              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] font-medium text-slate-600 dark:text-slate-300 shrink-0"
+              className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-[11px] font-medium text-slate-600 dark:text-slate-300 shrink-0"
             >
               <Lock className="w-3 h-3 text-slate-400" />
               <span>View-Only</span>
@@ -430,7 +430,7 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
                 value={selectedVersionTag || 'live'}
                 onChange={(e) => handleVersionChange(e.target.value)}
                 aria-label="Schema version"
-                className="px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono text-[11px] text-slate-700 dark:text-slate-200 shrink-0"
+                className="px-2 py-1 rounded-md border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 font-mono text-[11px] text-slate-700 dark:text-slate-200 shrink-0 max-w-[140px] sm:max-w-[180px]"
               >
                 <option value="live">Latest Live</option>
                 {payload.publishedVersions.map((v) => (
@@ -445,13 +445,15 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
           <button
             type="button"
             onClick={() => setCommandPaletteOpen(true)}
-            className="hidden md:flex flex-1 max-w-[260px] ml-2 items-center justify-between gap-2 px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 text-slate-500 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-600"
+            title={`Open Global Command Palette (${modKey}K)`}
+            aria-label="Open Global Command Palette"
+            className="hidden sm:flex shrink-0 items-center justify-center w-8 h-8 xl:w-48 xl:justify-between xl:gap-2 xl:px-2.5 xl:py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/70 text-slate-500 dark:text-slate-400 hover:border-slate-300 dark:hover:border-slate-600"
           >
-            <span className="flex items-center gap-2 truncate">
+            <span className="flex items-center gap-2 min-w-0">
               <Search className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-              <span className="truncate">Search tables, notes...</span>
+              <span className="hidden xl:inline truncate">Search tables, notes...</span>
             </span>
-            <kbd className="px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-[10px] font-mono text-slate-400">
+            <kbd className="hidden 2xl:inline-block px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-[10px] font-mono text-slate-400 shrink-0">
               {modKey}K
             </kbd>
           </button>
