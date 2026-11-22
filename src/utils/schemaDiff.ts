@@ -1,19 +1,84 @@
 import {
+  CheckDef,
+  CheckDiff,
   ColumnDef,
   ColumnDiff,
   EnumDiff,
   GroupDiff,
+  IndexDef,
+  IndexDiff,
   LineDiffEntry,
   ParsedSchema,
   RefDef,
   RefDiff,
   SchemaDiffResult,
+  SqlDialect,
   TableDiff,
 } from '../types/schema';
 import { parseDbml } from './dbmlParser';
+import {
+  generateSqlMigration,
+  resolveIndexName,
+  SqlMigrationOptions,
+} from './io/sqlMigration';
+
+export { generateSqlMigration };
+export type { SqlMigrationOptions };
+
+export function generateIncrementalSqlMigration(
+  dbmlA: string,
+  dbmlB: string,
+  dialect: SqlDialect = 'postgres',
+  options?: SqlMigrationOptions
+): string {
+  const diff = computeSchemaDiff(dbmlA, dbmlB);
+  return generateSqlMigration(diff, dialect, options);
+}
 
 function refSignature(r: RefDef): string {
   return `${r.fromTable}.${r.fromColumns.join(',')} ${r.relation} ${r.toTable}.${r.toColumns.join(',')}`;
+}
+
+function indexKey(tableName: string, idx: IndexDef): string {
+  if (idx.name) return `name:${idx.name}`;
+  const items = (
+    idx.items ||
+    idx.columns.map((c) => ({
+      value: c.replace(/^`|`$/g, ''),
+      isExpression: c.startsWith('`') && c.endsWith('`'),
+    }))
+  ).map((it) => `${it.isExpression ? 'expr:' : 'col:'}${it.value}`);
+  return `cols:${tableName}:${items.join(',')}${idx.pk ? ':pk' : ''}`;
+}
+
+function compareIndexes(
+  tableName: string,
+  a: IndexDef,
+  b: IndexDef
+): string[] {
+  const changes: string[] = [];
+  const nameA = resolveIndexName(tableName, a);
+  const nameB = resolveIndexName(tableName, b);
+  if (nameA !== nameB) changes.push(`name: ${nameA} -> ${nameB}`);
+  if (Boolean(a.unique) !== Boolean(b.unique)) {
+    changes.push(b.unique ? 'added unique' : 'removed unique');
+  }
+  if (Boolean(a.pk) !== Boolean(b.pk)) {
+    changes.push(b.pk ? 'added pk' : 'removed pk');
+  }
+  if ((a.type || '') !== (b.type || '')) {
+    changes.push(`type: ${a.type || 'default'} -> ${b.type || 'default'}`);
+  }
+  const colsA = (a.items?.map((i) => i.value) || a.columns).join(', ');
+  const colsB = (b.items?.map((i) => i.value) || b.columns).join(', ');
+  if (colsA !== colsB) {
+    changes.push(`columns: (${colsA}) -> (${colsB})`);
+  }
+  return changes;
+}
+
+function checkKey(chk: CheckDef): string {
+  return chk.name ? `name:${chk.name}` : `expr:${chk.expression.trim()}`;
 }
 
 function diffLines(textA: string, textB: string): LineDiffEntry[] {
@@ -87,6 +152,9 @@ function compareColumns(a: ColumnDef, b: ColumnDef): string[] {
   if ((a.defaultValue || '') !== (b.defaultValue || '')) {
     changes.push(`default: ${a.defaultValue || 'none'} -> ${b.defaultValue || 'none'}`);
   }
+  if ((a.check || '') !== (b.check || '')) {
+    changes.push(`check: ${a.check || 'none'} -> ${b.check || 'none'}`);
+  }
   if ((a.note || '') !== (b.note || '')) {
     changes.push('note updated');
   }
@@ -119,6 +187,7 @@ export function computeSchemaDiff(dbmlA: string, dbmlB: string): SchemaDiffResul
   let tablesRemoved = 0;
   let tablesModified = 0;
   let columnsChanged = 0;
+  let indexesChanged = 0;
 
   for (const id of allTableIds) {
     const tA = mapA.get(id);
@@ -127,30 +196,58 @@ export function computeSchemaDiff(dbmlA: string, dbmlB: string): SchemaDiffResul
     if (!tA && tB) {
       tablesAdded++;
       columnsChanged += tB.columns.length;
+      indexesChanged += tB.indexes.filter((idx) => !idx.pk).length;
       tableDiffs.push({
         tableId: id,
         status: 'added',
         groupNames: tableGroupMap.get(id) || [],
+        after: tB,
         columnDiffs: tB.columns.map((c) => ({
           name: c.name,
           status: 'added',
           changes: [`${c.type}${c.pk ? ' [pk]' : ''}`],
           after: c,
         })),
+        indexDiffs: tB.indexes
+          .filter((idx) => !idx.pk)
+          .map((idx) => ({
+            key: indexKey(tB.name, idx),
+            name: resolveIndexName(tB.name, idx),
+            status: 'added',
+            changes: [
+              `(${(idx.items?.map((i) => i.value) || idx.columns).join(', ')})${
+                idx.unique ? ' [unique]' : ''
+              }`,
+            ],
+            after: idx,
+          })),
       });
     } else if (tA && !tB) {
       tablesRemoved++;
       columnsChanged += tA.columns.length;
+      indexesChanged += tA.indexes.filter((idx) => !idx.pk).length;
       tableDiffs.push({
         tableId: id,
         status: 'removed',
         groupNames: tableGroupMap.get(id) || [],
+        before: tA,
         columnDiffs: tA.columns.map((c) => ({
           name: c.name,
           status: 'removed',
           changes: [`${c.type}`],
           before: c,
         })),
+        indexDiffs: tA.indexes
+          .filter((idx) => !idx.pk)
+          .map((idx) => ({
+            key: indexKey(tA.name, idx),
+            name: resolveIndexName(tA.name, idx),
+            status: 'removed',
+            changes: [
+              `(${(idx.items?.map((i) => i.value) || idx.columns).join(', ')})`,
+            ],
+            before: idx,
+          })),
       });
     } else if (tA && tB) {
       const colMapA = new Map(tA.columns.map((c) => [c.name, c]));
@@ -189,6 +286,70 @@ export function computeSchemaDiff(dbmlA: string, dbmlB: string): SchemaDiffResul
         }
       }
 
+      // Indexes diff
+      const idxMapA = new Map(tA.indexes.map((idx) => [indexKey(tA.name, idx), idx]));
+      const idxMapB = new Map(tB.indexes.map((idx) => [indexKey(tB.name, idx), idx]));
+      const allIdxKeys = Array.from(new Set([...idxMapA.keys(), ...idxMapB.keys()]));
+      const indexDiffs: IndexDiff[] = [];
+
+      for (const key of allIdxKeys) {
+        const iA = idxMapA.get(key);
+        const iB = idxMapB.get(key);
+        if (!iA && iB) {
+          indexDiffs.push({
+            key,
+            name: resolveIndexName(tB.name, iB),
+            status: 'added',
+            changes: [
+              `(${(iB.items?.map((i) => i.value) || iB.columns).join(', ')})${
+                iB.unique ? ' [unique]' : ''
+              }`,
+            ],
+            after: iB,
+          });
+        } else if (iA && !iB) {
+          indexDiffs.push({
+            key,
+            name: resolveIndexName(tA.name, iA),
+            status: 'removed',
+            changes: [
+              `(${(iA.items?.map((i) => i.value) || iA.columns).join(', ')})`,
+            ],
+            before: iA,
+          });
+        } else if (iA && iB) {
+          const changes = compareIndexes(tB.name, iA, iB);
+          if (changes.length > 0) {
+            indexDiffs.push({
+              key,
+              name: resolveIndexName(tB.name, iB),
+              status: 'modified',
+              changes,
+              before: iA,
+              after: iB,
+            });
+          }
+        }
+      }
+
+      // Table checks diff
+      const chkMapA = new Map((tA.checks || []).map((c) => [checkKey(c), c]));
+      const chkMapB = new Map((tB.checks || []).map((c) => [checkKey(c), c]));
+      const allChkKeys = Array.from(new Set([...chkMapA.keys(), ...chkMapB.keys()]));
+      const checkDiffs: CheckDiff[] = [];
+
+      for (const key of allChkKeys) {
+        const cA = chkMapA.get(key);
+        const cB = chkMapB.get(key);
+        if (!cA && cB) {
+          checkDiffs.push({ key, status: 'added', after: cB });
+        } else if (cA && !cB) {
+          checkDiffs.push({ key, status: 'removed', before: cA });
+        } else if (cA && cB && cA.expression.trim() !== cB.expression.trim()) {
+          checkDiffs.push({ key, status: 'modified', before: cA, after: cB });
+        }
+      }
+
       const headerColorChanged =
         (tA.headerColor || '') !== (tB.headerColor || '')
           ? { from: tA.headerColor, to: tB.headerColor }
@@ -199,16 +360,27 @@ export function computeSchemaDiff(dbmlA: string, dbmlB: string): SchemaDiffResul
           ? { from: tA.note, to: tB.note }
           : undefined;
 
-      if (colDiffs.length > 0 || headerColorChanged || noteChanged) {
+      if (
+        colDiffs.length > 0 ||
+        indexDiffs.length > 0 ||
+        checkDiffs.length > 0 ||
+        headerColorChanged ||
+        noteChanged
+      ) {
         tablesModified++;
         columnsChanged += colDiffs.length;
+        indexesChanged += indexDiffs.filter((d) => !(d.before?.pk && d.after?.pk)).length;
         tableDiffs.push({
           tableId: id,
           status: 'modified',
           groupNames: tableGroupMap.get(id) || [],
           headerColorChanged,
           noteChanged,
+          before: tA,
+          after: tB,
           columnDiffs: colDiffs,
+          indexDiffs,
+          checkDiffs,
         });
       }
     }
@@ -224,16 +396,28 @@ export function computeSchemaDiff(dbmlA: string, dbmlB: string): SchemaDiffResul
     const rA = refMapA.get(sig);
     const rB = refMapB.get(sig);
     if (!rA && rB) {
-      refDiffs.push({ id: rB.id, label: sig, status: 'added' });
+      refDiffs.push({ id: rB.id, label: sig, status: 'added', after: rB });
     } else if (rA && !rB) {
-      refDiffs.push({ id: rA.id, label: sig, status: 'removed' });
+      refDiffs.push({ id: rA.id, label: sig, status: 'removed', before: rA });
     } else if (rA && rB) {
-      if ((rA.onDelete || '') !== (rB.onDelete || '') || (rA.onUpdate || '') !== (rB.onUpdate || '')) {
+      const details: string[] = [];
+      if ((rA.onDelete || '') !== (rB.onDelete || '')) {
+        details.push(`delete: ${rA.onDelete || 'none'} -> ${rB.onDelete || 'none'}`);
+      }
+      if ((rA.onUpdate || '') !== (rB.onUpdate || '')) {
+        details.push(`update: ${rA.onUpdate || 'none'} -> ${rB.onUpdate || 'none'}`);
+      }
+      if ((rA.name || '') !== (rB.name || '')) {
+        details.push(`name: ${rA.name || 'auto'} -> ${rB.name || 'auto'}`);
+      }
+      if (details.length > 0) {
         refDiffs.push({
           id: rB.id,
           label: sig,
           status: 'modified',
-          detail: `delete: ${rA.onDelete || 'none'} -> ${rB.onDelete || 'none'}`,
+          detail: details.join('; '),
+          before: rA,
+          after: rB,
         });
       }
     }
@@ -304,6 +488,7 @@ export function computeSchemaDiff(dbmlA: string, dbmlB: string): SchemaDiffResul
         status: 'added',
         addedValues: eB.values.map((v) => v.name),
         removedValues: [],
+        after: eB,
       });
     } else if (eA && !eB) {
       enumDiffs.push({
@@ -311,6 +496,7 @@ export function computeSchemaDiff(dbmlA: string, dbmlB: string): SchemaDiffResul
         status: 'removed',
         addedValues: [],
         removedValues: eA.values.map((v) => v.name),
+        before: eA,
       });
     } else if (eA && eB) {
       const valsA = new Set(eA.values.map((v) => v.name));
@@ -323,6 +509,8 @@ export function computeSchemaDiff(dbmlA: string, dbmlB: string): SchemaDiffResul
           status: 'modified',
           addedValues,
           removedValues,
+          before: eA,
+          after: eB,
         });
       }
     }
@@ -339,8 +527,10 @@ export function computeSchemaDiff(dbmlA: string, dbmlB: string): SchemaDiffResul
       tablesRemoved,
       tablesModified,
       columnsChanged,
+      indexesChanged,
       refsChanged: refDiffs.length,
       groupsChanged: groupDiffs.length,
     },
   };
 }
+

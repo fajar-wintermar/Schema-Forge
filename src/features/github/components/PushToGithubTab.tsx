@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   ExternalLink,
   FolderGit2,
@@ -12,11 +12,14 @@ import {
   GithubFileLink,
   GithubRepoLink,
   LineDiffEntry,
+  SchemaDiffResult,
   SchemaModuleFile,
+  SqlDialect,
   WorkspaceProject,
 } from '../../../types/schema';
 import { GithubAuthStatus, GithubRepoInfo } from '../../../utils/remoteService';
 import { cleanFolderPrefix } from '../../../utils/schemaModules';
+import { SqlMigrationViewer } from '../../../components/SqlMigrationViewer';
 
 interface PushToGithubTabProps {
   workspace: WorkspaceProject;
@@ -43,6 +46,7 @@ interface PushToGithubTabProps {
   onSelectPreviewDiffPath: (path: string) => void;
   resolveModularPushPath: (filePath: string, destinationFolder: string) => string;
   diffPreview: { lineDiff: LineDiffEntry[] } | null;
+  fullSchemaDiff: SchemaDiffResult | null;
   changedDiffLines: LineDiffEntry[];
   createNewBranch: boolean;
   onChangeCreateNewBranch: (val: boolean) => void;
@@ -82,6 +86,7 @@ export const PushToGithubTab: React.FC<PushToGithubTabProps> = ({
   onSelectPreviewDiffPath,
   resolveModularPushPath,
   diffPreview,
+  fullSchemaDiff,
   changedDiffLines,
   createNewBranch,
   onChangeCreateNewBranch,
@@ -96,6 +101,8 @@ export const PushToGithubTab: React.FC<PushToGithubTabProps> = ({
   onPush,
 }) => {
   const schemaFiles: SchemaModuleFile[] = workspace.schemaFiles || [];
+  const [previewTab, setPreviewTab] = useState<'diff' | 'sql'>('diff');
+  const [sqlDialect, setSqlDialect] = useState<SqlDialect>('postgres');
 
   if (!authStatus?.connected) {
     return (
@@ -442,20 +449,67 @@ export const PushToGithubTab: React.FC<PushToGithubTabProps> = ({
         </>
       )}
 
-      {/* Schema & Line Diff Preview */}
-      {diffPreview && (
+      {/* Schema & Line Diff / SQL Migration Preview */}
+      {(diffPreview || fullSchemaDiff) && (
         <div className="rounded-lg border border-slate-200 dark:border-slate-800 overflow-hidden">
-          <div className="px-3 py-2 bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between text-xs">
-            <span className="font-semibold text-slate-700 dark:text-slate-300 truncate">
-              {isModularWorkspace ? `Diff: ${previewDiffPath}` : 'Changes to Commit'}
-            </span>
+          <div className="px-3 py-2 bg-slate-50 dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="font-semibold text-slate-700 dark:text-slate-300 truncate">
+                {previewTab === 'sql'
+                  ? 'SQL Migration (Last Synced → Working Draft)'
+                  : isModularWorkspace
+                  ? `Diff: ${previewDiffPath}`
+                  : 'Changes to Commit'}
+              </span>
+              {fullSchemaDiff && (
+                <div className="inline-flex items-center p-0.5 rounded bg-slate-200/70 dark:bg-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setPreviewTab('diff')}
+                    className={`px-2 py-0.5 text-[10px] font-medium rounded ${
+                      previewTab === 'diff'
+                        ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-xs'
+                        : 'text-slate-500 dark:text-slate-400'
+                    }`}
+                  >
+                    DBML Diff
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPreviewTab('sql')}
+                    className={`px-2 py-0.5 text-[10px] font-medium rounded ${
+                      previewTab === 'sql'
+                        ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 shadow-xs'
+                        : 'text-slate-500 dark:text-slate-400'
+                    }`}
+                  >
+                    SQL (ALTER)
+                  </button>
+                </div>
+              )}
+            </div>
             <span className="text-[11px] text-slate-500 tabular-nums shrink-0">
-              {changedDiffLines.length === 0
+              {previewTab === 'sql' && fullSchemaDiff
+                ? `+${fullSchemaDiff.summary.tablesAdded} ~${fullSchemaDiff.summary.tablesModified} -${fullSchemaDiff.summary.tablesRemoved} tables · ${fullSchemaDiff.summary.indexesChanged} idx · ${fullSchemaDiff.summary.refsChanged} FK`
+                : changedDiffLines.length === 0
                 ? 'No edits since last sync'
                 : `${changedDiffLines.filter((l) => l.type === 'added').length} additions · ${changedDiffLines.filter((l) => l.type === 'removed').length} deletions`}
             </span>
           </div>
-          {changedDiffLines.length > 0 ? (
+          {previewTab === 'sql' && fullSchemaDiff ? (
+            <div className="p-3 bg-white dark:bg-slate-950/60">
+              <SqlMigrationViewer
+                diff={fullSchemaDiff}
+                dialect={sqlDialect}
+                onChangeDialect={setSqlDialect}
+                options={{
+                  baseLabel: 'Last Synced Git Commit',
+                  targetLabel: 'Working Draft',
+                }}
+                maxHeightClass="max-h-52"
+              />
+            </div>
+          ) : changedDiffLines.length > 0 && diffPreview ? (
             <div className="max-h-40 overflow-y-auto font-mono text-[11px] divide-y divide-slate-100/60 dark:divide-slate-800/50 bg-white dark:bg-slate-950/60">
               {diffPreview.lineDiff
                 .filter((l) => l.type !== 'context')

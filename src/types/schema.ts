@@ -303,6 +303,8 @@ export interface SharedWorkspacePayload {
   }>;
 }
 
+export type SqlDialect = 'postgres' | 'mysql';
+
 export interface ColumnDiff {
   name: string;
   status: 'added' | 'removed' | 'modified';
@@ -311,13 +313,33 @@ export interface ColumnDiff {
   after?: ColumnDef;
 }
 
+export interface IndexDiff {
+  key: string;
+  name?: string;
+  status: 'added' | 'removed' | 'modified';
+  changes: string[];
+  before?: IndexDef;
+  after?: IndexDef;
+}
+
+export interface CheckDiff {
+  key: string;
+  status: 'added' | 'removed' | 'modified';
+  before?: CheckDef;
+  after?: CheckDef;
+}
+
 export interface TableDiff {
   tableId: string;
   status: 'added' | 'removed' | 'modified';
   groupNames?: string[];
   headerColorChanged?: { from?: string; to?: string };
   noteChanged?: { from?: string; to?: string };
+  before?: TableDef;
+  after?: TableDef;
   columnDiffs: ColumnDiff[];
+  indexDiffs?: IndexDiff[];
+  checkDiffs?: CheckDiff[];
 }
 
 export interface RefDiff {
@@ -325,6 +347,8 @@ export interface RefDiff {
   label: string;
   status: 'added' | 'removed' | 'modified';
   detail?: string;
+  before?: RefDef;
+  after?: RefDef;
 }
 
 export interface GroupDiff {
@@ -341,6 +365,8 @@ export interface EnumDiff {
   status: 'added' | 'removed' | 'modified';
   addedValues: string[];
   removedValues: string[];
+  before?: EnumDef;
+  after?: EnumDef;
 }
 
 export interface LineDiffEntry {
@@ -361,7 +387,9 @@ export interface SchemaDiffResult {
     tablesRemoved: number;
     tablesModified: number;
     columnsChanged: number;
+    indexesChanged: number;
     refsChanged: number;
     groupsChanged: number;
   };
 }
+

@@ -15,7 +15,7 @@ import {
   pushGithubFile,
 } from '../../../utils/remoteService';
 import { computeSchemaDiff } from '../../../utils/schemaDiff';
-import { cleanFolderPrefix } from '../../../utils/schemaModules';
+import { cleanFolderPrefix, mergeSchemaFiles } from '../../../utils/schemaModules';
 import { BatchPushSummary } from '../types';
 
 export interface UseGithubPushSyncParams {
@@ -425,6 +425,35 @@ export function useGithubPushSync({
     workspace.dbml,
   ]);
 
+  const fullSchemaDiff = useMemo(() => {
+    if (isModularWorkspace) {
+      const files = workspace.schemaFiles || [];
+      if (files.length === 0) return null;
+      const folder = repoLinked?.schemaFolder || workspace.schemaFolder || 'schema';
+      const baseFiles = files
+        .filter((f) => f.lastSyncedContent !== undefined)
+        .map((f) => ({ ...f, content: f.lastSyncedContent || '' }));
+      const baseDbml =
+        baseFiles.length > 0
+          ? mergeSchemaFiles(baseFiles, { schemaFolder: folder }).mergedDbml
+          : '';
+      const targetDbml = mergeSchemaFiles(files, {
+        schemaFolder: folder,
+      }).mergedDbml;
+      return computeSchemaDiff(baseDbml, targetDbml);
+    }
+    if (!linked || pushMode !== 'linked') return null;
+    return computeSchemaDiff(linked.lastSyncedDbml, workspace.dbml);
+  }, [
+    isModularWorkspace,
+    workspace.schemaFiles,
+    workspace.schemaFolder,
+    repoLinked?.schemaFolder,
+    linked,
+    pushMode,
+    workspace.dbml,
+  ]);
+
   const changedDiffLines = useMemo(() => {
     if (!diffPreview) return [];
     return diffPreview.lineDiff.filter((l) => l.type !== 'context');
@@ -458,6 +487,7 @@ export function useGithubPushSync({
     pushSuccess,
     batchPushSummary,
     diffPreview,
+    fullSchemaDiff,
     changedDiffLines,
     hasVerifiedPushTarget,
     resolveModularPushPath,

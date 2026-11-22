@@ -204,7 +204,7 @@ githubReadRoutes.get('/api/github/file', async (c) => {
 githubReadRoutes.get('/api/github/folder', async (c) => {
   const owner = (c.req.query('owner') || '').trim();
   const repo = (c.req.query('repo') || '').trim();
-  const branch = (c.req.query('branch') || 'main').trim();
+  const branch = (c.req.query('ref') || c.req.query('branch') || 'main').trim();
   const folder = (c.req.query('folder') || 'schema')
     .trim()
     .replace(/^\/+|\/+$/g, '');
@@ -372,3 +372,76 @@ githubReadRoutes.get('/api/github/folder', async (c) => {
     );
   }
 });
+
+githubReadRoutes.get('/api/github/commits', async (c) => {
+  const owner = (c.req.query('owner') || '').trim();
+  const repo = (c.req.query('repo') || '').trim();
+  const branch = (c.req.query('branch') || '').trim();
+  const path = (c.req.query('path') || '').trim().replace(/^\/+/, '');
+  const rawPerPage = Number(c.req.query('per_page') || '25');
+  const perPage = Number.isFinite(rawPerPage)
+    ? Math.min(Math.max(Math.trunc(rawPerPage), 1), 50)
+    : 25;
+
+  if (!owner || !repo) {
+    return c.json({ error: 'Missing owner or repo parameter.' }, 400);
+  }
+
+  const session = await getGithubSession(c);
+  try {
+    const qs = new URLSearchParams({ per_page: String(perPage) });
+    if (branch) qs.set('sha', branch);
+    if (path) qs.set('path', path);
+
+    const res = await githubApiFetch(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+        repo
+      )}/commits?${qs.toString()}`,
+      session?.accessToken
+    );
+
+    const json = (await res.json()) as
+      | Array<{
+          sha: string;
+          html_url?: string;
+          commit?: {
+            message?: string;
+            author?: { name?: string; date?: string };
+          };
+          author?: { login?: string } | null;
+        }>
+      | { message?: string };
+
+    if (!res.ok || !Array.isArray(json)) {
+      const errMsg = !Array.isArray(json) ? json?.message : undefined;
+      return c.json(
+        { error: errMsg || 'Failed to fetch GitHub commit history.' },
+        (res.status || 400) as 400
+      );
+    }
+
+    const commits = json.map((item) => ({
+      sha: item.sha,
+      shortSha: item.sha.slice(0, 7),
+      message: (item.commit?.message || '').split('\n')[0],
+      authorName:
+        item.commit?.author?.name || item.author?.login || 'Unknown',
+      authorLogin: item.author?.login || null,
+      date: item.commit?.author?.date || '',
+      htmlUrl: item.html_url || '',
+    }));
+
+    return c.json({ commits });
+  } catch (err) {
+    return c.json(
+      {
+        error:
+          err instanceof Error
+            ? err.message
+            : 'Failed to fetch GitHub commit history.',
+      },
+      502
+    );
+  }
+});
+

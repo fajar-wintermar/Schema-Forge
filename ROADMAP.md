@@ -7,18 +7,17 @@
 ## 1. Current State Assessment
 
 ### Strengths (Pros)
-- **Unified Text + Diagram + Docs Workflow**: A single DBML source drives the live code editor, interactive ERD canvas, and engineering documentation portal.
-- **Modular DBML + Real GitHub Integration**: Supports splitting schemas into domain modules (`schema/*.dbml`) with cross-file error line mapping, conflict detection, branch initialization, and batched Git commits.
-- **Domain-First Visual Organization**: `TableGroup` containers, multi-domain shared tables, custom table header colors, sticky architecture notes, cursor mode switching (interact vs. pan), semantic zoom/detail levels, and domain-aware auto-layout.
-- **Rich Documentation Portal**: Renders GitHub-flavored Markdown (tables, syntax-highlighted code blocks, callouts/alerts, sticky `CONTENTS` outlines, and read-time stats) for projects, domains, and tables.
-- **Fast, Portable Stack**: React + TypeScript + Hono runtime compatible with Node.js and Cloudflare Workers/Pages, backed by zero-setup browser `IndexedDB` persistence.
+- **Unified Text + Diagram + Docs Workflow**: A single DBML source drives the live CodeMirror 6 IDE editor, interactive ERD canvas, and engineering documentation portal.
+- **Modular DBML + Real GitHub Integration**: Supports splitting schemas into domain modules (`schema/*.dbml`) with cross-file error line mapping, conflict detection, branch initialization, batched Git commits, commit history inspection, and incremental SQL migration generation.
+- **Incremental SQL Migrations (`ALTER`)**: Compares any two saved version snapshots or Git commits to generate runnable PostgreSQL and MySQL `ALTER TABLE`, `CREATE/DROP INDEX`, enum, and foreign-key migration scripts.
+- **Domain-First Visual Organization & Focus Tools**: `TableGroup` containers (plus explicit filtering/export for **Ungrouped** tables on the canvas), multi-domain shared tables, Focus Neighborhood mode (`F`), orthogonal/curved/bundled edge routing, custom table header colors, and sticky architecture notes.
+- **Rich Documentation Portal & Offline PWA + Cloud Sync**: Renders GitHub-flavored Markdown docs, persists locally in AES-GCM encrypted IndexedDB with full offline PWA support, and optionally syncs to Cloudflare D1 with versioned shareable read-only links (and toggleable PNG/SVG exports).
 
 ### Current Limitations (Cons)
-- **Local-Only Persistence**: Workspaces, diagram coordinates (`tablePositions`), sticky notes, and version snapshots live in browser `IndexedDB`; switching devices or collaborating requires manual GitHub sync or exports.
-- **Custom `<textarea>` Editor Limits**: Lightweight and fast, with Find/Replace, Go-to-Line, and DBML autocomplete, but lacks native multi-cursor editing, block code folding, bracket matching, and granular undo history on programmatic edits.
-- **Partial DBML & SQL Dialect Coverage**: Core DBML is covered, while `TablePartial`, `Checks` blocks, composite/expression indexes, and incremental `ALTER` SQL migration scripts are not yet supported.
-- **Visual Density on Very Large Schemas**: Diagrams with 100+ tables and heavy cross-domain foreign keys need focus-isolation and cleaner connector routing options.
-- **Direct-Push GitHub Flow Only**: Supports pushing commits directly to branches, but lacks an in-app Pull Request workflow and CI automation.
+- **Direct-Push GitHub Flow Only**: Supports pushing commits directly to branches and comparing Git commits, but lacks an in-app **Create Branch & Open Pull Request** flow and CI automation.
+- **Layout Metadata Outside Git**: Table coordinates (`tablePositions`) and sticky notes live in IndexedDB / Cloudflare D1 rather than a tracked `.schemaforge/layout.json` file in Git repositories.
+- **DBML-First Schema Input/Output**: Supports DBML, SQL DDL, incremental SQL migrations, CSV, SVG, and PNG, while third-party ORM importers/exporters (Prisma, Drizzle, OpenAPI) are not yet built.
+- **Standalone Annotations**: Sticky notes attach to tables or domains on the canvas, but do not yet support threaded, resolvable PR review conversations.
 
 ---
 
@@ -27,8 +26,8 @@
 ### Phase 1 — Core Power & Spec Completeness (Weeks 1–4)
 *Goal: Deliver maximum daily engineering value without requiring backend database infrastructure.*
 
-- [ ] **Incremental SQL Migration (`ALTER`) Generator**
-  - Extend `schemaDiff` to emit `ALTER TABLE ... ADD/DROP/ALTER COLUMN`, `CREATE/DROP INDEX`, and foreign-key `ALTER` statements between any two saved snapshots or Git commits (PostgreSQL & MySQL).
+- [x] **Incremental SQL Migration (`ALTER`) Generator**
+  - Extend `schemaDiff` to emit `ALTER TABLE ... ADD/DROP/ALTER COLUMN`, `CREATE/DROP INDEX`, enum, and foreign-key `ALTER` statements between any two saved snapshots or Git commits (PostgreSQL & MySQL).
 - [x] **Full DBML Spec Parity**
   - Add parser, semantic validator, diagram, and docs support for `TablePartial`, `Checks` blocks, expression-based `Indexes`, and extended inline `Ref` metadata.
 - [x] **Diagram Focus & Visual Decluttering**
@@ -84,8 +83,8 @@
 
 ## 3. Recommended Priority Order (Highest Leverage Next)
 
-1. **Incremental SQL Migration (`ALTER`) Export + Focus-on-Selection Dimming** — Immediate day-to-day utility boost with zero new infrastructure.
-2. **`.schemaforge/layout.json` in GitHub Sync + "Open Pull Request" Flow** — Unlocks shared team workflows using GitHub alone.
-3. **CodeMirror 6 Migration** — Eliminates custom textarea limitations before schemas scale larger.
-4. **Prisma / Drizzle Importers & Exporters** — Expands adoption across full-stack TypeScript teams.
-5. **Cloud Persistence & Shareable Docs Links** — Turns SchemaForge into an organization-wide architecture portal.
+1. **`.schemaforge/layout.json` in GitHub Sync + "Open Pull Request" Flow** — Unlocks shared team diagram layouts and PR review workflows using GitHub alone.
+2. **Prisma / Drizzle / OpenAPI Importers & ORM Exporters** — Expands adoption across full-stack TypeScript and Python teams.
+3. **Anchored Review Comments** — Evolve sticky notes into threaded, resolvable discussions on tables, columns, and branches.
+4. **SchemaForge CLI & GitHub Action** — Automate modular DBML validation, PR diff summaries, and static Docs publishing in CI.
+5. **Multi-VCS Support & Live Database Introspection Bridge** — Add GitLab/Bitbucket adapters and `npx schemaforge pull <connection-url>` catalog introspection.

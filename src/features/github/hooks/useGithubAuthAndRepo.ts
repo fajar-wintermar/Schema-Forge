@@ -20,7 +20,7 @@ import { WorkspaceProject } from '../../../types/schema';
 
 export interface UseGithubAuthAndRepoParams {
   workspace: WorkspaceProject;
-  tab: 'browse' | 'push';
+  tab: 'browse' | 'push' | 'migrations';
   onLoadGithubFile: (file: GithubFileResult, openInNewWorkspace: boolean) => void;
   onLoadGithubFolder?: (
     folderResult: GithubFolderResult,

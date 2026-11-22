@@ -11,7 +11,7 @@ import {
 
 export interface GitHubModalProps {
   workspace: WorkspaceProject;
-  initialTab?: 'browse' | 'push';
+  initialTab?: 'browse' | 'push' | 'migrations';
   onLoadGithubFile: (
     file: GithubFileResult,
     openInNewWorkspace: boolean

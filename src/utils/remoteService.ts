@@ -249,6 +249,35 @@ export interface GithubBatchPushResult {
   }>;
 }
 
+export interface GithubCommitInfo {
+  sha: string;
+  shortSha: string;
+  message: string;
+  authorName: string;
+  authorLogin: string | null;
+  date: string;
+  htmlUrl: string;
+}
+
+export function getGithubCommits(params: {
+  owner: string;
+  repo: string;
+  branch?: string;
+  path?: string;
+  perPage?: number;
+}): Promise<{ commits: GithubCommitInfo[] }> {
+  const qs = new URLSearchParams({
+    owner: params.owner,
+    repo: params.repo,
+  });
+  if (params.branch) qs.set('branch', params.branch);
+  if (params.path) qs.set('path', params.path);
+  if (params.perPage) qs.set('per_page', String(params.perPage));
+  return apiRequest<{ commits: GithubCommitInfo[] }>(
+    `/api/github/commits?${qs.toString()}`
+  );
+}
+
 export function getGithubFolderFiles(
   owner: string,
   repo: string,

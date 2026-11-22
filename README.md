@@ -18,11 +18,11 @@
 - **Modular `.dbml` File Workspace**: Organize large schemas across multiple `schema/*.dbml` modules with split, merge, rename, create, delete, and merged read-only preview support.
 
 ### Interactive ER Diagram & Visual Decluttering
-- **Business-Domain Table Groups (`TableGroup`)**: Cluster tables into functional domains, assign shared core tables (e.g., `users`, `organizations`, `audit_logs`) to multiple domains simultaneously, reorder columns/tables, and filter visibility (`All Domains` vs. `Only Selected`).
+- **Business-Domain Table Groups (`TableGroup`) & Ungrouped Filtering**: Cluster tables into functional domains, assign shared core tables (e.g., `users`, `organizations`, `audit_logs`) to multiple domains simultaneously, reorder columns/tables, and filter visibility on the diagram canvas (`All Domains` vs. `Only Selected`, including dedicated filtering and visibility toggles for **Ungrouped** tables without affecting Docs).
 - **Focus Neighborhood Mode (`F`)**: Click any table to isolate its 1-hop upstream and downstream relationships while dimming unrelated tables, edges, groups, and sticky notes.
 - **Orthogonal & Curved Edge Routing**: Switch between curved Bézier connectors (`Curved`) and right-angle orthogonal routing (`Ortho`) on the canvas toolbar.
 - **Cross-Domain Edge Toggles**: Choose **Show**, **Bundle** (collapses edges between domain pairs into labeled summary trunks), or **Hide** on crowded multi-domain canvases.
-- **Canvas Controls**: Switch between **Select** (`V`) and **Pan** (`H`) modes, toggle **Grid Snap** and **Minimap**, switch table detail visibility (**All Fields**, **Keys Only**, **Names Only**), customize table header colors, attach color-coded **Sticky Notes**, and run **Auto Layout** (globally or per domain).
+- **Canvas Controls**: Switch between **Select** (`V`) and **Pan** (`H`) modes, toggle **Grid Snap** and **Minimap**, switch table detail visibility (**All Fields**, **Keys Only**, **Names Only**), customize table header colors, attach color-coded **Sticky Notes**, and run **Auto Layout** (globally or per domain/ungrouped group).
 
 ### Global Command Palette (`⌘K` / `Ctrl+K`)
 - Instant fuzzy search across tables, columns, business domains (`TableGroup`), `TablePartial` mixins, Markdown & sticky notes, `.dbml` modules, and quick actions.
@@ -37,14 +37,14 @@
 - **Local-First Encrypted IndexedDB Storage**: Works offline out of the box—persists workspaces, diagram coordinates, sticky notes, GitHub link metadata, and version snapshots in browser **IndexedDB** (`SchemaForgeLocalDB`), encrypted at rest with non-extractable **AES-256-GCM** Web Crypto keys.
 - **Optional Cloud Workspaces (Cloudflare D1)**: Sign in with GitHub to sync workspaces, layout positions, sticky notes, and saved versions across devices via **Cloudflare D1** (or local SQLite in Node.js development).
 - **Shareable View-Only Links (`/share/:token` & `/share/:token/:versionTag`)**: Generate and edit clean view-only Docs and ER Diagram URLs pointing either to the live workspace or pinned to a published version (e.g., `v1.2.0`), with preset or custom date/time expiration, one-click revocation, and a per-link toggle to enable or disable **PNG / SVG** diagram exports. Viewers can inspect docs, browse and temporarily rearrange the diagram layout, and export PNG/SVG snapshots (when enabled) without copying or accessing the underlying DBML source.
-- **Version History & Changelog**: Save draft or published snapshots (`⌘S` / `Ctrl+S`), revert with automatic pre-revert checkpoints, and inspect semantic or raw line-by-line diffs between any two versions.
+- **Version History, Changelog & Incremental SQL Migrations (`ALTER`)**: Save draft or published snapshots (`⌘S` / `Ctrl+S`), revert with automatic pre-revert checkpoints, inspect semantic or raw line-by-line diffs between any two snapshots, and generate syntax-highlighted **Incremental SQL Migrations** (`ALTER TABLE ... ADD/DROP/ALTER COLUMN`, `CREATE/DROP INDEX`, enum updates, and `ALTER TABLE ... FOREIGN KEY` statements) for **PostgreSQL** and **MySQL** with one-click copy and `.sql` download.
 
-### GitHub Sync, URL Loader & Import/Export
-- **Two-Way GitHub Repository Sync**: Sign in via GitHub OAuth, browse repositories/branches/files, load single `.dbml` files or multi-file `schema/*.dbml` folders, preview schema & line diffs, reconcile remote SHA updates, and commit/push back to the linked branch or a new branch.
+### GitHub Sync, Commit Migrations, URL Loader & Scoped Export
+- **Two-Way GitHub Repository Sync & Git Commit Migrations**: Sign in via GitHub OAuth, browse repositories/branches/files, load single `.dbml` files or multi-file `schema/*.dbml` folders, preview schema diffs & incremental SQL migrations before committing, compare **any two Git commits** (or a commit vs. Working Draft) to emit PostgreSQL/MySQL `ALTER` migrations, reconcile remote SHA updates, and commit/push to existing or new branches.
 - **View DBML from URL**: Load public `.dbml` files from raw URLs, GitHub `blob` URLs, or GitHub Gists via **Open URL** or `?url=<encoded_url>`.
-- **Import & Export**:
+- **Import & Scoped Domain Export**:
   - **Import**: DBML, PostgreSQL/MySQL/SQL DDL (`CREATE TABLE`, `ALTER TABLE ... FOREIGN KEY`), CSV column definitions, and remote `.dbml` URLs.
-  - **Export**: DBML, PostgreSQL/MySQL DDL, CSV data dictionary, **SVG**, and **high-resolution PNG**.
+  - **Export**: DBML, PostgreSQL/MySQL DDL, CSV data dictionary, **SVG**, and **high-resolution PNG** — export the **All Domains & Tables** workspace or scope any export strictly to **Selected Domains** (including **Ungrouped** tables).
 
 ---
 
@@ -104,7 +104,7 @@
 │   └── routes/
 │       ├── auth.ts                   # GitHub OAuth login, callback, logout & /api/auth/me
 │       ├── fetchUrl.ts               # Safe remote DBML URL / GitHub blob / Gist proxy
-│       ├── github/                   # GitHub repos, branches, single-file & folder sync handlers
+│       ├── github/                   # GitHub repos, branches, commit history, single-file & folder sync handlers
 │       ├── share.ts                  # Owner share-link management & public read-only /api/share/:token
 │       └── workspaces.ts             # Authenticated /api/workspaces CRUD synced to D1
 └── src/
@@ -112,7 +112,7 @@
     ├── App.tsx                       # Root workspace orchestration & /share/:token routing
     ├── index.css                     # Global Tailwind v4 styles and scrollbar/editor rules
     ├── types/
-    │   └── schema.ts                 # Core TypeScript models (Workspace, ParsedSchema, ShareLink, etc.)
+    │   └── schema.ts                 # Core TypeScript models (Workspace, ParsedSchema, ShareLink, SchemaDiffResult)
     ├── db/
     │   ├── localCrypto.ts            # AES-256-GCM sealing/unsealing for local storage
     │   └── localDb.ts                # Encrypted IndexedDB wrapper for offline workspaces & preferences
@@ -120,26 +120,27 @@
     │   ├── BrandLogo.tsx             # Brand mark component
     │   ├── InspectorDrawer.tsx       # Table, domain, header-color, and sticky-note inspector
     │   ├── OpenUrlModal.tsx          # Load DBML from raw URL / GitHub / Gist & build ?url= links
-    │   └── TopBar.tsx                # Grouped navigation: workspace switcher, Cmd+K palette, Sync & I/O menu, Share & Save CTA
+    │   ├── SqlMigrationViewer.tsx    # Incremental ALTER SQL migration viewer (PostgreSQL/MySQL), copy & .sql export
+    │   └── TopBar.tsx                # Responsive grouped navigation: workspace switcher, Cmd+K palette, Sync & I/O menu, Share & Save CTA
     ├── features/
     │   ├── app/                      # Global shortcut hook & root app helpers
     │   ├── command/                  # Global Command Palette modal & fuzzy search engine
     │   ├── diagram/                  # ER canvas, TableCards, DomainFilterBar, Focus mode, orthogonal/bundled edges, minimap
     │   ├── docs/                     # dbdocs-style Schema, Domain, Table, Partials, Enums, Refs & Notes views
     │   ├── editor/                   # CodeMirror 6 DBML editor, custom grammar/highlighter, diagnostics, folder explorer
-    │   ├── github/                   # GitHub OAuth modal, repo/branch/folder browser, diff preview & push
+    │   ├── github/                   # GitHub OAuth modal, repo/branch/folder browser, commit SQL migrations, diff preview & push
     │   ├── markdown/                 # GFM Markdown parser, callouts, read-time & syntax highlighter
     │   ├── pwa/                      # PWA install prompt hook/button & offline connectivity banner
     │   ├── share/                    # Read-only SharedViewerPage (/share/:token & /share/:token/:versionTag)
-    │   ├── sidebar/                  # Left sidebar for Domains, Modules, Version History & Schema Changelog
-    │   └── workspace/                # IndexedDB + Cloud D1 workspace store & modals (Workspaces, Share, Export, Shortcuts)
+    │   ├── sidebar/                  # Left sidebar for Domains, Modules, Version History & Schema Changelog (Semantic, SQL ALTER, Raw)
+    │   └── workspace/                # IndexedDB + Cloud D1 workspace store & modals (Workspaces, Share, Scoped Export, Shortcuts)
     └── utils/
         ├── dbml/                     # DBML tokenizer, parser, mutators, AST helpers & sample schemas
-        ├── highlight/                # Syntax highlighting utilities for code blocks
-        ├── io/                       # Auto-layout, edge geometry, SQL/CSV/DBML converters, SVG/PNG export
+        ├── highlight/                # Syntax highlighting utilities for SQL, DBML & code blocks
+        ├── io/                       # Auto-layout, edge geometry, SQL/CSV/DBML converters, SQL ALTER migration generator, SVG/PNG export
         ├── cloudService.ts           # Client API calls for D1 workspaces & share links
-        ├── remoteService.ts          # Client API calls for auth state, URL proxy & GitHub sync
-        ├── schemaDiff.ts             # Semantic & line-level schema diff generator
+        ├── remoteService.ts          # Client API calls for auth state, URL proxy & GitHub sync/commits
+        ├── schemaDiff.ts             # Semantic, index, FK, line-level diff & incremental SQL migration generator
         └── schemaModules.ts          # Multi-file .dbml module splitting & merging helpers
 ```
 

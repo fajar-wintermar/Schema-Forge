@@ -9,6 +9,7 @@ import {
   AuthStatusHeader,
   OAuthConfigNotice,
 } from './components/AuthStatusHeader';
+import { GitCommitsMigrationTab } from './components/GitCommitsMigrationTab';
 import { LoadFromGithubTab } from './components/LoadFromGithubTab';
 import { PushToGithubTab } from './components/PushToGithubTab';
 import { RepoSelectorCard } from './components/RepoSelectorCard';
@@ -40,7 +41,7 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
     ? hasModularLocalChanges
     : Boolean(linked && workspace.dbml !== linked.lastSyncedDbml);
 
-  const [tab, setTab] = useState<'browse' | 'push'>(
+  const [tab, setTab] = useState<'browse' | 'push' | 'migrations'>(
     initialTab || (linked || repoLinked ? 'push' : 'browse')
   );
   const [error, setError] = useState<string | null>(null);
@@ -135,6 +136,20 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
               {hasLocalChanges && (
                 <span className="w-2 h-2 rounded-full bg-amber-500" />
               )}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setTab('migrations');
+                setError(null);
+              }}
+              className={`px-3.5 py-2 text-xs font-semibold border-b-2 transition-colors ${
+                tab === 'migrations'
+                  ? 'border-blue-600 text-blue-600 dark:text-blue-400'
+                  : 'border-transparent text-slate-500 hover:text-slate-800 dark:hover:text-slate-200'
+              }`}
+            >
+              SQL Migrations
             </button>
           </div>
 
@@ -294,7 +309,7 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
                 setError(null);
               }}
             />
-          ) : (
+          ) : tab === 'push' ? (
             <PushToGithubTab
               workspace={workspace}
               isModularWorkspace={isModularWorkspace}
@@ -320,6 +335,7 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
               onSelectPreviewDiffPath={push.setPreviewDiffPath}
               resolveModularPushPath={push.resolveModularPushPath}
               diffPreview={push.diffPreview}
+              fullSchemaDiff={push.fullSchemaDiff}
               changedDiffLines={push.changedDiffLines}
               createNewBranch={push.createNewBranch}
               onChangeCreateNewBranch={push.setCreateNewBranch}
@@ -332,6 +348,20 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
               pushing={push.pushing}
               hasVerifiedPushTarget={push.hasVerifiedPushTarget}
               onPush={() => push.handlePush(false)}
+            />
+          ) : (
+            <GitCommitsMigrationTab
+              workspace={workspace}
+              isModularWorkspace={isModularWorkspace}
+              linked={linked}
+              repoLinked={repoLinked}
+              hasLocalChanges={hasLocalChanges}
+              selectedRepo={repo.selectedRepo}
+              selectedBranch={repo.selectedBranch}
+              onBranchChange={repo.handleBranchChange}
+              treeFiles={repo.treeFiles}
+              dbmlFolders={repo.dbmlFolders}
+              onError={setError}
             />
           )}
         </div>
