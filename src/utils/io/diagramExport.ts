@@ -4,6 +4,7 @@ import {
   StickyNote,
   TableDef,
   TablePosition,
+  UNGROUPED_DOMAIN_ID,
 } from '../../types/schema';
 import {
   buildTableInstances,
@@ -51,6 +52,7 @@ export function buildDiagramSvg(params: {
   darkMode: boolean;
   title?: string;
   edgeRouting?: EdgeRoutingMode;
+  selectedDomains?: string[];
 }): { svg: string; width: number; height: number } {
   const {
     schema,
@@ -60,6 +62,7 @@ export function buildDiagramSvg(params: {
     darkMode,
     title,
     edgeRouting = 'bezier',
+    selectedDomains = [],
   } = params;
 
   const fkColsByTable = new Map<string, Set<string>>();
@@ -68,15 +71,43 @@ export function buildDiagramSvg(params: {
     for (const c of r.fromColumns) fkColsByTable.get(r.fromTable)!.add(c);
   }
 
-  const groupBoxes = computeGroupBoundingBoxes(
+  const allGroupBoxes = computeGroupBoundingBoxes(
     schema,
     positions,
     detailLevel,
     fkColsByTable
   );
 
-  const { instances } = buildTableInstances(schema);
-  const resolvedEdges = resolveSchemaEdges(schema, instances, positions);
+  const { instances: allInstances } = buildTableInstances(schema);
+  const allResolvedEdges = resolveSchemaEdges(schema, allInstances, positions);
+
+  const isFilteringDomains = selectedDomains.length > 0;
+  const selectedDomainSet = new Set(selectedDomains);
+  const isInstVisible = (inst: (typeof allInstances)[number]) =>
+    !isFilteringDomains ||
+    (inst.groupName === null
+      ? selectedDomainSet.has(UNGROUPED_DOMAIN_ID)
+      : selectedDomainSet.has(inst.groupName));
+
+  const groupBoxes = isFilteringDomains
+    ? allGroupBoxes.filter((gb) => selectedDomainSet.has(gb.name))
+    : allGroupBoxes;
+  const instances = isFilteringDomains
+    ? allInstances.filter(isInstVisible)
+    : allInstances;
+  const visibleTableIds = new Set(instances.map((i) => i.table.id));
+  const resolvedEdges = isFilteringDomains
+    ? allResolvedEdges.filter(
+        (e) => isInstVisible(e.fromInst) && isInstVisible(e.toInst)
+      )
+    : allResolvedEdges;
+  const visibleStickyNotes = isFilteringDomains
+    ? stickyNotes.filter((note) => {
+        if (!note.linkedTarget?.startsWith('table:')) return true;
+        const tableId = note.linkedTarget.slice('table:'.length);
+        return visibleTableIds.has(tableId);
+      })
+    : stickyNotes;
 
   let minX = Infinity;
   let minY = Infinity;
@@ -104,7 +135,7 @@ export function buildDiagramSvg(params: {
     maxY = Math.max(maxY, gb.y + gb.height);
   }
 
-  for (const note of stickyNotes) {
+  for (const note of visibleStickyNotes) {
     minX = Math.min(minX, note.x);
     minY = Math.min(minY, note.y);
     maxX = Math.max(maxX, note.x + note.width);
@@ -156,8 +187,11 @@ export function buildDiagramSvg(params: {
         title
       )}</text>`
     );
+    const domainCountLabel = isFilteringDomains
+      ? groupBoxes.length
+      : schema.tableGroups.length;
     parts.push(
-      `<text x="${width - margin}" y="${42}" text-anchor="end" class="sans" font-size="12" fill="${textSecondary}">${schema.tables.length} tables · ${schema.tableGroups.length} domains · ${schema.refs.length} relationships</text>`
+      `<text x="${width - margin}" y="${42}" text-anchor="end" class="sans" font-size="12" fill="${textSecondary}">${visibleTableIds.size} tables · ${domainCountLabel} domains · ${resolvedEdges.length} relationships</text>`
     );
   }
 
@@ -309,7 +343,7 @@ export function buildDiagramSvg(params: {
     slate: { bg: '#f1f5f9', border: '#64748b', text: '#0f172a' },
   };
 
-  for (const note of stickyNotes) {
+  for (const note of visibleStickyNotes) {
     const pal = notePalette[note.color] || notePalette.amber;
     const nh = note.collapsed ? 42 : 140;
     parts.push(
@@ -361,6 +395,7 @@ export async function exportDiagramAsPng(params: {
   darkMode: boolean;
   title?: string;
   scale?: number;
+  selectedDomains?: string[];
 }): Promise<void> {
   const scale = params.scale || 2;
   const { svg, width, height } = buildDiagramSvg(params);

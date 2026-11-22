@@ -50,7 +50,6 @@ export const TableDetailPage: React.FC<TableDetailPageProps> = ({
   const parentGroups = (domainsByTable.get(activeTable.id) || [])
     .map((dom) => schema.tableGroups.find((g) => g.name === dom))
     .filter((g): g is NonNullable<typeof g> => Boolean(g));
-  const groupsWithNotes = parentGroups.filter((g) => Boolean(g.note?.trim()));
   const tableStickyNotes = stickyNotes.filter(
     (sn) => sn.linkedTarget === `table:${activeTable.id}`
   );
@@ -82,58 +81,23 @@ export const TableDetailPage: React.FC<TableDetailPageProps> = ({
       </div>
 
       {parentGroups.length > 0 && (
-        <div className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2 text-xs">
-            <span className="text-slate-400">Business Domains:</span>
-            {parentGroups.map((grp) => (
-              <button
-                key={grp.name}
-                type="button"
-                onClick={() =>
-                  onNavigateSection({ kind: 'group', groupName: grp.name })
-                }
-                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:border-blue-400"
-              >
-                <span
-                  className="w-2 h-2 rounded-xs"
-                  style={{ backgroundColor: grp.color || '#2563EB' }}
-                />
-                <span>{grp.name}</span>
-              </button>
-            ))}
-          </div>
-
-          {groupsWithNotes.map((grp) => (
-            <div
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="text-slate-400">Business Domains:</span>
+          {parentGroups.map((grp) => (
+            <button
               key={grp.name}
-              className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-5 py-3.5 space-y-2"
+              type="button"
+              onClick={() =>
+                onNavigateSection({ kind: 'group', groupName: grp.name })
+              }
+              className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:border-blue-400"
             >
-              <div className="flex items-center justify-between gap-2 text-xs">
-                <span className="inline-flex items-center gap-2 font-semibold text-slate-800 dark:text-slate-100">
-                  <span
-                    className="w-2.5 h-2.5 rounded-xs shrink-0"
-                    style={{ backgroundColor: grp.color || '#2563EB' }}
-                  />
-                  <span>TableGroup Note · {grp.name}</span>
-                </span>
-                <button
-                  type="button"
-                  onClick={() =>
-                    onNavigateSection({ kind: 'group', groupName: grp.name })
-                  }
-                  className="text-blue-600 dark:text-blue-400 hover:underline font-medium"
-                >
-                  Open Group Docs →
-                </button>
-              </div>
-              <TrimmableNote
-                key={`tbl-grp-${activeTable.id}-${grp.name}`}
-                content={grp.note!}
-                compact
-                maxChars={180}
-                defaultExpanded={false}
+              <span
+                className="w-2 h-2 rounded-xs"
+                style={{ backgroundColor: grp.color || '#2563EB' }}
               />
-            </div>
+              <span>{grp.name}</span>
+            </button>
           ))}
         </div>
       )}

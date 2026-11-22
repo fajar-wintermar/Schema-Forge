@@ -808,6 +808,7 @@ export default function App() {
             positions={activeWorkspace.tablePositions}
             detailLevel={activeWorkspace.detailLevel}
             stickyNotes={activeWorkspace.stickyNotes}
+            selectedDomains={effectiveSelectedDomains}
             darkMode={darkMode}
             onImportDbml={remoteSync.handleImportDbml}
             onImportUrlResult={(res) =>

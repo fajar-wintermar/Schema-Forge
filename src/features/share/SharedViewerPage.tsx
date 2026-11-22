@@ -22,6 +22,7 @@ import { DiagramCanvas } from '../diagram/DiagramCanvas';
 import type { DocsSection } from '../docs/types';
 import {
   DetailLevel,
+  formatDomainLabel,
   ParsedSchema,
   SharedWorkspacePayload,
   StickyNote,
@@ -236,13 +237,23 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
     const versionSuffix = payload?.share.activeVersionTag
       ? `-${payload.share.activeVersionTag}`
       : '';
+    const filterSuffix =
+      selectedDomains.length === 1
+        ? `-${formatDomainLabel(selectedDomains[0])}`
+        : selectedDomains.length > 1
+        ? '-filtered'
+        : '';
     return (
-      `${rawName}${versionSuffix}`
+      `${rawName}${versionSuffix}${filterSuffix}`
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, '-')
         .replace(/^-|-$/g, '') || 'schema-diagram'
     );
-  }, [payload?.share.workspaceName, payload?.share.activeVersionTag]);
+  }, [
+    payload?.share.workspaceName,
+    payload?.share.activeVersionTag,
+    selectedDomains,
+  ]);
 
   const handleExportSharedPng = useCallback(
     async (scale: number) => {
@@ -259,6 +270,7 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
           darkMode,
           title: payload.share.workspaceName,
           scale,
+          selectedDomains,
         });
         setExportFeedback(`Exported ${scale}x PNG`);
         setTimeout(() => setExportFeedback(null), 2200);
@@ -279,6 +291,7 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
       viewDetailLevel,
       viewStickyNotes,
       darkMode,
+      selectedDomains,
     ]
   );
 
@@ -292,6 +305,7 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
       stickyNotes: viewStickyNotes,
       darkMode,
       title: payload.share.workspaceName,
+      selectedDomains,
     });
     downloadTextFile(
       `${safeExportBaseName}.svg`,
@@ -308,6 +322,7 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
     viewStickyNotes,
     darkMode,
     safeExportBaseName,
+    selectedDomains,
   ]);
 
   const handleExecuteCommand = (
@@ -513,9 +528,11 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
                     className="fixed inset-0 z-40"
                     onClick={() => setExportMenuOpen(false)}
                   />
-                  <div className="absolute right-0 mt-1.5 w-52 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-lg py-1.5 z-50">
+                  <div className="absolute right-0 mt-1.5 w-56 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-lg py-1.5 z-50">
                     <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
-                      Diagram Export
+                      {selectedDomains.length > 0
+                        ? `Diagram Export (${selectedDomains.length} filtered)`
+                        : 'Diagram Export'}
                     </div>
                     <button
                       type="button"
