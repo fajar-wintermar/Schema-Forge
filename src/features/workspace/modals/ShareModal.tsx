@@ -138,6 +138,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
   const [togglingExportId, setTogglingExportId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [editLabel, setEditLabel] = useState('');
   const [editPinnedVersionTag, setEditPinnedVersionTag] =
     useState<string>('live');
@@ -162,7 +163,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
     setError(null);
     try {
       const res = await listWorkspaceShares(workspace.id);
-      setShares(res.shares);
+      setShares(res.shares.filter((s) => !s.revokedAt));
     } catch (err) {
       setError(
         err instanceof Error ? err.message : 'Failed to load share links.'
@@ -365,22 +366,21 @@ export const ShareModal: React.FC<ShareModalProps> = ({
   };
 
   const handleRevoke = async (shareId: string) => {
+    setDeletingId(shareId);
     setError(null);
     try {
-      const res = await revokeWorkspaceShare(workspace.id, shareId);
-      setShares((prev) =>
-        prev.map((s) =>
-          s.id === shareId ? { ...s, revokedAt: res.revokedAt } : s
-        )
-      );
+      await revokeWorkspaceShare(workspace.id, shareId);
+      setShares((prev) => prev.filter((s) => s.id !== shareId));
       if (editingId === shareId) {
         setEditingId(null);
       }
-      onShowToast('Share link revoked');
+      onShowToast('Share link deleted');
     } catch (err) {
       setError(
-        err instanceof Error ? err.message : 'Failed to revoke share link.'
+        err instanceof Error ? err.message : 'Failed to delete share link.'
       );
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -784,11 +784,17 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                                 </button>
                                 <button
                                   type="button"
+                                  disabled={deletingId === share.id}
                                   onClick={() => handleRevoke(share.id)}
-                                  className="p-1.5 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40"
-                                  title="Revoke share link"
+                                  className="p-1.5 rounded-md text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 disabled:opacity-50"
+                                  title="Delete share link"
+                                  aria-label="Delete share link"
                                 >
-                                  <Trash2 className="w-3.5 h-3.5" />
+                                  {deletingId === share.id ? (
+                                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  ) : (
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  )}
                                 </button>
                               </div>
                             )}

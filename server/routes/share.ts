@@ -56,7 +56,7 @@ shareRoutes.get('/api/workspaces/:id/shares', async (c) => {
   const res = await db
     .prepare(
       `SELECT * FROM share_links
-       WHERE workspace_id = ? AND owner_user_id = ?
+       WHERE workspace_id = ? AND owner_user_id = ? AND revoked_at IS NULL
        ORDER BY created_at DESC`
     )
     .bind(workspaceId, userId)
