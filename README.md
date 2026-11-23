@@ -1,8 +1,10 @@
 # SchemaForge — DBML Viewer, ER Diagrammer & Database Docs Studio
-
-**SchemaForge** is an interactive DBML (Database Markup Language) editor, ER diagrammer, and engineering documentation studio built for teams working on complex, multi-domain schemas. It pairs a modular CodeMirror 6 DBML workspace with business-domain clustering, visual decluttering tools, dbdocs-style documentation, local-first IndexedDB persistence, optional Cloudflare D1 cloud sync, shareable read-only schema links, and two-way GitHub repository synchronization.
-
----
+<div>
+<img align="left" src="public/pwa-192x192.png" width="100">
+<b>SchemaForge</b> is an interactive DBML (Database Markup Language) editor, ER diagrammer, and engineering documentation studio built for teams working on complex, multi-domain schemas. It pairs a modular CodeMirror 6 DBML workspace with business-domain clustering, visual decluttering tools, dbdocs-style documentation, local-first IndexedDB persistence, optional Cloudflare D1 cloud sync, shareable read-only schema links, and two-way GitHub repository synchronization.
+<br clear="left"/>
+<br clear="left"/>
+</div>
 
 ## Key Features
 
