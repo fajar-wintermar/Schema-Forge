@@ -8,8 +8,9 @@
 
 ## Key Features
 
-### DBML Editor & Modular Schemas
-- **CodeMirror 6 IDE Experience**: Custom DBML syntax highlighting, multi-cursor editing, collapsible code folding (`Table`, `TableGroup`, `TablePartial`, `Note`), bracket matching, context-aware autocomplete (`Ctrl+Space`), real-time syntax & semantic diagnostics, **Find** (`⌘F` / `Ctrl+F`), **Find & Replace** (`⌘H` / `Ctrl+H`), and **Go to Line** (`⌘G` / `Ctrl+G`).
+### DBML Editor, Quality Linter & Modular Schemas
+- **CodeMirror 6 IDE Experience**: Custom DBML syntax highlighting, multi-cursor editing, collapsible code folding (`Table`, `TableGroup`, `TablePartial`, `Note`), bracket matching, **Word Wrap toggle (`Alt+Z` / `⌥Z`)**, context-aware autocomplete (`Ctrl+Space`), real-time syntax & semantic diagnostics, **Find** (`⌘F` / `Ctrl+F`), **Find & Replace** (`⌘H` / `Ctrl+H`), and **Go to Line** (`⌘G` / `Ctrl+G`).
+- **Schema Quality Linter & Best-Practice Analyzer**: Non-blocking diagnostics drawer in the editor footer flagging unindexed foreign-key columns, tables missing primary keys, inconsistent `snake_case`/`camelCase` naming, nullable unique keys, and multi-table circular FK cycles—with severity filters (`All` / `Warn` / `Info`) and click-to-jump to the exact line and canvas column.
 - **Full DBML Spec Support**:
   - `Table`, `Enum`, `Ref` (inline and block relationships with `delete`, `update`, and `color` metadata)
   - `TableGroup` business domains with accent colors and notes
@@ -17,14 +18,16 @@
   - `Checks` blocks and column-level check constraints
   - Composite & expression-based `Indexes`
   - Standalone project and domain Markdown `Note` blocks
-- **Modular `.dbml` File Workspace**: Organize large schemas across multiple `schema/*.dbml` modules with split, merge, rename, create, delete, and merged read-only preview support.
+- **Lossless Modular `.dbml` Workspace**: Organize large schemas across `schema/*.dbml` modules and custom nested subfolders with a toggleable **Explorer**, lossless Flatten/Split round-tripping that preserves folder paths, cross-file error jumping, and merged read-only preview support.
 
-### Interactive ER Diagram & Visual Decluttering
+### Interactive ER Diagram, Visual Authoring & 150+ Table Virtualization
+- **150+ Table Canvas Virtualization**: Engineered for massive enterprise schemas with tile-quantized spatial viewport culling, 3-tier automatic Level-of-Detail (**Full / Compact / Minimal** LOD with an **Auto LOD** toggle), `requestAnimationFrame`-coalesced 60fps panning/zooming, `8%–200%` zoom range, and a minimap with a live camera viewport frame.
+- **Interactive Multi-Select, Alignment & Drag-to-Connect FKs**: Use **Box (`M`)** marquee selection or `Shift+Click` / `Shift+Drag` to select multiple tables, drag groups together with real-time **Snap Alignment Guides**, align/distribute via the floating **Multi-Select Alignment Bar**, and drag from any column row port handle to another column to insert a DBML `Ref:` automatically.
 - **Business-Domain Table Groups (`TableGroup`) & Ungrouped Filtering**: Cluster tables into functional domains, assign shared core tables (e.g., `users`, `organizations`, `audit_logs`) to multiple domains simultaneously, reorder columns/tables, and filter visibility on the diagram canvas (`All Domains` vs. `Only Selected`, including dedicated filtering and visibility toggles for **Ungrouped** tables without affecting Docs).
 - **Focus Neighborhood Mode (`F`)**: Click any table to isolate its 1-hop upstream and downstream relationships while dimming unrelated tables, edges, groups, and sticky notes.
 - **Orthogonal & Curved Edge Routing**: Switch between curved Bézier connectors (`Curved`) and right-angle orthogonal routing (`Ortho`) on the canvas toolbar.
 - **Cross-Domain Edge Toggles**: Choose **Show**, **Bundle** (collapses edges between domain pairs into labeled summary trunks), or **Hide** on crowded multi-domain canvases.
-- **Canvas Controls**: Switch between **Select** (`V`) and **Pan** (`H`) modes, toggle **Grid Snap** and **Minimap**, switch table detail visibility (**All Fields**, **Keys Only**, **Names Only**), customize table header colors, attach color-coded **Sticky Notes**, and run **Auto Layout** (globally or per domain/ungrouped group).
+- **Canvas Controls**: Switch between **Select** (`V`), **Box** (`M`), and **Pan** (`H`) modes, toggle **Grid Snap** and **Minimap**, switch table detail visibility (**All Fields**, **Keys Only**, **Names Only**), customize table header colors, attach color-coded **Sticky Notes**, and run **Auto Layout** (globally or per domain/ungrouped group).
 
 ### Global Command Palette (`⌘K` / `Ctrl+K`)
 - Instant fuzzy search across tables, columns, business domains (`TableGroup`), `TablePartial` mixins, Markdown & sticky notes, `.dbml` modules, and quick actions.
@@ -48,6 +51,9 @@
   - **Import**: DBML, PostgreSQL/MySQL/SQL DDL (`CREATE TABLE`, `ALTER TABLE ... FOREIGN KEY`), CSV column definitions, and remote `.dbml` URLs.
   - **Export**: DBML, PostgreSQL/MySQL DDL, CSV data dictionary, **SVG**, and **high-resolution PNG** — export the **All Domains & Tables** workspace or scope any export strictly to **Selected Domains** (including **Ungrouped** tables).
 
+### Product Tiering & Roadmap
+- See [`ROADMAP.md`](./ROADMAP.md) for current product pros & cons, **Essential** (local-first solo studio) vs. **Premium** (team, CI/CD & cloud platform) feature separation, and upcoming engineering milestones.
+
 ---
 
 ## Tech Stack
@@ -62,7 +68,8 @@
 | **API & Edge Backend** | [Hono 4](https://hono.dev/) (`hono`, `@hono/node-server`) | Unified `/api/*` router running on Cloudflare Workers, Cloudflare Pages Functions, and Node.js |
 | **Cloud & Local Persistence** | [Cloudflare D1](https://developers.cloudflare.com/d1/) + `node:sqlite` + Browser IndexedDB | Local-first offline storage (`SchemaForgeLocalDB`) with optional cross-device D1 sync & sharing |
 | **Auth & Security** | GitHub OAuth + Web Crypto API (`crypto.subtle` AES-GCM) | Stateless encrypted `HttpOnly; Secure; SameSite=None; Partitioned` session cookies, origin checks, and parameterized SQL |
-| **DBML & Diagram Engine** | Custom TypeScript modules (`src/utils/`) | DBML parser/validator, fuzzy command search, semantic diffing, auto-layout, SQL/CSV converters, and SVG/PNG exporter |
+| **DBML & Diagram Engine** | Custom TypeScript modules (`src/utils/`, `src/features/diagram/`) | DBML parser/validator, quality linter, fuzzy search, semantic diffing, auto-layout, spatial virtualization/LOD, SQL/CSV converters, and SVG/PNG exporter |
+| **Automated Testing** | [Vitest 5](https://vitest.dev/) + [Playwright](https://playwright.dev/) | Unit tests (DBML parsing, modular round-trips, diffs, SQL migrations, linter, canvas geometry/virtualization) + full browser E2E smoke suite |
 
 ---
 
@@ -72,6 +79,10 @@
 .
 ├── index.html                        # HTML entry point, favicon, and metadata
 ├── package.json                      # Dependencies and npm scripts
+├── README.md                         # Project documentation
+├── ROADMAP.md                        # Product evaluation, Essential vs. Premium feature matrix & phased roadmap
+├── vitest.config.ts                  # Vitest unit test runner configuration
+├── playwright.config.ts              # Playwright E2E smoke test configuration
 ├── vite.config.ts                    # Vite configuration (React, Tailwind v4, HMR toggle)
 ├── tsconfig.json                     # TypeScript compiler configuration
 ├── wrangler.jsonc                    # Cloudflare Workers + Static Assets + D1 binding config
@@ -127,9 +138,9 @@
     ├── features/
     │   ├── app/                      # Global shortcut hook & root app helpers
     │   ├── command/                  # Global Command Palette modal & fuzzy search engine
-    │   ├── diagram/                  # ER canvas, TableCards, DomainFilterBar, Focus mode, orthogonal/bundled edges, minimap
+    │   ├── diagram/                  # ER canvas, virtualization/LOD engine, multi-select alignment, FK connector handles, minimap
     │   ├── docs/                     # dbdocs-style Schema, Domain, Table, Partials, Enums, Refs & Notes views
-    │   ├── editor/                   # CodeMirror 6 DBML editor, custom grammar/highlighter, diagnostics, folder explorer
+    │   ├── editor/                   # CodeMirror 6 DBML editor, QualityLinterPanel, syntax highlighter, folder explorer
     │   ├── github/                   # GitHub OAuth modal, repo/branch/folder browser, commit SQL migrations, diff preview & push
     │   ├── markdown/                 # GFM Markdown parser, callouts, read-time & syntax highlighter
     │   ├── pwa/                      # PWA install prompt hook/button & offline connectivity banner
@@ -143,7 +154,11 @@
         ├── cloudService.ts           # Client API calls for D1 workspaces & share links
         ├── remoteService.ts          # Client API calls for auth state, URL proxy & GitHub sync/commits
         ├── schemaDiff.ts             # Semantic, index, FK, line-level diff & incremental SQL migration generator
+        ├── schemaLinter.ts           # Schema Quality Linter (unindexed FKs, missing PKs, naming drift, nullable uniques, FK cycles)
         └── schemaModules.ts          # Multi-file .dbml module splitting & merging helpers
+├── tests/
+│   ├── unit/                         # Vitest unit suites (parser, modules, diffs, SQL migrations, linter, canvas geometry & virtualization)
+│   └── e2e/                          # Playwright browser smoke tests (Editor, Diagram, Docs, Share, Linter/Canvas, 160-table Virtualization)
 ```
 
 ---
@@ -191,6 +206,22 @@ Run TypeScript type checking across the frontend, Hono API, and Cloudflare Worke
 npm run lint
 ```
 
+### 5. Run Automated Tests (Vitest + Playwright)
+
+```bash
+# Run unit test suites (DBML parser, modular round-trip, diff, SQL ALTER, linter, canvas geometry & virtualization)
+npm test
+
+# Run unit tests in watch mode
+npm run test:watch
+
+# Run Playwright browser E2E smoke tests
+npm run test:e2e
+
+# Run full regression suite (Vitest + Playwright)
+npm run test:all
+```
+
 ---
 
 ## Keyboard Shortcuts
@@ -204,6 +235,7 @@ npm run lint
 | `⌘J` / `Ctrl+J` | Toggle Docs Navigation Tree *(in Docs view)* |
 | `⌘\` / `Ctrl+\` | Toggle / Minimize Code Editor |
 | `⌘⇧E` / `Ctrl+Shift+E` | Maximize / Restore Code Editor |
+| `Alt+Z` / `⌥Z` | Toggle Word Wrap in Code Editor |
 | `⌘F` / `Ctrl+F` | Find text in Code Editor |
 | `⌘H` / `Ctrl+H` | Find & Replace in Code Editor |
 | `⌘G` / `Ctrl+G` | Go to Line (`line` or `line:col`) in Code Editor |
@@ -217,8 +249,11 @@ npm run lint
 | Shortcut | Action |
 | --- | --- |
 | `V` | Switch to **Select** cursor mode (click & drag tables, groups, and notes) |
+| `M` | Switch to **Box** marquee multi-select mode (drag rectangle to select multiple tables) |
 | `H` | Switch to **Pan** cursor mode (drag anywhere to pan the canvas) |
+| `Shift + Click / Drag` | Add/toggle tables in multi-selection or draw additive marquee box |
 | `F` | Toggle **Focus Neighborhood Mode** (isolate 1-hop upstream/downstream tables) |
+| `Esc` | Clear multi-selection or exit Focus Neighborhood Mode |
 
 ---
 
