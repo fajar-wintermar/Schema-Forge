@@ -208,13 +208,14 @@ interface TopBlock {
   text: string;
 }
 
-/**
- * Splits a monolithic DBML document into per-table `.dbml` files plus an optional
- * `_project.dbml` for Project, Enum, TableGroup, and standalone Note blocks.
- */
-export function splitDbmlIntoModuleFiles(
+const SECTION_HEADER_REGEX = /^\s*\/\/\s*----\s*([^\r\n]+?\.dbml)\s*----\s*$/i;
+const AUTO_GENERATED_BANNER_REGEX =
+  /^\s*\/\/\s*AUTO-GENERATED\.\s+(?:Edit files in|Add \.dbml files inside)\b/i;
+
+function splitBlocksIntoModuleFiles(
   source: string,
-  folderPrefix = 'schema'
+  folderPrefix = 'schema',
+  options: { skipEmptyFallback?: boolean } = {}
 ): SchemaModuleFile[] {
   const folder = cleanFolderPrefix(folderPrefix);
   const normalized = source.replace(/\r\n?/g, '\n');
@@ -437,7 +438,7 @@ export function splitDbmlIntoModuleFiles(
     });
   }
 
-  if (result.length === 0) {
+  if (result.length === 0 && !options.skipEmptyFallback) {
     result.push({
       id: `mod_${Date.now()}_init`,
       path: `${folder}/users.dbml`,
@@ -445,6 +446,115 @@ export function splitDbmlIntoModuleFiles(
     });
   }
 
+  return result;
+}
+
+export function splitDbmlIntoModuleFiles(
+  source: string,
+  folderPrefix = 'schema'
+): SchemaModuleFile[] {
+  const normalized = source.replace(/\r\n?/g, '\n');
+  const lines = normalized.split('\n');
+
+  const hasSectionHeaders = lines.some((line) => SECTION_HEADER_REGEX.test(line));
+  if (!hasSectionHeaders) {
+    return splitBlocksIntoModuleFiles(source, folderPrefix);
+  }
+
+  const folder = cleanFolderPrefix(folderPrefix);
+  const preambleLines: string[] = [];
+  const rawSections: Array<{ path: string; lines: string[] }> = [];
+  let currentSection: { path: string; lines: string[] } | null = null;
+
+  for (const line of lines) {
+    const match = line.match(SECTION_HEADER_REGEX);
+    if (match) {
+      const cleanedPath = match[1]
+        .trim()
+        .replace(/^(?:\.\/)+/, '')
+        .replace(/^\/+/, '')
+        .replace(/\/{2,}/g, '/');
+      if (cleanedPath) {
+        currentSection = { path: cleanedPath, lines: [] };
+        rawSections.push(currentSection);
+        continue;
+      }
+    }
+
+    if (!currentSection) {
+      if (!AUTO_GENERATED_BANNER_REGEX.test(line)) {
+        preambleLines.push(line);
+      }
+    } else {
+      currentSection.lines.push(line);
+    }
+  }
+
+  const stamp = Date.now();
+  const filesByPath = new Map<string, SchemaModuleFile>();
+
+  rawSections.forEach((sec, idx) => {
+    const bodyLines = [...sec.lines];
+    while (bodyLines.length > 0 && bodyLines[bodyLines.length - 1] === '') {
+      bodyLines.pop();
+    }
+    const content = bodyLines.length > 0 ? `${bodyLines.join('\n')}\n` : '';
+
+    const existing = filesByPath.get(sec.path);
+    if (existing) {
+      if (content) {
+        const prev = existing.content.replace(/\n+$/, '');
+        existing.content = prev ? `${prev}\n\n${content}` : content;
+      }
+    } else {
+      filesByPath.set(sec.path, {
+        id: `mod_${stamp}_${idx}`,
+        path: sec.path,
+        content,
+      });
+    }
+  });
+
+  const preambleText = preambleLines.join('\n').trim();
+  if (preambleText) {
+    const preambleModules = splitBlocksIntoModuleFiles(preambleText, folder, {
+      skipEmptyFallback: true,
+    });
+    for (const mod of preambleModules) {
+      const existing = filesByPath.get(mod.path);
+      if (existing) {
+        if (/_project\.dbml$/i.test(mod.path)) {
+          const prev = existing.content.replace(/\n+$/, '');
+          existing.content = prev
+            ? `${mod.content.replace(/\n+$/, '')}\n\n${prev}\n`
+            : mod.content;
+        } else {
+          const base = mod.path.replace(/\.dbml$/i, '');
+          let n = 2;
+          let candidate = `${base}_${n}.dbml`;
+          while (filesByPath.has(candidate)) {
+            n++;
+            candidate = `${base}_${n}.dbml`;
+          }
+          filesByPath.set(candidate, {
+            ...mod,
+            id: `mod_${stamp}_pre_${filesByPath.size}`,
+            path: candidate,
+          });
+        }
+      } else {
+        filesByPath.set(mod.path, {
+          ...mod,
+          id: `mod_${stamp}_pre_${filesByPath.size}`,
+        });
+      }
+    }
+  }
+
+  const result = Array.from(filesByPath.values());
+  if (result.length === 0) {
+    return splitBlocksIntoModuleFiles(source, folderPrefix);
+  }
   return result;
 }
 
