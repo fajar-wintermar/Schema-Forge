@@ -1,94 +1,103 @@
-# SchemaForge Product Roadmap
+# SchemaForge Product Roadmap & Feature Tiering
 
-> Product evaluation, current-state pros & cons, and phased roadmap for evolving **SchemaForge** from a local-first DBML studio into a full team schema engineering platform.
+> Updated product assessment, **Essential vs. Premium** feature separation, and readjusted phased roadmap for evolving **SchemaForge** from a local-first DBML studio into a tiered team & enterprise schema engineering platform.
 
 ---
 
 ## 1. Current State Assessment
 
 ### Strengths (Pros)
-- **Unified Text + Diagram + Docs Workflow**: A single DBML source drives the live CodeMirror 6 IDE editor (with `Alt+Z` word wrap, folding, autocomplete, find/replace, and go-to-line), interactive ERD canvas, and engineering documentation portal.
-- **Lossless Modular DBML + Real GitHub Integration**: Supports splitting schemas into `schema/*.dbml` modules and custom nested subfolders with lossless Flatten/Split round-tripping, a toggleable Explorer panel, cross-file error mapping, branch initialization, batched Git commits, commit history comparison, and incremental SQL migrations.
-- **Incremental SQL Migrations (`ALTER`)**: Compares any two saved version snapshots or Git commits to generate clean PostgreSQL and MySQL `ALTER TABLE`, `CREATE/DROP INDEX`, enum, and foreign-key migration scripts (keeping DBML documentation notes out of `.sql` DDL files).
-- **Domain-First Visual Organization & Focus Tools**: `TableGroup` containers (plus explicit filtering and scoped export for **Ungrouped** tables on the canvas without altering Docs), multi-domain shared tables, Focus Neighborhood mode (`F`), orthogonal/curved/bundled edge routing, custom table header colors, and sticky architecture notes.
-- **Built-In Schema Quality Linter & Automated Regression Suite**: Non-blocking Schema Quality Analyzer catches unindexed foreign keys, missing primary keys, `snake_case`/`camelCase` naming drift, nullable unique keys, and multi-table circular FK cycles, backed by Vitest unit tests and Playwright E2E smoke tests.
-- **150+ Table Canvas Virtualization & Interactive Authoring**: Supports tile-quantized spatial viewport culling, 3-tier automatic Level-of-Detail (Full / Compact / Minimal) rendering, rAF-coalesced 60fps panning/zooming, live minimap camera frame, marquee/Shift multi-select, real-time snap alignment guides, multi-table align/distribute controls, and visual drag-from-column-to-column FK `Ref:` creation.
-- **Local-First Security, Offline PWA & Edge Cloud Sync**: Persists locally in AES-256-GCM encrypted IndexedDB with full offline PWA support (including iOS & Firefox install guides), responsive grouped TopBar navigation, and optional Cloudflare D1 / Node SQLite sync with clean revocable/deletable versioned share links.
+- **Unified Text + Diagram + Docs Studio**: A single DBML source drives the CodeMirror 6 IDE (`Alt+Z` word wrap, code folding, autocomplete, find/replace, go-to-line), interactive ERD canvas, and `dbdocs`-style engineering documentation portal with Global Command Palette (`⌘K` / `Ctrl+K`).
+- **Lossless Modular DBML & Real GitHub Sync**: Supports `schema/*.dbml` modules with custom nested subfolders, lossless Flatten/Split round-tripping, toggleable Explorer, cross-file diagnostic jumps, branch creation/switching, batched Git commits, and commit history comparison.
+- **Enterprise-Scale 150+ Table Canvas Virtualization**: Tile-quantized spatial viewport culling, 3-tier automatic Level-of-Detail (`full` / `compact` / `minimal`), `requestAnimationFrame`-coalesced 60fps panning/zooming, live minimap camera viewport frame, marquee/Shift multi-select, real-time snap alignment guides, align/distribute actions, and drag-to-connect FK creation.
+- **Domain-First Visual Organization**: `TableGroup` containers, explicit **Ungrouped** filtering and domain-scoped exports (without altering Docs), multi-domain shared tables, Focus Neighborhood (`F`), Curved/Orthogonal edge routing, Cross-Domain Show/Bundle/Hide, custom header colors, and sticky notes.
+- **Incremental SQL Migrations (`ALTER`) & Schema Quality Linter**: Emits PostgreSQL and MySQL `ALTER TABLE`, index, enum, and FK migration scripts between any two saved snapshots or Git commits (excluding doc notes from `.sql` DDL), paired with a non-blocking 5-rule Schema Quality Analyzer.
+- **Local-First Security, Offline PWA & Edge Sync**: Persists offline in AES-256-GCM encrypted IndexedDB with full PWA installability, plus optional Cloudflare D1 / Node SQLite sync and clean revocable, expiring, version-pinned share links (`/share/:token`).
+- **Automated Regression Suite**: Backed by Vitest unit tests (30 tests across 7 suites) and Playwright E2E smoke tests (6 full workflow suites, including 160-table canvas virtualization).
 
 ### Current Limitations (Cons)
-- **Direct-Push GitHub Flow & Layout Outside Git**: Supports pushing commits directly to branches and comparing Git commits, but lacks an in-app **Create Branch & Open Pull Request** flow and does not yet track `tablePositions` / `stickyNotes` in `.schemaforge/layout.json` inside Git.
-- **DBML/SQL-Centric Import/Export Only**: Supports DBML, PostgreSQL/MySQL DDL, incremental SQL migrations, CSV, SVG, and PNG, while ORM/API formats (Prisma, Drizzle, TypeORM, SQLAlchemy, OpenAPI, Mermaid ERD, and standalone static HTML/Markdown doc bundles) are not yet available.
-- **No Live DB Introspection**: Includes static quality diagnostics and SQL/DBML parsing, but does not yet connect directly to live database catalogs via a CLI bridge.
-- **No Threaded Collaboration**: Share links are view-only and sticky notes are standalone annotations rather than threaded, resolvable PR review discussions.
+- **Direct-Push GitHub Flow & Layout Outside Git**: Pushes commits cleanly to branches, but lacks an in-app **Create Branch & Open Pull Request** flow and does not yet persist `tablePositions` / `stickyNotes` inside `.schemaforge/layout.json` in Git.
+- **DBML + PostgreSQL/MySQL Format Boundaries**: Supports DBML, PG/MySQL DDL, SQL migrations, CSV, SVG, and PNG, while modern ORM/API formats (**Prisma**, **Drizzle**, **TypeORM**, **SQLAlchemy**, **OpenAPI**) and standalone **static HTML/Markdown doc bundles** are not yet supported.
+- **No Live DB Introspection or CI/CD Automation**: Static parsing and diagnostics work offline, but there is no CLI (`npx schemaforge`) or GitHub Action yet to introspect live databases, detect schema drift, or post PR diff previews automatically.
+- **Single-Player Collaboration & Missing Entitlement Layer**: Share links are view-only and sticky notes are standalone (no threaded PR review comments, live presence, or workspace RBAC). Additionally, cloud sync, versioned share portals, and commit-level migrations exist in code without a formal **Essential vs. Premium** entitlement boundary or org/seat management.
 
 ---
 
-## 2. Phased Product Roadmap
+## 2. Feature Separation: Essential vs. Premium
 
-### Phase 1 — Core Power & Spec Completeness (Completed)
-*Goal: Deliver maximum daily engineering value without requiring backend database infrastructure.*
+*Packaging Principle: **Essential** delivers a complete, fast, zero-friction local-first DBML studio so solo developers never hit annoying paywalls on core modeling or canvas performance. **Premium** monetizes team workflows, cloud hosting, ecosystem codegen, CI/CD automation, and governance.*
 
-- [x] **Incremental SQL Migration (`ALTER`) Generator**
-  - Emit `ALTER TABLE ... ADD/DROP/ALTER COLUMN`, `CREATE/DROP INDEX`, enum, and foreign-key `ALTER` statements between any two saved snapshots or Git commits (PostgreSQL & MySQL), keeping documentation notes out of exported `.sql` files.
-- [x] **Full DBML Spec Parity**
-  - Parser, semantic validator, diagram, and docs support for `TablePartial`, `Checks` blocks, expression-based `Indexes`, and extended inline `Ref` metadata.
-- [x] **Diagram Focus, Ungrouped Filtering & Visual Decluttering**
-  - **Focus Neighborhood Mode (`F`)**, **Orthogonal Edge Routing**, **Cross-Domain Edge Show/Bundle/Hide**, and dedicated **Ungrouped** table filtering + domain-scoped DBML/SQL/CSV/PNG/SVG exports.
-- [x] **Global Command Palette (`Cmd/Ctrl + K`)**
-  - Instant fuzzy search and jump to any table, column, domain, Markdown note, or `.dbml` module across Editor, Diagram, and Docs views.
-
----
-
-### Phase 2 — IDE Ergonomics, Canvas Authoring & Quality Checks (Next Up)
-*Goal: Remove daily friction for solo engineers and teams working on large schemas.*
-
-- [x] **CodeMirror 6 Editor, Explorer Toggle & Word Wrap (`Alt+Z`)**
-  - CodeMirror 6 with DBML syntax theme, collapsible blocks, bracket matching, `Alt+Z` / `⌥Z` word wrap toggle, toggleable modular Explorer, and lossless subfolder preservation across Flatten/Split.
-- [x] **Schema Quality Linter & Best-Practice Analyzer**
-  - Non-blocking diagnostics panel flagging unindexed foreign-key columns, tables without primary keys, inconsistent `snake_case`/`camelCase` naming, nullable unique keys, and circular FK cycles.
-- [x] **Interactive Canvas Multi-Select, Alignment & Drag-to-Connect FKs**
-  - Marquee/Shift multi-select for tables, snap alignment guides (align left/top/distribute), and dragging from a column handle to another column to insert a DBML `Ref` automatically.
-- [x] **Automated Regression Suite (Vitest + Playwright)**
-  - Unit tests (`tests/unit/`) for DBML parsing, lossless modular round-tripping, semantic diffs, and PostgreSQL/MySQL `ALTER` SQL generation, plus Playwright smoke tests (`tests/e2e/`) for Editor, Diagram, Docs, and Share workflows.
-- [ ] **GitHub Pull Request & Diff Review Flow**
-  - Add a **Create Branch & Open Pull Request** flow in `GitHubModal`, pre-filling the PR description with SchemaForge's semantic `schemaDiff` summary (tables, columns, refs, enums, and domains changed).
-- [ ] **Expanded Schema Importers & Code Exporters**
-  - Client-side importers for **Prisma (`schema.prisma`)**, **Drizzle TypeScript schemas**, and **JSON Schema / OpenAPI**.
-  - Exporters for **Prisma**, **Drizzle**, **TypeORM**, **SQLAlchemy**, **Mermaid ERD**, and downloadable **static HTML / Markdown documentation bundles**.
+| Capability Area | Essential *(Core / Free Local-First)* | Premium *(Team / Cloud / Enterprise)* |
+| --- | --- | --- |
+| **DBML Editor & Spec** | **CodeMirror 6 IDE** (full DBML spec: `TablePartial`, `Checks`, expression `Indexes`, inline `Ref`), `Alt+Z` wrap, folding, autocomplete, find/replace, go-to-line *(Delivered)* | Shared team **Schema Templates**, **Custom Linter Rulesets** (org naming/compliance policies), and cross-repo partial registries *(Planned)* |
+| **Modular Workspaces** | Single-file & modular `schema/**/*.dbml` Explorer, lossless Flatten/Split, cross-file error mapping *(Delivered)* | Multi-workspace **Team Organization Catalogs** & shared domain governance across services *(Planned)* |
+| **Interactive ER Canvas** | **150+ Table Virtualization** (culling + Auto-LOD + 60fps pan/zoom), Auto Layout, `TableGroup` + Ungrouped filtering, Focus Mode (`F`), Ortho/Curved/Bundled edges, Marquee multi-select, snap alignment, drag-to-connect FKs, Minimap, local Sticky Notes *(Delivered)* | **Git-Tracked `.schemaforge/layout.json`** team layout sync *(Planned)*, **Anchored Threaded Review Comments**, and **Live Collaborative Cursors** *(Planned)* |
+| **Quality & Diffs** | Core **5-rule Schema Quality Linter** (unindexed FK, missing PK, naming drift, nullable unique, FK cycles) + visual semantic diff between local drafts *(Delivered)* | **Breaking-Change Risk Analyzer** (lock/data-loss checks), custom team lint severity enforcement, and PR diff reports *(Planned)* |
+| **SQL & Code Import / Export** | Import DBML, PG/MySQL `CREATE TABLE`, CSV, URL; Export DBML, PG/MySQL DDL, CSV, PNG, SVG (including domain-scoped export) *(Delivered)* | **Incremental `ALTER` Migration Studio** across Git commits & snapshots *(Delivered — move to Team/Pro tier)*; **ORM & API Importers/Exporters** (Prisma, Drizzle, TypeORM, SQLAlchemy, OpenAPI, Mermaid) & **Static HTML/MD Docs Bundles** *(Planned)* |
+| **Engineering Docs & Search** | Full `dbdocs`-style local Docs Portal, GFM Markdown notes, Global Command Palette (`⌘K`) *(Delivered)* | **Private Hosted Team Docs Portals**, custom branding/domains, and **Shareable Versioned Links** with expiration, revocation & export controls *(Delivered — tier gate planned)* |
+| **Persistence & Sync** | Local-first **AES-256-GCM IndexedDB**, offline **PWA** install, local version snapshots (`⌘S`) *(Delivered)* | **Cloudflare D1 Cross-Device Cloud Sync**, **Workspace RBAC** (Owner/Editor/Viewer), **SSO/SAML**, and **Audit Logs** *(Sync Delivered; RBAC/SSO Planned)* |
+| **Git, CI/CD & Live DB** | Basic **GitHub Single-File Pull/Push** & URL loader (`?url=`) *(Delivered)* | **Multi-File `schema/` Batch Git Sync** *(Delivered)*, **Open PR with Semantic Diff** *(Planned)*, **GitLab/Bitbucket**, **SchemaForge CLI & GitHub Action**, and **Live DB Introspection + Drift Detection** *(Planned)* |
 
 ---
 
-### Phase 3 — Shared Layouts, Cloud Sync & Collaboration
-*Goal: Evolve SchemaForge into a seamless multi-engineer team workspace.*
+## 3. Readjusted Phased Product Roadmap
 
-- [ ] **Git-Tracked Layout & Sticky Metadata (`.schemaforge/layout.json`)**
-  - Optionally include `.schemaforge/layout.json` (table coordinates, sticky notes, view settings) in GitHub batch pushes and folder pulls so teammates share identical diagram layouts with zero cloud lock-in.
-- [x] **Optional Cloud Workspaces & Authentication**
-  - Sync workspaces, layout coordinates, sticky notes, and published versions across devices via Cloudflare D1 / Node SQLite while keeping local AES-GCM `IndexedDB` mode available for offline/anonymous work.
-- [x] **Shareable Read-Only Docs & Diagram Links**
-  - Generate, edit, expire, and delete clean shareable links for live workspaces or pinned versions (e.g., `v1.2.0`) with toggleable PNG/SVG export permissions.
-- [ ] **Anchored Review Comments & Live Presence**
-  - Evolve sticky notes into threaded, resolvable review comments anchored to specific tables, columns, or PR branches, with optional collaborative cursors.
-- [x] **150+ Table Canvas Virtualization**
-  - Viewport culling and level-of-detail rendering for smooth 60fps panning/zooming on massive enterprise schemas.
+### Phase 1 — Core Studio, Spec Parity & Virtualization (`Essential` — Completed)
+*Goal: Best-in-class offline-capable DBML editor, documenter, and high-scale diagrammer.*
+- [x] **Full DBML Spec Parity** (`TablePartial`, `Checks`, expression `Indexes`, extended `Ref` metadata)
+- [x] **CodeMirror 6 Editor, Modular `schema/` Explorer & Word Wrap (`Alt+Z`)** with lossless nested-folder Flatten/Split
+- [x] **Diagram Decluttering & Domain Focus** (Focus Mode `F`, Ortho/Curved edges, Cross-Domain Show/Bundle/Hide, Ungrouped filtering & scoped export)
+- [x] **Interactive Canvas Authoring** (Marquee/Shift multi-select, snap alignment guides, Align/Distribute bar, drag-to-connect FK `Ref:` insertion)
+- [x] **150+ Table Canvas Virtualization** (Tile-quantized spatial culling, 3-tier Auto-LOD, rAF pan/zoom, minimap viewport frame)
+- [x] **Global Command Palette (`⌘K`)**, **Schema Quality Linter (5 core rules)**, **Offline PWA + Encrypted IndexedDB**, and **Automated Vitest + Playwright Regression Suite**
 
 ---
 
-### Phase 4 — CI/CD Automation & Ecosystem
-*Goal: Embed SchemaForge directly into CI pipelines and live database workflows.*
-
-- [ ] **SchemaForge CLI & GitHub Action**
-  - Validate and merge `schema/*.dbml` modules in CI, check for breaking migration changes, post semantic schema diffs + rendered SVG/PNG previews onto Pull Requests, and auto-publish static Schema Docs on merge to `main`.
-- [ ] **Live Database Introspection Bridge**
-  - Lightweight local CLI (`npx schemaforge pull <connection-url>`) to introspect PostgreSQL, MySQL, or SQLite catalogs directly into a workspace or modular `schema/*.dbml` folder.
-- [ ] **Multi-VCS Support**
-  - Add **GitLab** and **Bitbucket** adapters alongside GitHub using a shared repository provider interface.
+### Phase 2 — Cloud Foundations, Migrations & Hosted Sharing (`Premium Foundations` — Completed)
+*Goal: Establish cloud persistence, clean read-only sharing, and SQL migration tooling.*
+- [x] **Incremental SQL Migration (`ALTER`) Generator** (PostgreSQL & MySQL `ALTER TABLE`, indexes, enums, FKs between snapshots and Git commits)
+- [x] **Optional Cloud Workspaces & GitHub OAuth** (Cloudflare D1 / Node SQLite sync across devices)
+- [x] **Shareable Read-Only Docs & Diagram Links** (`/share/:token` with version pinning, expiration, revocation, and PNG/SVG export toggles)
+- [x] **Two-Way GitHub Multi-File `schema/` Sync** (Batched folder commits, branch management, and commit SHA comparison)
 
 ---
 
-## 3. Recommended Priority Order (Highest Leverage Next)
+### Phase 3 — Git-Native PR Workflow & Ecosystem Interoperability (`Next Up`)
+*Goal: Eliminate team friction in Git reviews and unlock adoption across non-DBML stacks.*
+- [ ] **Git-Tracked Layout & Sticky Metadata (`.schemaforge/layout.json`)** `[Essential]`
+  - Optionally commit `.schemaforge/layout.json` (table coordinates, sticky notes, canvas settings) alongside `schema/*.dbml` so any teammate cloning the repo gets identical diagram layouts with zero cloud dependency.
+- [ ] **GitHub Pull Request & Semantic Diff Flow** `[Premium]`
+  - Add **Create Branch & Open Pull Request** inside `GitHubModal`, auto-generating PR bodies with SchemaForge's semantic `schemaDiff` summary and breaking-change callouts.
+- [ ] **Expanded ORM / API Importers & Exporters** `[Premium]`
+  - Client-side importers for **Prisma (`schema.prisma`)**, **Drizzle TypeScript**, and **JSON Schema / OpenAPI**.
+  - Exporters for **Prisma**, **Drizzle**, **TypeORM**, **SQLAlchemy**, **Mermaid ERD**, and downloadable **Static HTML / Markdown Docs Bundles**.
 
-1. **`.schemaforge/layout.json` in GitHub Sync + "Open Pull Request" Flow** — Unlocks shared team diagram layouts and PR review workflows using GitHub alone.
-2. **Prisma / Drizzle / OpenAPI Importers + ORM & Static Docs Bundle Exporters** — Expands adoption across full-stack TypeScript, Python, and API-first teams.
-3. **SchemaForge CLI / GitHub Action & Live DB Introspection Bridge** — Integrates SchemaForge into CI/CD checks and existing production databases.
-4. **Anchored Review Comments & Live Presence** — Evolves sticky notes into threaded team review feedback.
+---
+
+### Phase 4 — Entitlement Architecture, CI/CD & Live DB Bridge (`Monetization & DevOps`)
+*Goal: Enforce Essential vs. Premium tiers cleanly and embed SchemaForge into automated pipelines.*
+- [ ] **Tier Entitlements, Workspace RBAC & Billing Hooks** `[Platform]`
+  - Introduce a unified capability/entitlement config (`essential` vs `premium`), usage limits on hosted shares/cloud workspaces, and workspace role permissions (`Owner`, `Editor`, `Viewer`).
+- [ ] **SchemaForge CLI & GitHub Action** `[Premium]`
+  - `npx schemaforge check` in CI to validate modular `schema/*.dbml`, lint schema quality rules, flag destructive `ALTER` drops, post PR comment diffs + SVG/PNG previews, and auto-deploy static docs on merge to `main`.
+- [ ] **Live Database Introspection & Drift Detection** `[Premium]`
+  - `npx schemaforge pull <connection-url>` to introspect PostgreSQL, MySQL, or SQLite catalogs into DBML and highlight schema drift against the repository baseline.
+
+---
+
+### Phase 5 — Multiplayer Review & Enterprise Governance (`Scale`)
+*Goal: Full team review collaboration and multi-provider enterprise compliance.*
+- [ ] **Anchored Review Comments & Live Presence** `[Premium]`
+  - Upgrade sticky notes into threaded, resolvable review comments anchored to specific tables, columns, or PR branches, with optional live cursors.
+- [ ] **Multi-VCS Adapters & Enterprise Governance** `[Premium]`
+  - Add **GitLab** and **Bitbucket** adapters via a shared repository provider interface, **SSO/SAML**, custom team linter policies, custom-domain share portals, and audit logs.
+
+---
+
+## 4. Recommended Execution Priority (Highest Leverage Next)
+
+1. **`.schemaforge/layout.json` in GitHub Sync + "Open Pull Request" Flow** — Completes the Git-native engineering loop immediately on top of existing `GitHubModal` and `schemaDiff` code.
+2. **Prisma / Drizzle / OpenAPI Importers & ORM/Static Docs Bundle Exporters** — Strongest top-of-funnel growth and clear Premium conversion driver for TypeScript/Python backend teams.
+3. **Tier Entitlement Config + Workspace RBAC** — Establishes clean separation between free local-first features and paid Team/Cloud capabilities before launching hosted plans.
+4. **SchemaForge CLI / GitHub Action & Live DB Introspection Bridge** — Locks SchemaForge into daily CI/CD and production database workflows.
+5. **Anchored Review Comments, Live Presence & Multi-VCS** — Rounds out the multiplayer collaboration and enterprise tier.
