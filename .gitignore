@@ -12,3 +12,4 @@ public/assets/aistudio/*
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+dev-dist/
