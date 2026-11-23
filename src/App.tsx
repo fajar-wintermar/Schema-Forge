@@ -25,6 +25,7 @@ import { useWorkspaceStore } from './features/workspace/hooks/useWorkspaceStore'
 import { OfflineIndicator } from './features/pwa/OfflineIndicator';
 import { TableGroupDef, UNGROUPED_DOMAIN_ID, ViewMode } from './types/schema';
 import { MERGED_SCHEMA_VIEW_ID } from './utils/schemaModules';
+import { lintSchemaQuality, SchemaLintIssue } from './utils/schemaLinter';
 
 const CommandPaletteModal = lazy(() =>
   import('./features/command/CommandPaletteModal').then((m) => ({
@@ -251,6 +252,31 @@ export default function App() {
   });
 
   const { parsedSchema, isModular, activeSchemaFilePath } = schemaActions;
+  const lintResult = useMemo(
+    () => lintSchemaQuality(parsedSchema),
+    [parsedSchema]
+  );
+
+  const handleJumpToLintIssue = useCallback(
+    (issue: SchemaLintIssue) => {
+      if (issue.line) {
+        schemaActions.jumpToMergedLine(issue.line);
+      }
+      if (issue.tableId) {
+        setSelectedTableId(issue.tableId);
+        if (issue.columnName) {
+          setHighlightedColumn({
+            tableId: issue.tableId,
+            columnName: issue.columnName,
+          });
+        } else {
+          setHighlightedColumn(null);
+        }
+        setFocusRequest({ type: 'table', id: issue.tableId, nonce: Date.now() });
+      }
+    },
+    [schemaActions]
+  );
 
   const effectiveSelectedDomains = useMemo(() => {
     if (selectedDomains.length === 0) return [];
@@ -479,6 +505,8 @@ export default function App() {
     value: schemaActions.editorValue,
     onChange: schemaActions.handleDbmlChange,
     errors: schemaActions.editorErrors,
+    lintResult,
+    onJumpToLintIssue: handleJumpToLintIssue,
     scrollToLine,
     enumNames: parsedSchema.enums.map((e) => e.name),
     partialNames: parsedSchema.tablePartials.map((p) => p.name),
@@ -727,6 +755,7 @@ export default function App() {
                 }
                 onUpdateStickyNote={schemaActions.handleUpdateStickyNote}
                 onDeleteStickyNote={schemaActions.handleDeleteStickyNote}
+                onCreateRef={schemaActions.handleCreateRef}
                 focusRequest={focusRequest}
                 darkMode={darkMode}
               />

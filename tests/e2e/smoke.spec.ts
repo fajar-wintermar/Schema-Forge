@@ -469,4 +469,136 @@ test.describe('SchemaForge E2E Smoke Suite', () => {
 
     expect(pageErrors).toEqual([]);
   });
+
+  test('Quality Linter diagnostics & Canvas multi-select alignment + drag-to-connect FKs', async ({
+    page,
+  }) => {
+    const pageErrors: string[] = [];
+    page.on('pageerror', (err) => pageErrors.push(err.message));
+
+    await page.goto('/');
+    const cmContent = page.locator('.cm-content').first();
+    await expect(cmContent).toBeVisible();
+
+    const testSchema = [
+      'Table users {',
+      '  id int [pk]',
+      '  email varchar [unique]',
+      '}',
+      '',
+      'Table orders {',
+      '  user_id int',
+      '  total_amount decimal',
+      '}',
+    ].join('\n');
+
+    await cmContent.click();
+    await page.keyboard.press('ControlOrMeta+a');
+    await page.keyboard.press('Backspace');
+    await page.keyboard.insertText(testSchema);
+
+    await expect(page.getByText('Valid DBML syntax')).toBeVisible();
+
+    // Non-blocking quality hints badge should appear in editor footer
+    const qualityBtn = page.getByRole('button', { name: /quality hint/i });
+    await expect(qualityBtn).toBeVisible();
+    await qualityBtn.click();
+
+    const qualityPanel = page.getByRole('region', {
+      name: 'Schema Quality Diagnostics',
+    });
+    await expect(qualityPanel).toBeVisible();
+    await expect(qualityPanel.getByText(/Missing PK/)).toBeVisible();
+    await expect(qualityPanel.getByText(/Nullable Unique/)).toBeVisible();
+
+    // Filter to warnings only
+    await qualityPanel.getByRole('button', { name: /^Warn \(/ }).click();
+    await expect(qualityPanel.getByText(/Missing PK/)).toBeVisible();
+    await expect(qualityPanel.getByText(/Nullable Unique/)).toBeHidden();
+
+    await qualityPanel
+      .getByRole('button', { name: 'Close Schema Quality panel' })
+      .click();
+    await expect(qualityPanel).toBeHidden();
+
+    // Auto Layout so both cards sit cleanly separated in viewport
+    await page.getByRole('button', { name: 'Auto Layout' }).click();
+
+    const usersCard = page.locator('[data-table-card="users"]').first();
+    const ordersCard = page.locator('[data-table-card="orders"]').first();
+    await expect(usersCard).toBeVisible();
+    await expect(ordersCard).toBeVisible();
+
+    // Drag ordersCard horizontally to the right so the two cards are side-by-side
+    const initialOrdersBox = await ordersCard.boundingBox();
+    expect(initialOrdersBox).not.toBeNull();
+    await page.mouse.move(
+      initialOrdersBox!.x + initialOrdersBox!.width / 2,
+      initialOrdersBox!.y + 18
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      initialOrdersBox!.x + initialOrdersBox!.width / 2 + 340,
+      initialOrdersBox!.y + 18,
+      { steps: 6 }
+    );
+    await page.mouse.up();
+
+    // Fit both side-by-side tables cleanly inside the canvas viewport
+    await page.getByRole('button', { name: 'Fit diagram to viewport' }).click();
+
+    // orders is already selected from the drag; Shift+Click users to multi-select both
+    await usersCard.click({ modifiers: ['Shift'] });
+
+    const alignToolbar = page.getByRole('toolbar', {
+      name: 'Multi-select table alignment',
+    });
+    await expect(alignToolbar).toBeVisible();
+    await expect(alignToolbar.getByText('2 selected')).toBeVisible();
+
+    await alignToolbar.getByRole('button', { name: 'Align top' }).click();
+    const usersBox = await usersCard.boundingBox();
+    const ordersBox = await ordersCard.boundingBox();
+    expect(usersBox).not.toBeNull();
+    expect(ordersBox).not.toBeNull();
+    expect(Math.abs((usersBox?.y ?? 0) - (ordersBox?.y ?? 100))).toBeLessThan(3);
+
+    await alignToolbar
+      .getByRole('button', { name: 'Clear multi-selection' })
+      .click();
+    await expect(alignToolbar).toBeHidden();
+
+    // Drag-to-connect from orders.user_id handle to users.id column row
+    const sourceCol = page.locator('[data-fk-col="orders.user_id"]').first();
+    await sourceCol.hover();
+    const handle = page
+      .locator('[data-fk-handle="orders.user_id:left"]')
+      .first();
+    const targetCol = page.locator('[data-fk-col="users.id"]').first();
+
+    const hBox = await handle.boundingBox();
+    const tBox = await targetCol.boundingBox();
+    expect(hBox).not.toBeNull();
+    expect(tBox).not.toBeNull();
+
+    await page.mouse.move(
+      hBox!.x + hBox!.width / 2,
+      hBox!.y + hBox!.height / 2
+    );
+    await page.mouse.down();
+    await page.mouse.move(
+      tBox!.x + tBox!.width / 2,
+      tBox!.y + tBox!.height / 2,
+      { steps: 8 }
+    );
+    await page.mouse.up();
+
+    await expect(
+      page.getByText('Added Ref: orders.user_id > users.id')
+    ).toBeVisible();
+    const updatedDbml = await cmContent.innerText();
+    expect(updatedDbml).toContain('Ref: orders.user_id > users.id');
+
+    expect(pageErrors).toEqual([]);
+  });
 });

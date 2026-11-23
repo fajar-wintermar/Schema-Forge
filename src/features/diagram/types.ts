@@ -42,9 +42,15 @@ export interface DiagramCanvasProps {
   readOnly?: boolean;
   onResetLayout?: () => void;
   hasCustomLayout?: boolean;
+  onCreateRef?: (
+    fromTableId: string,
+    fromCol: string,
+    toTableId: string,
+    toCol: string
+  ) => void;
 }
 
-export type CursorMode = 'select' | 'pan';
+export type CursorMode = 'select' | 'marquee' | 'pan';
 export type EdgeRoutingMode = 'bezier' | 'orthogonal';
 export type CrossDomainEdgeMode = 'show' | 'bundle' | 'hide';
 
@@ -80,12 +86,38 @@ export type DragState =
       origGroup: string | null;
     }
   | {
+      type: 'multi-table';
+      posKeys: string[];
+      startX: number;
+      startY: number;
+      origPositions: Record<string, TablePosition>;
+    }
+  | {
       type: 'group';
       groupName: string;
       posKeys: string[];
       startX: number;
       startY: number;
       origPositions: Record<string, TablePosition>;
+    }
+  | {
+      type: 'marquee';
+      startWorldX: number;
+      startWorldY: number;
+      currentWorldX: number;
+      currentWorldY: number;
+      additive: boolean;
+      initialSelected: string[];
+    }
+  | {
+      type: 'connect-fk';
+      fromPosKey: string;
+      fromTableId: string;
+      fromCol: string;
+      startWorldX: number;
+      startWorldY: number;
+      currentWorldX: number;
+      currentWorldY: number;
     }
   | {
       type: 'note';

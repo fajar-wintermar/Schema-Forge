@@ -2,6 +2,7 @@ import {
   DetailLevel,
   formatDomainLabel,
   ParsedSchema,
+  RefRelation,
   SchemaModuleFile,
   StickyNote,
   WorkspaceProject,
@@ -11,6 +12,7 @@ import {
   computeAutoLayout,
 } from '../../../utils/autoLayout';
 import {
+  addRefInDbml,
   assignTableToGroupInDbml,
   deleteTableGroupInDbml,
   moveTableToGroupInDbml,
@@ -528,6 +530,96 @@ export function useDiagramSchemaActions({
     }));
   };
 
+  const handleCreateRef = (
+    fromTableId: string,
+    fromCol: string,
+    toTableId: string,
+    toCol: string
+  ) => {
+    if (!activeWorkspace) return;
+    if (fromTableId === toTableId && fromCol === toCol) return;
+
+    const fromTable = parsedSchema.tables.find((t) => t.id === fromTableId);
+    const toTable = parsedSchema.tables.find((t) => t.id === toTableId);
+    const fromColDef = fromTable?.columns.find((c) => c.name === fromCol);
+    const toColDef = toTable?.columns.find((c) => c.name === toCol);
+
+    // Orient so child FK -> parent PK uses `>` cleanly
+    let refFromTable = fromTableId;
+    let refFromCol = fromCol;
+    let refToTable = toTableId;
+    let refToCol = toCol;
+    let relation: RefRelation = '>';
+
+    if (fromColDef?.pk && !toColDef?.pk) {
+      refFromTable = toTableId;
+      refFromCol = toCol;
+      refToTable = fromTableId;
+      refToCol = fromCol;
+      relation = '>';
+    } else if (fromColDef?.unique && toColDef?.unique && !toColDef?.pk && !fromColDef?.pk) {
+      relation = '-';
+    }
+
+    if (isModular) {
+      const files = activeWorkspace.schemaFiles || [];
+      const ownerMod =
+        findModuleDefiningTable(files, refFromTable) ||
+        findModuleDefiningTable(files, refToTable) ||
+        files[0];
+      if (!ownerMod) return;
+
+      const res = addRefInDbml(
+        ownerMod.content,
+        refFromTable,
+        refFromCol,
+        refToTable,
+        refToCol,
+        relation,
+        parsedSchema
+      );
+      if (res.duplicate) {
+        showToast(
+          `Relationship already exists between ${refFromTable}.${refFromCol} and ${refToTable}.${refToCol}`
+        );
+        return;
+      }
+      if (res.added) {
+        updateModularFiles((currFiles) => ({
+          files: currFiles.map((f) =>
+            f.path === ownerMod.path ? { ...f, content: res.dbml } : f
+          ),
+        }));
+        showToast(
+          `Added Ref: ${refFromTable}.${refFromCol} ${relation} ${refToTable}.${refToCol}`
+        );
+      }
+      return;
+    }
+
+    const res = addRefInDbml(
+      activeWorkspace.dbml,
+      refFromTable,
+      refFromCol,
+      refToTable,
+      refToCol,
+      relation,
+      parsedSchema
+    );
+    if (res.duplicate) {
+      showToast(
+        `Relationship already exists between ${refFromTable}.${refFromCol} and ${refToTable}.${refToCol}`
+      );
+      return;
+    }
+    if (res.added) {
+      updateActiveWorkspace((ws) => ({ ...ws, dbml: res.dbml }));
+      showToast(
+        `Added Ref: ${refFromTable}.${refFromCol} ${relation} ${refToTable}.${refToCol}`
+      );
+    }
+  };
+
   return {
     handleDetailLevelChange,
     handleAutoLayout,
@@ -543,5 +635,6 @@ export function useDiagramSchemaActions({
     handleAddStickyNote,
     handleUpdateStickyNote,
     handleDeleteStickyNote,
+    handleCreateRef,
   };
 }

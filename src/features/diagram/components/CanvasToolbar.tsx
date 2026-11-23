@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  BoxSelect,
   Check,
   ChevronUp,
   CornerDownRight,
@@ -89,7 +90,7 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
       <button
         type="button"
         onClick={() => onUpdateCursorMode('select')}
-        title="Select & Drag Objects (V) — click and drag tables, groups, and notes"
+        title="Select & Drag Objects (V) — hold Shift + drag canvas for box multi-select"
         className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-colors whitespace-nowrap ${
           cursorMode === 'select'
             ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
@@ -98,6 +99,19 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
       >
         <MousePointer2 className="w-3.5 h-3.5 shrink-0" />
         <span>Select</span>
+      </button>
+      <button
+        type="button"
+        onClick={() => onUpdateCursorMode('marquee')}
+        title="Box Multi-Select (M) — drag rectangle on canvas to select multiple tables"
+        className={`flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium transition-colors whitespace-nowrap ${
+          cursorMode === 'marquee'
+            ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
+            : 'text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-slate-100'
+        }`}
+      >
+        <BoxSelect className="w-3.5 h-3.5 shrink-0" />
+        <span>Box</span>
       </button>
       <button
         type="button"

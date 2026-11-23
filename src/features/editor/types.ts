@@ -1,9 +1,12 @@
 import { ParseError, SchemaModuleFile, TableDef } from '../../types/schema';
+import { SchemaLintIssue, SchemaLintResult } from '../../utils/schemaLinter';
 
 export interface DbmlEditorProps {
   value: string;
   onChange: (next: string) => void;
   errors: ParseError[];
+  lintResult?: SchemaLintResult;
+  onJumpToLintIssue?: (issue: SchemaLintIssue) => void;
   scrollToLine?: number | null;
   enumNames?: string[];
   partialNames?: string[];

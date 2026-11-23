@@ -11,13 +11,14 @@
 - **Lossless Modular DBML + Real GitHub Integration**: Supports splitting schemas into `schema/*.dbml` modules and custom nested subfolders with lossless Flatten/Split round-tripping, a toggleable Explorer panel, cross-file error mapping, branch initialization, batched Git commits, commit history comparison, and incremental SQL migrations.
 - **Incremental SQL Migrations (`ALTER`)**: Compares any two saved version snapshots or Git commits to generate clean PostgreSQL and MySQL `ALTER TABLE`, `CREATE/DROP INDEX`, enum, and foreign-key migration scripts (keeping DBML documentation notes out of `.sql` DDL files).
 - **Domain-First Visual Organization & Focus Tools**: `TableGroup` containers (plus explicit filtering and scoped export for **Ungrouped** tables on the canvas without altering Docs), multi-domain shared tables, Focus Neighborhood mode (`F`), orthogonal/curved/bundled edge routing, custom table header colors, and sticky architecture notes.
+- **Built-In Schema Quality Linter & Automated Regression Suite**: Non-blocking Schema Quality Analyzer catches unindexed foreign keys, missing primary keys, `snake_case`/`camelCase` naming drift, nullable unique keys, and multi-table circular FK cycles, backed by Vitest unit tests and Playwright E2E smoke tests.
+- **Interactive Canvas Authoring**: Supports marquee/Shift multi-select, real-time snap alignment guides, multi-table align/distribute controls, and visual drag-from-column-to-column FK `Ref:` creation.
 - **Local-First Security, Offline PWA & Edge Cloud Sync**: Persists locally in AES-256-GCM encrypted IndexedDB with full offline PWA support (including iOS & Firefox install guides), responsive grouped TopBar navigation, and optional Cloudflare D1 / Node SQLite sync with clean revocable/deletable versioned share links.
 
 ### Current Limitations (Cons)
 - **Direct-Push GitHub Flow & Layout Outside Git**: Supports pushing commits directly to branches and comparing Git commits, but lacks an in-app **Create Branch & Open Pull Request** flow and does not yet track `tablePositions` / `stickyNotes` in `.schemaforge/layout.json` inside Git.
 - **DBML/SQL-Centric Import/Export Only**: Supports DBML, PostgreSQL/MySQL DDL, incremental SQL migrations, CSV, SVG, and PNG, while ORM/API formats (Prisma, Drizzle, TypeORM, SQLAlchemy, OpenAPI, Mermaid ERD, and standalone static HTML/Markdown doc bundles) are not yet available.
-- **No Built-In Schema Quality Linter or Live DB Introspection**: Detects syntax/reference errors, but does not warn on schema design issues (e.g., unindexed foreign keys, missing PKs, naming drift, circular FKs) or introspect live databases directly.
-- **Limited Canvas Authoring Gestures**: Supports dragging individual tables/groups and editing via DBML/Inspector, but lacks multi-table box selection, alignment guides, and visual drag-from-column-to-column FK creation.
+- **No Live DB Introspection**: Includes static quality diagnostics and SQL/DBML parsing, but does not yet connect directly to live database catalogs via a CLI bridge.
 - **No Threaded Collaboration**: Share links are view-only and sticky notes are standalone annotations rather than threaded, resolvable PR review discussions.
 
 ---
@@ -43,9 +44,9 @@
 
 - [x] **CodeMirror 6 Editor, Explorer Toggle & Word Wrap (`Alt+Z`)**
   - CodeMirror 6 with DBML syntax theme, collapsible blocks, bracket matching, `Alt+Z` / `⌥Z` word wrap toggle, toggleable modular Explorer, and lossless subfolder preservation across Flatten/Split.
-- [ ] **Schema Quality Linter & Best-Practice Analyzer**
+- [x] **Schema Quality Linter & Best-Practice Analyzer**
   - Non-blocking diagnostics panel flagging unindexed foreign-key columns, tables without primary keys, inconsistent `snake_case`/`camelCase` naming, nullable unique keys, and circular FK cycles.
-- [ ] **Interactive Canvas Multi-Select, Alignment & Drag-to-Connect FKs**
+- [x] **Interactive Canvas Multi-Select, Alignment & Drag-to-Connect FKs**
   - Marquee/Shift multi-select for tables, snap alignment guides (align left/top/distribute), and dragging from a column handle to another column to insert a DBML `Ref` automatically.
 - [x] **Automated Regression Suite (Vitest + Playwright)**
   - Unit tests (`tests/unit/`) for DBML parsing, lossless modular round-tripping, semantic diffs, and PostgreSQL/MySQL `ALTER` SQL generation, plus Playwright smoke tests (`tests/e2e/`) for Editor, Diagram, Docs, and Share workflows.
@@ -87,8 +88,8 @@
 
 ## 3. Recommended Priority Order (Highest Leverage Next)
 
-1. **Schema Quality Linter** — Immediately catch real DB design mistakes (like unindexed foreign keys, missing PKs, naming drift, or circular refs) before migrations hit production.
-2. **`.schemaforge/layout.json` in GitHub Sync + "Open Pull Request" Flow** — Unlocks shared team diagram layouts and PR review workflows using GitHub alone.
-3. **Interactive Canvas Drag-to-Connect FKs & Multi-Select Alignment** — Makes visual schema editing feel as fast as DBML coding.
-4. **Prisma / Drizzle / OpenAPI Importers + ORM & Static Docs Bundle Exporters** — Expands adoption across full-stack TypeScript, Python, and API-first teams.
-5. **SchemaForge CLI / GitHub Action & Live DB Introspection Bridge** — Integrates SchemaForge into CI/CD checks and existing production databases.
+1. **`.schemaforge/layout.json` in GitHub Sync + "Open Pull Request" Flow** — Unlocks shared team diagram layouts and PR review workflows using GitHub alone.
+2. **Prisma / Drizzle / OpenAPI Importers + ORM & Static Docs Bundle Exporters** — Expands adoption across full-stack TypeScript, Python, and API-first teams.
+3. **SchemaForge CLI / GitHub Action & Live DB Introspection Bridge** — Integrates SchemaForge into CI/CD checks and existing production databases.
+4. **Anchored Review Comments & Live Presence** — Evolves sticky notes into threaded team review feedback.
+5. **150+ Table Canvas Virtualization** — Ensures smooth 60fps rendering on massive enterprise schemas.

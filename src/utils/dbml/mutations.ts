@@ -220,3 +220,50 @@ export function reorderTableGroupsInDbml(
 
   return updated;
 }
+
+function formatDbmlRefIdentifier(identifier: string): string {
+  return identifier
+    .split('.')
+    .map((part) => (/[^a-zA-Z0-9_]/.test(part) ? `"${part}"` : part))
+    .join('.');
+}
+
+export function addRefInDbml(
+  dbml: string,
+  fromTable: string,
+  fromCol: string,
+  toTable: string,
+  toCol: string,
+  relation: '>' | '<' | '-' | '<>' = '>',
+  existingSchema?: ParsedSchema
+): { dbml: string; added: boolean; duplicate: boolean } {
+  const refsToCheck = existingSchema?.refs ?? parseDbml(dbml).refs;
+  const isSameSide = (
+    aTable: string,
+    aCols: string[],
+    bTable: string,
+    bCol: string
+  ) => aTable === bTable && aCols.length === 1 && aCols[0] === bCol;
+
+  const duplicate = refsToCheck.some(
+    (r) =>
+      (isSameSide(r.fromTable, r.fromColumns, fromTable, fromCol) &&
+        isSameSide(r.toTable, r.toColumns, toTable, toCol)) ||
+      (isSameSide(r.fromTable, r.fromColumns, toTable, toCol) &&
+        isSameSide(r.toTable, r.toColumns, fromTable, fromCol))
+  );
+
+  if (duplicate) {
+    return { dbml, added: false, duplicate: true };
+  }
+
+  const refLine = `Ref: ${formatDbmlRefIdentifier(
+    fromTable
+  )}.${formatDbmlRefIdentifier(fromCol)} ${relation} ${formatDbmlRefIdentifier(
+    toTable
+  )}.${formatDbmlRefIdentifier(toCol)}`;
+
+  const trimmed = dbml.trimEnd();
+  const nextDbml = trimmed ? `${trimmed}\n\n${refLine}\n` : `${refLine}\n`;
+  return { dbml: nextDbml, added: true, duplicate: false };
+}

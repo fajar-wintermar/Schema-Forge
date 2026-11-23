@@ -1,5 +1,6 @@
 export { parseDbml } from './dbml/parser';
 export {
+  addRefInDbml,
   assignTableToGroupInDbml,
   deleteTableGroupInDbml,
   moveTableToGroupInDbml,

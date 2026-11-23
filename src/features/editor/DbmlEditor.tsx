@@ -37,6 +37,8 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
   value,
   onChange,
   errors,
+  lintResult,
+  onJumpToLintIssue,
   scrollToLine,
   enumNames = [],
   tables = [],
@@ -67,6 +69,7 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
   const gotoInputRef = useRef<HTMLInputElement>(null);
 
   const [problemsOpen, setProblemsOpen] = useState(false);
+  const [qualityOpen, setQualityOpen] = useState(false);
 
   // Find / Replace & Go to Line state
   const [findOpen, setFindOpen] = useState(false);
@@ -533,6 +536,17 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
             errors={errors}
             problemsOpen={problemsOpen}
             onToggleProblems={() => setProblemsOpen((p) => !p)}
+            lintResult={lintResult}
+            qualityOpen={qualityOpen}
+            onToggleQuality={() => setQualityOpen((q) => !q)}
+            onCloseQuality={() => setQualityOpen(false)}
+            onJumpToLintIssue={(issue) => {
+              if (onJumpToLintIssue) {
+                onJumpToLintIssue(issue);
+              } else if (issue.line) {
+                handleJumpToLine(issue.line);
+              }
+            }}
             onJumpToLine={handleJumpToLine}
             isModular={isModular}
             otherFileErrorEntries={otherFileErrorEntries}

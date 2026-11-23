@@ -12,7 +12,10 @@ export interface TableCardProps {
   detailLevel: DetailLevel;
   fkSet?: Set<string>;
   isSelected: boolean;
+  isMultiSelected?: boolean;
   isHovered: boolean;
+  isConnectingFk?: boolean;
+  connectTargetCol?: string | null;
   focusState?: 'focused' | 'neighbor' | 'dimmed' | 'normal';
   highlightedColumn?: { tableId: string; columnName: string } | null;
   colorPickerOpen: boolean;
@@ -20,6 +23,11 @@ export interface TableCardProps {
   darkMode: boolean;
   onHoverChange: (hovered: boolean) => void;
   onStartDrag: (e: React.PointerEvent) => void;
+  onStartConnectFk?: (
+    colName: string,
+    side: 'left' | 'right',
+    e: React.PointerEvent
+  ) => void;
   onToggleColorPicker: () => void;
   onCloseColorPicker: () => void;
   onChangeTableHeaderColor: (tableId: string, color: string | null) => void;
@@ -32,7 +40,10 @@ export const TableCard: React.FC<TableCardProps> = ({
   detailLevel,
   fkSet,
   isSelected,
+  isMultiSelected = false,
   isHovered,
+  isConnectingFk = false,
+  connectTargetCol = null,
   focusState = 'normal',
   highlightedColumn,
   colorPickerOpen,
@@ -40,6 +51,7 @@ export const TableCard: React.FC<TableCardProps> = ({
   darkMode,
   onHoverChange,
   onStartDrag,
+  onStartConnectFk,
   onToggleColorPicker,
   onCloseColorPicker,
   onChangeTableHeaderColor,
@@ -63,13 +75,16 @@ export const TableCard: React.FC<TableCardProps> = ({
 
   return (
     <div
+      data-table-card={table.id}
+      data-pos-key={inst.posKey}
+      data-selected={isSelected || isMultiSelected ? 'true' : 'false'}
       style={{
         left: pos.x,
         top: pos.y,
         width: TABLE_WIDTH,
       }}
       onMouseEnter={() => {
-        if (cursorMode === 'select') onHoverChange(true);
+        if (cursorMode !== 'pan') onHoverChange(true);
       }}
       onMouseLeave={() => onHoverChange(false)}
       onPointerDown={(e) => {
@@ -82,7 +97,7 @@ export const TableCard: React.FC<TableCardProps> = ({
       } ${
         focusState === 'dimmed'
           ? 'opacity-25 hover:opacity-85 border-slate-300 dark:border-slate-700'
-          : isSelected || focusState === 'focused'
+          : isSelected || isMultiSelected || focusState === 'focused'
           ? 'border-blue-600 ring-2 ring-blue-500/35 z-20'
           : focusState === 'neighbor'
           ? 'border-blue-400 dark:border-blue-500 ring-1 ring-blue-400/40 z-10'
@@ -184,12 +199,19 @@ export const TableCard: React.FC<TableCardProps> = ({
             const isColHighlighted =
               highlightedColumn?.tableId === table.id &&
               highlightedColumn?.columnName === col.name;
+            const isDropTarget = connectTargetCol === col.name;
+            const canConnect =
+              !readOnly && cursorMode !== 'pan' && Boolean(onStartConnectFk);
+
             return (
               <div
                 key={col.name}
+                data-fk-col={`${table.id}.${col.name}`}
                 style={{ height: rowH }}
-                className={`px-3 flex items-center justify-between gap-2 text-xs transition-colors ${
-                  isColHighlighted
+                className={`group/colrow relative px-3 flex items-center justify-between gap-2 text-xs transition-colors ${
+                  isDropTarget
+                    ? 'bg-emerald-500/15 dark:bg-emerald-500/25 ring-1 ring-inset ring-emerald-500'
+                    : isColHighlighted
                     ? 'bg-blue-500/15 dark:bg-blue-500/25 ring-1 ring-inset ring-blue-500/70'
                     : 'hover:bg-slate-50 dark:hover:bg-slate-800/40'
                 }`}
@@ -199,6 +221,45 @@ export const TableCard: React.FC<TableCardProps> = ({
                     .join(' · ') || undefined
                 }
               >
+                {canConnect && (
+                  <>
+                    <button
+                      type="button"
+                      data-fk-handle={`${table.id}.${col.name}:left`}
+                      aria-label={`Drag from ${table.id}.${col.name} left handle to create Ref`}
+                      title={`Drag to another column to create a Ref from ${table.id}.${col.name}`}
+                      onPointerDown={(e) => {
+                        e.stopPropagation();
+                        onStartConnectFk?.(col.name, 'left', e);
+                      }}
+                      className={`absolute -left-1.5 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full border-2 border-white dark:border-slate-900 bg-blue-600 dark:bg-blue-500 shadow-xs cursor-crosshair transition-opacity z-20 ${
+                        isDropTarget
+                          ? 'opacity-100 bg-emerald-500 scale-110'
+                          : isConnectingFk
+                          ? 'opacity-70 hover:opacity-100 hover:scale-110'
+                          : 'opacity-0 group-hover/colrow:opacity-100 hover:scale-110'
+                      }`}
+                    />
+                    <button
+                      type="button"
+                      data-fk-handle={`${table.id}.${col.name}:right`}
+                      aria-label={`Drag from ${table.id}.${col.name} right handle to create Ref`}
+                      title={`Drag to another column to create a Ref from ${table.id}.${col.name}`}
+                      onPointerDown={(e) => {
+                        e.stopPropagation();
+                        onStartConnectFk?.(col.name, 'right', e);
+                      }}
+                      className={`absolute -right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full border-2 border-white dark:border-slate-900 bg-blue-600 dark:bg-blue-500 shadow-xs cursor-crosshair transition-opacity z-20 ${
+                        isDropTarget
+                          ? 'opacity-100 bg-emerald-500 scale-110'
+                          : isConnectingFk
+                          ? 'opacity-70 hover:opacity-100 hover:scale-110'
+                          : 'opacity-0 group-hover/colrow:opacity-100 hover:scale-110'
+                      }`}
+                    />
+                  </>
+                )}
+
                 <div className="flex items-center gap-1.5 min-w-0">
                   {col.pk ? (
                     <KeyRound className="w-3 h-3 text-amber-500 shrink-0" />
