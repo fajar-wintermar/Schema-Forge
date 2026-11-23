@@ -14,7 +14,6 @@
 - **Local-First Security, Offline PWA & Edge Cloud Sync**: Persists locally in AES-256-GCM encrypted IndexedDB with full offline PWA support (including iOS & Firefox install guides), responsive grouped TopBar navigation, and optional Cloudflare D1 / Node SQLite sync with clean revocable/deletable versioned share links.
 
 ### Current Limitations (Cons)
-- **No Automated Test Suite in Repo**: Core engines (`dbmlParser`, `schemaModules`, `schemaDiff`, `sqlMigration`) and UI workflows currently rely on manual/ad-hoc checks and `tsc` rather than an automated Vitest + Playwright regression suite.
 - **Direct-Push GitHub Flow & Layout Outside Git**: Supports pushing commits directly to branches and comparing Git commits, but lacks an in-app **Create Branch & Open Pull Request** flow and does not yet track `tablePositions` / `stickyNotes` in `.schemaforge/layout.json` inside Git.
 - **DBML/SQL-Centric Import/Export Only**: Supports DBML, PostgreSQL/MySQL DDL, incremental SQL migrations, CSV, SVG, and PNG, while ORM/API formats (Prisma, Drizzle, TypeORM, SQLAlchemy, OpenAPI, Mermaid ERD, and standalone static HTML/Markdown doc bundles) are not yet available.
 - **No Built-In Schema Quality Linter or Live DB Introspection**: Detects syntax/reference errors, but does not warn on schema design issues (e.g., unindexed foreign keys, missing PKs, naming drift, circular FKs) or introspect live databases directly.
@@ -48,8 +47,8 @@
   - Non-blocking diagnostics panel flagging unindexed foreign-key columns, tables without primary keys, inconsistent `snake_case`/`camelCase` naming, nullable unique keys, and circular FK cycles.
 - [ ] **Interactive Canvas Multi-Select, Alignment & Drag-to-Connect FKs**
   - Marquee/Shift multi-select for tables, snap alignment guides (align left/top/distribute), and dragging from a column handle to another column to insert a DBML `Ref` automatically.
-- [ ] **Automated Regression Suite (Vitest + Playwright)**
-  - Unit tests for DBML parsing, lossless modular round-tripping, semantic diffs, and PostgreSQL/MySQL `ALTER` SQL generation, plus Playwright smoke tests for Editor/Diagram/Docs/Share flows.
+- [x] **Automated Regression Suite (Vitest + Playwright)**
+  - Unit tests (`tests/unit/`) for DBML parsing, lossless modular round-tripping, semantic diffs, and PostgreSQL/MySQL `ALTER` SQL generation, plus Playwright smoke tests (`tests/e2e/`) for Editor, Diagram, Docs, and Share workflows.
 - [ ] **GitHub Pull Request & Diff Review Flow**
   - Add a **Create Branch & Open Pull Request** flow in `GitHubModal`, pre-filling the PR description with SchemaForge's semantic `schemaDiff` summary (tables, columns, refs, enums, and domains changed).
 - [ ] **Expanded Schema Importers & Code Exporters**
@@ -88,7 +87,7 @@
 
 ## 3. Recommended Priority Order (Highest Leverage Next)
 
-1. **Automated Test Suite (Vitest + Playwright) + Schema Quality Linter** — Protects parser/SQL-migration correctness and immediately catches real DB design mistakes (like missing FK indexes) before migrations hit production.
+1. **Schema Quality Linter** — Immediately catch real DB design mistakes (like unindexed foreign keys, missing PKs, naming drift, or circular refs) before migrations hit production.
 2. **`.schemaforge/layout.json` in GitHub Sync + "Open Pull Request" Flow** — Unlocks shared team diagram layouts and PR review workflows using GitHub alone.
 3. **Interactive Canvas Drag-to-Connect FKs & Multi-Select Alignment** — Makes visual schema editing feel as fast as DBML coding.
 4. **Prisma / Drizzle / OpenAPI Importers + ORM & Static Docs Bundle Exporters** — Expands adoption across full-stack TypeScript, Python, and API-first teams.
