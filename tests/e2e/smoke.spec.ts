@@ -601,4 +601,84 @@ test.describe('SchemaForge E2E Smoke Suite', () => {
 
     expect(pageErrors).toEqual([]);
   });
+
+  test('Enterprise 160-table Canvas Virtualization: Auto-LOD on fit-view and viewport culling on zoom-in', async ({
+    page,
+  }) => {
+    const pageErrors: string[] = [];
+    page.on('pageerror', (err) => pageErrors.push(err.message));
+
+    await page.goto('/');
+    const cmContent = page.locator('.cm-content').first();
+    await expect(cmContent).toBeVisible();
+
+    // Generate a 160-table enterprise DBML schema across 10 domains
+    const blocks: string[] = [];
+    const domainTables: string[][] = Array.from({ length: 10 }, () => []);
+    for (let i = 0; i < 160; i++) {
+      const domainIdx = Math.floor(i / 16);
+      const tName = `ent_table_${i}`;
+      domainTables[domainIdx].push(tName);
+      const fkLine =
+        i > 0 && i % 4 !== 0
+          ? `\n  parent_id int [ref: > ent_table_${i - 1}.id]`
+          : '';
+      blocks.push(
+        `Table ${tName} {\n  id int [pk]\n  name varchar${fkLine}\n}`
+      );
+    }
+    domainTables.forEach((tbls, dIdx) => {
+      blocks.push(`TableGroup domain_${dIdx} {\n  ${tbls.join('\n  ')}\n}`);
+    });
+    const enterpriseDbml = blocks.join('\n\n');
+
+    await cmContent.click();
+    await page.keyboard.press('ControlOrMeta+a');
+    await page.keyboard.press('Backspace');
+    await page.keyboard.insertText(enterpriseDbml);
+
+    await expect(page.getByText('Valid DBML syntax')).toBeVisible();
+
+    // Switch to Diagram view & run Auto Layout + Fit View
+    const viewGroup = page.getByRole('group', { name: 'Workspace View Mode' });
+    await viewGroup.getByRole('button', { name: 'Diagram' }).click();
+
+    await page.getByRole('button', { name: 'Auto Layout' }).click();
+    await page.getByRole('button', { name: 'Fit diagram to viewport' }).click();
+
+    // Fit view zooms way out on 160 tables -> Minimal/Compact LOD kicks in automatically
+    const virtStatus = page.getByLabel('Canvas virtualization status');
+    await expect(virtStatus).toBeVisible();
+    await expect(virtStatus).toContainText(/160 tables/);
+    await expect(virtStatus).toContainText(/LOD/);
+
+    const lodAttrAtOverview = await page
+      .locator('[data-table-card]')
+      .first()
+      .getAttribute('data-lod');
+    expect(['minimal', 'compact']).toContain(lodAttrAtOverview);
+
+    // Jump to one specific table via Global Command Palette -> zooms to ~0.9x,
+    // triggers viewport culling (< 160 cards mounted) and restores full LOD
+    await page
+      .getByRole('button', { name: 'Open Global Command Palette' })
+      .click();
+    const paletteInput = page
+      .getByRole('dialog', { name: 'Global Command Palette' })
+      .locator('input');
+    await paletteInput.fill('ent_table_84');
+    await page.keyboard.press('Enter');
+
+    const mountedCardCount = await page.locator('[data-table-card]').count();
+    expect(mountedCardCount).toBeGreaterThan(0);
+    expect(mountedCardCount).toBeLessThan(120);
+
+    const focusedCard = page
+      .locator('[data-table-card="ent_table_84"]')
+      .first();
+    await expect(focusedCard).toBeVisible();
+    await expect(focusedCard).toHaveAttribute('data-lod', 'full');
+
+    expect(pageErrors).toEqual([]);
+  });
 });

@@ -32,6 +32,21 @@ import {
   EdgeRoutingMode,
 } from '../../utils/io/edgeGeometry';
 import {
+  CanvasLodTier,
+  computeExactViewportWorldRect,
+  computeWorldCullBounds,
+  ContainerDimensions,
+  cullCrossDomainBundles,
+  cullGroupBoxes,
+  cullResolvedEdges,
+  cullStickyNotes,
+  cullTableInstances,
+  MAX_CANVAS_ZOOM,
+  MIN_CANVAS_ZOOM,
+  resolveCanvasLod,
+} from './canvasVirtualization';
+import {
+  AUTO_LOD_STORAGE_KEY,
   CROSS_DOMAIN_EDGE_STORAGE_KEY,
   CrossDomainBundle,
   CrossDomainEdgeMode,
@@ -119,6 +134,17 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     } | null;
   } | null>(null);
 
+  const [containerSize, setContainerSize] = useState<ContainerDimensions>({
+    width: 1200,
+    height: 800,
+  });
+  const [autoLod, setAutoLod] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(AUTO_LOD_STORAGE_KEY) !== 'false';
+    } catch {
+      return true;
+    }
+  });
   const [focusMode, setFocusMode] = useState<boolean>(() => {
     try {
       return localStorage.getItem(FOCUS_MODE_STORAGE_KEY) === 'true';
@@ -144,6 +170,18 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
       }
     }
   );
+
+  const toggleAutoLod = useCallback(() => {
+    setAutoLod((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(AUTO_LOD_STORAGE_KEY, String(next));
+      } catch {
+        // ignore storage errors
+      }
+      return next;
+    });
+  }, []);
 
   const updateFocusMode = useCallback((next: boolean | ((prev: boolean) => boolean)) => {
     setFocusMode((prev) => {
@@ -196,6 +234,58 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
   }, []);
 
   const dragRef = useRef<DragState>(null);
+  const rafViewportIdRef = useRef<number | null>(null);
+  const pendingViewportRef = useRef<ViewportState | null>(null);
+  const latestViewportRef = useRef<ViewportState>(viewport);
+  latestViewportRef.current = viewport;
+
+  const scheduleViewportUpdate = useCallback(
+    (updater: ViewportState | ((prev: ViewportState) => ViewportState)) => {
+      const base = pendingViewportRef.current ?? latestViewportRef.current;
+      const next = typeof updater === 'function' ? updater(base) : updater;
+      pendingViewportRef.current = next;
+
+      if (rafViewportIdRef.current === null) {
+        rafViewportIdRef.current = window.requestAnimationFrame(() => {
+          rafViewportIdRef.current = null;
+          const commit = pendingViewportRef.current;
+          pendingViewportRef.current = null;
+          if (commit) {
+            setViewport(commit);
+          }
+        });
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const updateSize = () => {
+      const rect = el.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        setContainerSize((prev) =>
+          Math.abs(prev.width - rect.width) < 2 &&
+          Math.abs(prev.height - rect.height) < 2
+            ? prev
+            : { width: rect.width, height: rect.height }
+        );
+      }
+    };
+    updateSize();
+    const ro =
+      typeof ResizeObserver !== 'undefined'
+        ? new ResizeObserver(updateSize)
+        : null;
+    ro?.observe(el);
+    return () => {
+      ro?.disconnect();
+      if (rafViewportIdRef.current !== null) {
+        window.cancelAnimationFrame(rafViewportIdRef.current);
+      }
+    };
+  }, []);
 
   const fkColsByTable = useMemo(() => {
     const map = new Map<string, Set<string>>();
@@ -551,7 +641,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
       const zoom = Math.min(
         1.15,
         Math.max(
-          0.25,
+          MIN_CANVAS_ZOOM,
           Math.min((rect.width - pad * 2) / w, (rect.height - pad * 2) / h)
         )
       );
@@ -673,7 +763,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
       if (!drag) return;
 
       if (drag.type === 'pan') {
-        setViewport((prev) => ({
+        scheduleViewportUpdate((prev) => ({
           ...prev,
           x: drag.origX + (e.clientX - drag.startX),
           y: drag.origY + (e.clientY - drag.startY),
@@ -690,7 +780,10 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
 
         const movingRect = visibleTableRects.get(drag.posKey);
         const candidates = Array.from(visibleTableRects.values()).filter(
-          (r) => r.posKey !== drag.posKey
+          (r) =>
+            r.posKey !== drag.posKey &&
+            Math.abs(r.x - nx) < 1600 &&
+            Math.abs(r.y - ny) < 1200
         );
         const snap = computeSnapAlignment(
           {
@@ -922,6 +1015,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     visibleInstances,
     detailLevel,
     fkColsByTable,
+    scheduleViewportUpdate,
   ]);
 
   const handleWheel = (e: React.WheelEvent) => {
@@ -932,16 +1026,20 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
       const rect = el.getBoundingClientRect();
       const mouseX = e.clientX - rect.left;
       const mouseY = e.clientY - rect.top;
-
       const factor = e.deltaY < 0 ? 1.08 : 0.92;
-      const nextZoom = Math.min(2, Math.max(0.2, viewport.zoom * factor));
-      const scaleChange = nextZoom / viewport.zoom;
 
-      setViewport((prev) => ({
-        zoom: nextZoom,
-        x: mouseX - (mouseX - prev.x) * scaleChange,
-        y: mouseY - (mouseY - prev.y) * scaleChange,
-      }));
+      scheduleViewportUpdate((prev) => {
+        const nextZoom = Math.min(
+          MAX_CANVAS_ZOOM,
+          Math.max(MIN_CANVAS_ZOOM, prev.zoom * factor)
+        );
+        const scaleChange = nextZoom / prev.zoom;
+        return {
+          zoom: nextZoom,
+          x: mouseX - (mouseX - prev.x) * scaleChange,
+          y: mouseY - (mouseY - prev.y) * scaleChange,
+        };
+      });
     }
   };
 
@@ -959,18 +1057,11 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     let minY = Infinity;
     let maxX = -Infinity;
     let maxY = -Infinity;
-    for (const inst of visibleInstances) {
-      const p = positions[inst.posKey] || positions[inst.table.id] || { x: 0, y: 0 };
-      const h = getTableHeight(
-        inst.table,
-        detailLevel,
-        fkColsByTable.get(inst.table.id),
-        inst.sharedGroups.length > 1
-      );
-      minX = Math.min(minX, p.x);
-      minY = Math.min(minY, p.y);
-      maxX = Math.max(maxX, p.x + TABLE_WIDTH);
-      maxY = Math.max(maxY, p.y + h);
+    for (const rect of visibleTableRects.values()) {
+      minX = Math.min(minX, rect.x);
+      minY = Math.min(minY, rect.y);
+      maxX = Math.max(maxX, rect.x + rect.width);
+      maxY = Math.max(maxY, rect.y + rect.height);
     }
     if (!isFinite(minX)) return { minX: 0, minY: 0, width: 1000, height: 800 };
     return {
@@ -979,7 +1070,297 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
       width: Math.max(400, maxX - minX + 160),
       height: Math.max(300, maxY - minY + 160),
     };
-  }, [visibleInstances, positions, detailLevel, fkColsByTable]);
+  }, [visibleTableRects]);
+
+  const rawCullBounds = computeWorldCullBounds(viewport, containerSize, 220, 140);
+  const worldCullBounds = useMemo(
+    () => ({
+      minX: rawCullBounds.minX,
+      minY: rawCullBounds.minY,
+      maxX: rawCullBounds.maxX,
+      maxY: rawCullBounds.maxY,
+    }),
+    [
+      rawCullBounds.minX,
+      rawCullBounds.minY,
+      rawCullBounds.maxX,
+      rawCullBounds.maxY,
+    ]
+  );
+
+  const pinnedPosKeys = useMemo(() => {
+    const set = new Set<string>(effectiveSelectedPosKeys);
+    if (connectPreview?.fromPosKey) set.add(connectPreview.fromPosKey);
+    if (connectPreview?.target?.posKey) set.add(connectPreview.target.posKey);
+    if (colorPickerPosKey) set.add(colorPickerPosKey);
+    return set;
+  }, [effectiveSelectedPosKeys, connectPreview, colorPickerPosKey]);
+
+  const pinnedTableIds = useMemo(() => {
+    const set = new Set<string>();
+    if (selectedTableId) set.add(selectedTableId);
+    if (focusedTableId) set.add(focusedTableId);
+    if (hoveredTableId) set.add(hoveredTableId);
+    if (highlightedColumn?.tableId) set.add(highlightedColumn.tableId);
+    return set;
+  }, [selectedTableId, focusedTableId, hoveredTableId, highlightedColumn?.tableId]);
+
+  const culledGroupBoxes = useMemo(
+    () => cullGroupBoxes(visibleGroupBoxes, worldCullBounds),
+    [visibleGroupBoxes, worldCullBounds]
+  );
+
+  const culledInstances = useMemo(
+    () =>
+      cullTableInstances({
+        instances: visibleInstances,
+        tableRects: visibleTableRects,
+        bounds: worldCullBounds,
+        pinnedPosKeys,
+        pinnedTableIds,
+      }),
+    [visibleInstances, visibleTableRects, worldCullBounds, pinnedPosKeys, pinnedTableIds]
+  );
+
+  const culledStickyNotes = useMemo(
+    () => cullStickyNotes(visibleStickyNotes, worldCullBounds),
+    [visibleStickyNotes, worldCullBounds]
+  );
+
+  const culledEdges = useMemo(
+    () =>
+      cullResolvedEdges({
+        edges: renderedEdges,
+        tableRects: visibleTableRects,
+        positions,
+        detailLevel,
+        fkColsByTable,
+        bounds: worldCullBounds,
+        pinnedTableIds,
+        hoveredRefId,
+      }),
+    [
+      renderedEdges,
+      visibleTableRects,
+      positions,
+      detailLevel,
+      fkColsByTable,
+      worldCullBounds,
+      pinnedTableIds,
+      hoveredRefId,
+    ]
+  );
+
+  const culledBundles = useMemo(
+    () =>
+      cullCrossDomainBundles({
+        bundles: crossDomainBundles,
+        anchorBoxByDomain,
+        bounds: worldCullBounds,
+        hoveredBundleId,
+      }),
+    [crossDomainBundles, anchorBoxByDomain, worldCullBounds, hoveredBundleId]
+  );
+
+  const activeLod: CanvasLodTier = resolveCanvasLod({
+    zoom: viewport.zoom,
+    renderedTableCount: culledInstances.length,
+    autoLodEnabled: autoLod,
+  });
+
+  const minimapViewportRect = useMemo(
+    () => computeExactViewportWorldRect(viewport, containerSize),
+    [viewport, containerSize]
+  );
+
+  const latestPropsRef = useRef({
+    positions,
+    selectedTableId,
+    selectedPosKeySet,
+    effectiveSelectedPosKeys,
+    visibleInstances,
+    detailLevel,
+    fkColsByTable,
+    readOnly,
+    onSelectTable,
+    onChangeSelectedDomains,
+  });
+  latestPropsRef.current = {
+    positions,
+    selectedTableId,
+    selectedPosKeySet,
+    effectiveSelectedPosKeys,
+    visibleInstances,
+    detailLevel,
+    fkColsByTable,
+    readOnly,
+    onSelectTable,
+    onChangeSelectedDomains,
+  };
+
+  const handleTableHoverChange = useCallback((tableId: string, hovered: boolean) => {
+    setHoveredTableId(hovered ? tableId : null);
+  }, []);
+
+  const handleToggleColorPicker = useCallback((posKey: string) => {
+    setColorPickerPosKey((prev) => (prev === posKey ? null : posKey));
+  }, []);
+
+  const handleCloseColorPicker = useCallback(() => {
+    setColorPickerPosKey(null);
+  }, []);
+
+  const handleTableStartDrag = useCallback(
+    (inst: (typeof instances)[number], e: React.PointerEvent) => {
+      const {
+        positions: curPos,
+        selectedTableId: curSelectedTableId,
+        selectedPosKeySet: curSelectedSet,
+        effectiveSelectedPosKeys: curSelectedKeys,
+        visibleInstances: curVisibleInstances,
+        onSelectTable: selectTable,
+      } = latestPropsRef.current;
+
+      setColorPickerPosKey(null);
+      if (e.shiftKey) {
+        setSelectedPosKeys((prev) => {
+          const exists = prev.includes(inst.posKey);
+          if (exists) return prev.filter((k) => k !== inst.posKey);
+          const base =
+            prev.length === 0 && curSelectedTableId
+              ? curVisibleInstances
+                  .filter((vi) => vi.table.id === curSelectedTableId)
+                  .map((vi) => vi.posKey)
+              : prev;
+          return Array.from(new Set([...base, inst.posKey]));
+        });
+        selectTable(inst.table.id);
+        return;
+      }
+
+      if (curSelectedSet.has(inst.posKey) && curSelectedKeys.length > 1) {
+        const origPositions: Record<string, TablePosition> = {};
+        for (const pk of curSelectedKeys) {
+          const instMatch = curVisibleInstances.find((vi) => vi.posKey === pk);
+          const p =
+            curPos[pk] ||
+            (instMatch ? curPos[instMatch.table.id] : undefined) || {
+              x: 0,
+              y: 0,
+            };
+          origPositions[pk] = p;
+        }
+        dragRef.current = {
+          type: 'multi-table',
+          posKeys: curSelectedKeys,
+          startX: e.clientX,
+          startY: e.clientY,
+          origPositions,
+        };
+        return;
+      }
+
+      const pos = curPos[inst.posKey] || curPos[inst.table.id] || { x: 0, y: 0 };
+      setSelectedPosKeys([inst.posKey]);
+      selectTable(inst.table.id);
+      dragRef.current = {
+        type: 'table',
+        posKey: inst.posKey,
+        tableId: inst.table.id,
+        startX: e.clientX,
+        startY: e.clientY,
+        origPos: pos,
+        origGroup: inst.groupName,
+      };
+    },
+    []
+  );
+
+  const handleTableStartConnectFk = useCallback(
+    (
+      inst: (typeof instances)[number],
+      colName: string,
+      side: 'left' | 'right'
+    ) => {
+      const {
+        positions: curPos,
+        detailLevel: curDetailLevel,
+        fkColsByTable: curFkCols,
+      } = latestPropsRef.current;
+      const pos = curPos[inst.posKey] || curPos[inst.table.id] || { x: 0, y: 0 };
+      const anchor = getColumnPortWorldPosition(
+        inst.table,
+        pos,
+        colName,
+        side,
+        curDetailLevel,
+        curFkCols.get(inst.table.id)
+      );
+      dragRef.current = {
+        type: 'connect-fk',
+        fromPosKey: inst.posKey,
+        fromTableId: inst.table.id,
+        fromCol: colName,
+        startWorldX: anchor.x,
+        startWorldY: anchor.y,
+        currentWorldX: anchor.x,
+        currentWorldY: anchor.y,
+      };
+      setConnectPreview({
+        fromPosKey: inst.posKey,
+        fromTableId: inst.table.id,
+        fromCol: colName,
+        fromX: anchor.x,
+        fromY: anchor.y,
+        toX: anchor.x,
+        toY: anchor.y,
+        target: null,
+      });
+    },
+    []
+  );
+
+  const handleGroupStartDrag = useCallback(
+    (gb: (typeof visibleGroupBoxes)[number], e: React.PointerEvent) => {
+      const curPos = latestPropsRef.current.positions;
+      const origPositions: Record<string, TablePosition> = {};
+      for (const pk of gb.posKeys) {
+        origPositions[pk] = curPos[pk] || { x: 0, y: 0 };
+      }
+      dragRef.current = {
+        type: 'group',
+        groupName: gb.name,
+        posKeys: gb.posKeys,
+        startX: e.clientX,
+        startY: e.clientY,
+        origPositions,
+      };
+    },
+    []
+  );
+
+  const handleToggleOnlyDomain = useCallback(
+    (groupName: string, isOnlySelected: boolean) => {
+      latestPropsRef.current.onChangeSelectedDomains(
+        isOnlySelected ? [] : [groupName]
+      );
+    },
+    []
+  );
+
+  const handleStickyNoteStartDrag = useCallback(
+    (note: (typeof visibleStickyNotes)[number], e: React.PointerEvent) => {
+      dragRef.current = {
+        type: 'note',
+        noteId: note.id,
+        startX: e.clientX,
+        startY: e.clientY,
+        origX: note.x,
+        origY: note.y,
+      };
+    },
+    []
+  );
 
   return (
     <div
@@ -1043,12 +1424,13 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
       <div
         data-canvas-bg="true"
         style={{
-          transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.zoom})`,
+          transform: `translate3d(${viewport.x}px, ${viewport.y}px, 0) scale(${viewport.zoom})`,
           transformOrigin: '0 0',
+          willChange: visibleInstances.length >= 40 ? 'transform' : undefined,
         }}
         className="absolute inset-0 pointer-events-none"
       >
-        {visibleGroupBoxes.map((gb) => {
+        {culledGroupBoxes.map((gb) => {
           const groupObj = schema.tableGroups.find((g) => g.name === gb.name);
           const isOnlySelected =
             selectedDomains.length === 1 && selectedDomains[0] === gb.name;
@@ -1062,40 +1444,27 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
               groupObj={groupObj}
               cursorMode={cursorMode}
               darkMode={darkMode}
+              lod={activeLod}
               isOnlySelected={isOnlySelected}
               isDropTarget={dropTargetGroupName === gb.name}
               isDimmed={isGroupDimmed}
               altPressedDuringDrag={altPressedDuringDrag}
               readOnly={readOnly}
-              onStartDrag={(e) => {
-                const origPositions: Record<string, TablePosition> = {};
-                for (const pk of gb.posKeys) {
-                  origPositions[pk] = positions[pk] || { x: 0, y: 0 };
-                }
-                dragRef.current = {
-                  type: 'group',
-                  groupName: gb.name,
-                  posKeys: gb.posKeys,
-                  startX: e.clientX,
-                  startY: e.clientY,
-                  origPositions,
-                };
-              }}
-              onToggleOnlyDomain={() =>
-                onChangeSelectedDomains(isOnlySelected ? [] : [gb.name])
-              }
-              onAutoLayoutGroup={() => onAutoLayoutGroup(gb.name)}
+              onStartDrag={handleGroupStartDrag}
+              onToggleOnlyDomain={handleToggleOnlyDomain}
+              onAutoLayoutGroup={onAutoLayoutGroup}
               onEditGroup={onEditGroup}
             />
           );
         })}
 
         <EdgeLayer
-          edges={renderedEdges}
-          bundles={crossDomainBundles}
+          edges={culledEdges}
+          bundles={culledBundles}
           anchorBoxByDomain={anchorBoxByDomain}
           positions={positions}
           detailLevel={detailLevel}
+          lod={activeLod}
           fkColsByTable={fkColsByTable}
           hoveredRefId={hoveredRefId}
           hoveredBundleId={hoveredBundleId}
@@ -1109,9 +1478,10 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
           onHoverBundle={setHoveredBundleId}
         />
 
-        {visibleInstances.map((inst) => {
+        {culledInstances.map((inst) => {
           const pos =
             positions[inst.posKey] || positions[inst.table.id] || { x: 0, y: 0 };
+          const cardRect = visibleTableRects.get(inst.posKey);
           const focusState = !focusNeighborhood.active
             ? 'normal'
             : inst.table.id === focusedTableId
@@ -1125,6 +1495,8 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
             connectPreview?.target?.posKey === inst.posKey
               ? connectPreview.target.columnName
               : null;
+          const cardColorOpen = !readOnly && colorPickerPosKey === inst.posKey;
+          const cardLod: CanvasLodTier = cardColorOpen ? 'full' : activeLod;
 
           return (
             <TableCard
@@ -1132,6 +1504,8 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
               instance={inst}
               pos={pos}
               detailLevel={detailLevel}
+              lod={cardLod}
+              cardHeight={cardRect?.height}
               fkSet={fkColsByTable.get(inst.table.id)}
               isSelected={selectedTableId === inst.table.id}
               isMultiSelected={isMultiSelected}
@@ -1140,116 +1514,23 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
               connectTargetCol={connectTargetCol}
               focusState={focusState}
               highlightedColumn={highlightedColumn}
-              colorPickerOpen={!readOnly && colorPickerPosKey === inst.posKey}
+              colorPickerOpen={cardColorOpen}
               cursorMode={cursorMode}
               darkMode={darkMode}
               readOnly={readOnly}
-              onHoverChange={(hovered) =>
-                setHoveredTableId(hovered ? inst.table.id : null)
-              }
-              onStartDrag={(e) => {
-                setColorPickerPosKey(null);
-                if (e.shiftKey) {
-                  setSelectedPosKeys((prev) => {
-                    const exists = prev.includes(inst.posKey);
-                    if (exists) return prev.filter((k) => k !== inst.posKey);
-                    const base =
-                      prev.length === 0 && selectedTableId
-                        ? visibleInstances
-                            .filter((vi) => vi.table.id === selectedTableId)
-                            .map((vi) => vi.posKey)
-                        : prev;
-                    return Array.from(new Set([...base, inst.posKey]));
-                  });
-                  onSelectTable(inst.table.id);
-                  return;
-                }
-
-                if (
-                  selectedPosKeySet.has(inst.posKey) &&
-                  effectiveSelectedPosKeys.length > 1
-                ) {
-                  const origPositions: Record<string, TablePosition> = {};
-                  for (const pk of effectiveSelectedPosKeys) {
-                    const instMatch = visibleInstances.find(
-                      (vi) => vi.posKey === pk
-                    );
-                    const p =
-                      positions[pk] ||
-                      (instMatch ? positions[instMatch.table.id] : undefined) || {
-                        x: 0,
-                        y: 0,
-                      };
-                    origPositions[pk] = p;
-                  }
-                  dragRef.current = {
-                    type: 'multi-table',
-                    posKeys: effectiveSelectedPosKeys,
-                    startX: e.clientX,
-                    startY: e.clientY,
-                    origPositions,
-                  };
-                  return;
-                }
-
-                setSelectedPosKeys([inst.posKey]);
-                onSelectTable(inst.table.id);
-                dragRef.current = {
-                  type: 'table',
-                  posKey: inst.posKey,
-                  tableId: inst.table.id,
-                  startX: e.clientX,
-                  startY: e.clientY,
-                  origPos: pos,
-                  origGroup: inst.groupName,
-                };
-              }}
+              onHoverChange={handleTableHoverChange}
+              onStartDrag={handleTableStartDrag}
               onStartConnectFk={
-                readOnly
-                  ? undefined
-                  : (colName, side) => {
-                      const anchor = getColumnPortWorldPosition(
-                        inst.table,
-                        pos,
-                        colName,
-                        side,
-                        detailLevel,
-                        fkColsByTable.get(inst.table.id)
-                      );
-                      dragRef.current = {
-                        type: 'connect-fk',
-                        fromPosKey: inst.posKey,
-                        fromTableId: inst.table.id,
-                        fromCol: colName,
-                        startWorldX: anchor.x,
-                        startWorldY: anchor.y,
-                        currentWorldX: anchor.x,
-                        currentWorldY: anchor.y,
-                      };
-                      setConnectPreview({
-                        fromPosKey: inst.posKey,
-                        fromTableId: inst.table.id,
-                        fromCol: colName,
-                        fromX: anchor.x,
-                        fromY: anchor.y,
-                        toX: anchor.x,
-                        toY: anchor.y,
-                        target: null,
-                      });
-                    }
+                readOnly ? undefined : handleTableStartConnectFk
               }
-              onToggleColorPicker={() =>
-                setColorPickerPosKey(
-                  colorPickerPosKey === inst.posKey ? null : inst.posKey
-                )
-              }
-              onCloseColorPicker={() => setColorPickerPosKey(null)}
+              onToggleColorPicker={handleToggleColorPicker}
+              onCloseColorPicker={handleCloseColorPicker}
               onChangeTableHeaderColor={onChangeTableHeaderColor}
             />
           );
         })}
 
-        {visibleStickyNotes.map((note) => {
+        {culledStickyNotes.map((note) => {
           let isNoteDimmed = false;
           if (focusNeighborhood.active && note.linkedTarget?.startsWith('table:')) {
             const targetId = note.linkedTarget.slice('table:'.length);
@@ -1264,18 +1545,9 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
               cursorMode={cursorMode}
               isDimmed={isNoteDimmed}
               readOnly={readOnly}
-              onStartDrag={(e) => {
-                dragRef.current = {
-                  type: 'note',
-                  noteId: note.id,
-                  startX: e.clientX,
-                  startY: e.clientY,
-                  origX: note.x,
-                  origY: note.y,
-                };
-              }}
-              onUpdate={(patch) => onUpdateStickyNote(note.id, patch)}
-              onDelete={() => onDeleteStickyNote(note.id)}
+              onStartDrag={handleStickyNoteStartDrag}
+              onUpdate={onUpdateStickyNote}
+              onDelete={onDeleteStickyNote}
             />
           );
         })}
@@ -1402,16 +1674,39 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         onExitFocusMode={() => updateFocusMode(false)}
       />
 
+      {(culledInstances.length < visibleInstances.length ||
+        activeLod !== 'full') && (
+        <div
+          aria-label="Canvas virtualization status"
+          className={`absolute left-4 ${
+            showMinimap ? 'sm:bottom-34 bottom-4' : 'bottom-4'
+          } z-10 px-2.5 py-1 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/90 dark:bg-slate-900/90 backdrop-blur-xs text-[11px] font-medium text-slate-600 dark:text-slate-300 tabular-nums pointer-events-none`}
+        >
+          <span>
+            {culledInstances.length} / {visibleInstances.length} tables
+          </span>
+          {activeLod !== 'full' && (
+            <>
+              <span className="mx-1.5 text-slate-400" aria-hidden="true">
+                ·
+              </span>
+              <span>
+                {activeLod === 'minimal' ? 'Minimal LOD' : 'Compact LOD'}
+              </span>
+            </>
+          )}
+        </div>
+      )}
+
       {showMinimap && (
         <DiagramMinimap
           visibleGroupBoxes={visibleGroupBoxes}
           visibleInstances={visibleInstances}
-          positions={positions}
-          detailLevel={detailLevel}
-          fkColsByTable={fkColsByTable}
+          tableRects={visibleTableRects}
           selectedTableId={selectedTableId}
           darkMode={darkMode}
           bounds={minimapBounds}
+          viewportRect={minimapViewportRect}
         />
       )}
 
@@ -1424,6 +1719,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         detailMenuRef={detailMenuRef}
         snapGrid={snapGrid}
         showMinimap={showMinimap}
+        autoLod={autoLod}
         zoom={viewport.zoom}
         onUpdateCursorMode={updateCursorMode}
         onToggleFocusMode={() => updateFocusMode((prev) => !prev)}
@@ -1431,15 +1727,22 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         onToggleDetailMenu={() => setDetailMenuOpen((o) => !o)}
         onCloseDetailMenu={() => setDetailMenuOpen(false)}
         onChangeDetailLevel={onChangeDetailLevel}
+        onToggleAutoLod={toggleAutoLod}
         onAutoLayout={onAutoLayout}
         onAddNoteAtCenter={handleAddNoteAtCenter}
         onToggleSnapGrid={() => setSnapGrid((s) => !s)}
         onToggleMinimap={() => setShowMinimap((m) => !m)}
         onZoomOut={() =>
-          setViewport((v) => ({ ...v, zoom: Math.max(0.2, v.zoom - 0.12) }))
+          setViewport((v) => ({
+            ...v,
+            zoom: Math.max(MIN_CANVAS_ZOOM, v.zoom - 0.12),
+          }))
         }
         onZoomIn={() =>
-          setViewport((v) => ({ ...v, zoom: Math.min(2, v.zoom + 0.12) }))
+          setViewport((v) => ({
+            ...v,
+            zoom: Math.min(MAX_CANVAS_ZOOM, v.zoom + 0.12),
+          }))
         }
         onFitView={fitVisibleTables}
         readOnly={readOnly}

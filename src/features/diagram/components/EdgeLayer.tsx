@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { DetailLevel, TableDef, TablePosition } from '../../../types/schema';
-import { ResolvedEdge, TABLE_WIDTH } from '../../../utils/autoLayout';
+import { ResolvedEdge } from '../../../utils/autoLayout';
 import {
   AnchorBox,
   buildEdgePath,
@@ -8,6 +8,7 @@ import {
   getBoxToBoxAnchors,
   getEdgeAnchorPoints,
 } from '../../../utils/io/edgeGeometry';
+import type { CanvasLodTier } from '../canvasVirtualization';
 import type { CrossDomainBundle, CursorMode } from '../types';
 
 export interface EdgeLayerProps {
@@ -16,6 +17,7 @@ export interface EdgeLayerProps {
   anchorBoxByDomain?: Map<string, AnchorBox>;
   positions: Record<string, TablePosition>;
   detailLevel: DetailLevel;
+  lod?: CanvasLodTier;
   fkColsByTable: Map<string, Set<string>>;
   hoveredRefId: string | null;
   hoveredBundleId?: string | null;
@@ -29,17 +31,13 @@ export interface EdgeLayerProps {
   onHoverBundle?: (id: string | null) => void;
 }
 
-function getColAnchorY(
+function computeColOffsetsForTable(
   table: TableDef,
-  posKey: string,
-  colName: string,
-  positions: Record<string, TablePosition>,
   detailLevel: DetailLevel,
-  fkColsByTable: Map<string, Set<string>>
-) {
-  const pos = positions[posKey] || positions[table.id] || { x: 0, y: 0 };
-  if (detailLevel === 'names') return pos.y + 20;
-  const fkSet = fkColsByTable.get(table.id);
+  fkSet?: Set<string>
+): Map<string, number> {
+  const offsets = new Map<string, number>();
+  if (detailLevel === 'names') return offsets;
   const cols =
     detailLevel === 'keys'
       ? table.columns.filter(
@@ -47,17 +45,19 @@ function getColAnchorY(
         )
       : table.columns;
   const rowH = detailLevel === 'full' ? 30 : 26;
-  const idx = cols.findIndex((c) => c.name === colName);
-  if (idx === -1) return pos.y + 20;
-  return pos.y + 40 + idx * rowH + rowH / 2;
+  cols.forEach((col, idx) => {
+    offsets.set(col.name, 40 + idx * rowH + rowH / 2);
+  });
+  return offsets;
 }
 
-export const EdgeLayer: React.FC<EdgeLayerProps> = ({
+const EdgeLayerComponent: React.FC<EdgeLayerProps> = ({
   edges,
   bundles = [],
   anchorBoxByDomain,
   positions,
   detailLevel,
+  lod = 'full',
   fkColsByTable,
   hoveredRefId,
   hoveredBundleId = null,
@@ -71,6 +71,35 @@ export const EdgeLayer: React.FC<EdgeLayerProps> = ({
   onHoverBundle,
 }) => {
   const hasActiveFocus = focusMode && focusedTableId !== null;
+  const simplifiedEdges = lod === 'minimal';
+
+  // Precompute column Y offsets per referenced table once instead of scanning columns per edge
+  const colOffsetsByTableId = useMemo(() => {
+    const map = new Map<string, Map<string, number>>();
+    if (simplifiedEdges || detailLevel === 'names') return map;
+
+    const registerTable = (table: TableDef) => {
+      if (map.has(table.id)) return;
+      map.set(
+        table.id,
+        computeColOffsetsForTable(table, detailLevel, fkColsByTable.get(table.id))
+      );
+    };
+
+    for (const edge of edges) {
+      registerTable(edge.fromInst.table);
+      registerTable(edge.toInst.table);
+    }
+    return map;
+  }, [edges, detailLevel, fkColsByTable, simplifiedEdges]);
+
+  const getColY = (tableId: string, pos: TablePosition, colName?: string) => {
+    if (simplifiedEdges || detailLevel === 'names' || !colName) {
+      return pos.y + 20;
+    }
+    const offset = colOffsetsByTableId.get(tableId)?.get(colName);
+    return offset !== undefined ? pos.y + offset : pos.y + 20;
+  };
 
   return (
     <svg
@@ -186,22 +215,8 @@ export const EdgeLayer: React.FC<EdgeLayerProps> = ({
         const pB =
           positions[toInst.posKey] ||
           positions[toInst.table.id] || { x: 0, y: 0 };
-        const y1 = getColAnchorY(
-          fromInst.table,
-          fromInst.posKey,
-          r.fromColumns[0],
-          positions,
-          detailLevel,
-          fkColsByTable
-        );
-        const y2 = getColAnchorY(
-          toInst.table,
-          toInst.posKey,
-          r.toColumns[0],
-          positions,
-          detailLevel,
-          fkColsByTable
-        );
+        const y1 = getColY(fromInst.table.id, pA, r.fromColumns[0]);
+        const y2 = getColY(toInst.table.id, pB, r.toColumns[0]);
 
         const isSelfRef = fromInst.posKey === toInst.posKey;
         const anchors = getEdgeAnchorPoints(pA, pB, y1, y2, isSelfRef);
@@ -238,6 +253,20 @@ export const EdgeLayer: React.FC<EdgeLayerProps> = ({
           : darkMode
           ? '#475569'
           : '#94a3b8';
+
+        // Fast single-path rendering when zoomed out in minimal LOD
+        if (simplifiedEdges && !isHighlighted) {
+          return (
+            <path
+              key={edge.id}
+              d={pathD}
+              fill="none"
+              stroke={stroke}
+              strokeWidth={1.6}
+              style={{ opacity: opacity * 0.85 }}
+            />
+          );
+        }
 
         const metaLabel = [
           r.name,
@@ -328,3 +357,5 @@ export const EdgeLayer: React.FC<EdgeLayerProps> = ({
     </svg>
   );
 };
+
+export const EdgeLayer = React.memo(EdgeLayerComponent);

@@ -8,12 +8,12 @@ export interface StickyNoteCardProps {
   cursorMode: CursorMode;
   isDimmed?: boolean;
   readOnly?: boolean;
-  onStartDrag: (e: React.PointerEvent) => void;
-  onUpdate: (patch: Partial<StickyNote>) => void;
-  onDelete: () => void;
+  onStartDrag: (note: StickyNote, e: React.PointerEvent) => void;
+  onUpdate: (noteId: string, patch: Partial<StickyNote>) => void;
+  onDelete: (noteId: string) => void;
 }
 
-export const StickyNoteCard: React.FC<StickyNoteCardProps> = ({
+const StickyNoteCardComponent: React.FC<StickyNoteCardProps> = ({
   note,
   cursorMode,
   isDimmed = false,
@@ -34,7 +34,7 @@ export const StickyNoteCard: React.FC<StickyNoteCardProps> = ({
         onPointerDown={(e) => {
           if (cursorMode === 'pan') return;
           e.stopPropagation();
-          onStartDrag(e);
+          onStartDrag(note, e);
         }}
         className={`px-2.5 py-1.5 rounded-t-[7px] flex items-center justify-between gap-1.5 cursor-move ${style.header}`}
       >
@@ -47,7 +47,7 @@ export const StickyNoteCard: React.FC<StickyNoteCardProps> = ({
             type="text"
             value={note.title}
             onPointerDown={(e) => e.stopPropagation()}
-            onChange={(e) => onUpdate({ title: e.target.value })}
+            onChange={(e) => onUpdate(note.id, { title: e.target.value })}
             placeholder="Note title..."
             className="bg-transparent text-xs font-bold focus:outline-none flex-1 min-w-0"
           />
@@ -63,7 +63,7 @@ export const StickyNoteCard: React.FC<StickyNoteCardProps> = ({
               <button
                 key={c}
                 type="button"
-                onClick={() => onUpdate({ color: c })}
+                onClick={() => onUpdate(note.id, { color: c })}
                 className={`w-2.5 h-2.5 rounded-full border border-black/20 ${
                   c === 'amber'
                     ? 'bg-amber-400'
@@ -81,7 +81,7 @@ export const StickyNoteCard: React.FC<StickyNoteCardProps> = ({
           {!readOnly && (
             <button
               type="button"
-              onClick={() => onUpdate({ collapsed: !note.collapsed })}
+              onClick={() => onUpdate(note.id, { collapsed: !note.collapsed })}
               className="p-0.5 opacity-70 hover:opacity-100"
               title={note.collapsed ? 'Expand note' : 'Collapse note'}
             >
@@ -95,7 +95,7 @@ export const StickyNoteCard: React.FC<StickyNoteCardProps> = ({
           {!readOnly && (
             <button
               type="button"
-              onClick={onDelete}
+              onClick={() => onDelete(note.id)}
               className="p-0.5 opacity-70 hover:opacity-100 hover:text-rose-600"
               title="Delete sticky note"
             >
@@ -116,7 +116,7 @@ export const StickyNoteCard: React.FC<StickyNoteCardProps> = ({
               value={note.content}
               onPointerDown={(e) => e.stopPropagation()}
               onChange={(e) =>
-                onUpdate({
+                onUpdate(note.id, {
                   content: e.target.value,
                   updatedAt: new Date().toISOString(),
                 })
@@ -136,3 +136,5 @@ export const StickyNoteCard: React.FC<StickyNoteCardProps> = ({
     </div>
   );
 };
+
+export const StickyNoteCard = React.memo(StickyNoteCardComponent);

@@ -4,12 +4,15 @@ import { DetailLevel, TablePosition } from '../../../types/schema';
 import { TABLE_WIDTH, TableInstance } from '../../../utils/autoLayout';
 import { getContrastTextColor } from '../../../utils/importExport';
 import { stripMarkdownToPlainText } from '../../markdown/markdownUtils';
+import type { CanvasLodTier } from '../canvasVirtualization';
 import { CursorMode, HEADER_SWATCHES } from '../types';
 
 export interface TableCardProps {
   instance: TableInstance;
   pos: TablePosition;
   detailLevel: DetailLevel;
+  lod?: CanvasLodTier;
+  cardHeight?: number;
   fkSet?: Set<string>;
   isSelected: boolean;
   isMultiSelected?: boolean;
@@ -21,23 +24,26 @@ export interface TableCardProps {
   colorPickerOpen: boolean;
   cursorMode: CursorMode;
   darkMode: boolean;
-  onHoverChange: (hovered: boolean) => void;
-  onStartDrag: (e: React.PointerEvent) => void;
+  onHoverChange: (tableId: string, hovered: boolean) => void;
+  onStartDrag: (inst: TableInstance, e: React.PointerEvent) => void;
   onStartConnectFk?: (
+    inst: TableInstance,
     colName: string,
     side: 'left' | 'right',
     e: React.PointerEvent
   ) => void;
-  onToggleColorPicker: () => void;
+  onToggleColorPicker: (posKey: string) => void;
   onCloseColorPicker: () => void;
   onChangeTableHeaderColor: (tableId: string, color: string | null) => void;
   readOnly?: boolean;
 }
 
-export const TableCard: React.FC<TableCardProps> = ({
+const TableCardComponent: React.FC<TableCardProps> = ({
   instance: inst,
   pos,
   detailLevel,
+  lod = 'full',
+  cardHeight,
   fkSet,
   isSelected,
   isMultiSelected = false,
@@ -62,6 +68,132 @@ export const TableCard: React.FC<TableCardProps> = ({
   const headerText = getContrastTextColor(headerBg);
   const isShared = inst.sharedGroups.length > 1;
 
+  const selectionBorderClass =
+    focusState === 'dimmed'
+      ? 'opacity-25 hover:opacity-85 border-slate-300 dark:border-slate-700'
+      : isSelected || isMultiSelected || focusState === 'focused'
+      ? 'border-blue-600 ring-2 ring-blue-500/35 z-20'
+      : focusState === 'neighbor'
+      ? 'border-blue-400 dark:border-blue-500 ring-1 ring-blue-400/40 z-10'
+      : isHovered
+      ? 'border-slate-400 dark:border-slate-500 z-10'
+      : 'border-slate-300 dark:border-slate-700';
+
+  // Minimal LOD: Ultra-lightweight macro block for zoomed-out 150+ table enterprise views
+  if (lod === 'minimal') {
+    const pkCount = table.columns.reduce((acc, c) => acc + (c.pk ? 1 : 0), 0);
+    return (
+      <div
+        data-table-card={table.id}
+        data-pos-key={inst.posKey}
+        data-lod="minimal"
+        data-selected={isSelected || isMultiSelected ? 'true' : 'false'}
+        style={{
+          left: pos.x,
+          top: pos.y,
+          width: TABLE_WIDTH,
+          height: cardHeight ?? 76,
+        }}
+        onMouseEnter={() => {
+          if (cursorMode !== 'pan') onHoverChange(table.id, true);
+        }}
+        onMouseLeave={() => onHoverChange(table.id, false)}
+        onPointerDown={(e) => {
+          if (cursorMode === 'pan') return;
+          e.stopPropagation();
+          onStartDrag(inst, e);
+        }}
+        className={`absolute rounded-lg border bg-white dark:bg-slate-900 select-none overflow-hidden flex flex-col ${
+          cursorMode === 'pan' ? 'pointer-events-none' : 'pointer-events-auto cursor-move'
+        } ${selectionBorderClass}`}
+      >
+        <div
+          style={{ backgroundColor: headerBg }}
+          className="h-3 w-full shrink-0"
+        />
+        <div className="flex-1 px-3 py-2 flex flex-col justify-center min-h-0">
+          <div className="text-[16px] font-bold leading-tight text-slate-900 dark:text-slate-100 truncate">
+            {table.id}
+          </div>
+          <div className="text-xs font-mono text-slate-500 dark:text-slate-400 tabular-nums mt-0.5 truncate">
+            {table.columns.length} cols
+            {pkCount > 0 ? ` · ${pkCount} pk` : ''}
+            {isShared ? ` · ${inst.sharedGroups.length} domains` : ''}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Compact LOD: Preserves exact footprint & header + lightweight key summary (no icons/handles)
+  if (lod === 'compact') {
+    const keyCols = table.columns.filter(
+      (c) => c.pk || c.unique || (fkSet ? fkSet.has(c.name) : false)
+    );
+    const previewCols = (keyCols.length > 0 ? keyCols : table.columns).slice(0, 5);
+    const hiddenCount = Math.max(0, table.columns.length - previewCols.length);
+
+    return (
+      <div
+        data-table-card={table.id}
+        data-pos-key={inst.posKey}
+        data-lod="compact"
+        data-selected={isSelected || isMultiSelected ? 'true' : 'false'}
+        style={{
+          left: pos.x,
+          top: pos.y,
+          width: TABLE_WIDTH,
+          height: cardHeight,
+        }}
+        onMouseEnter={() => {
+          if (cursorMode !== 'pan') onHoverChange(table.id, true);
+        }}
+        onMouseLeave={() => onHoverChange(table.id, false)}
+        onPointerDown={(e) => {
+          if (cursorMode === 'pan') return;
+          e.stopPropagation();
+          onStartDrag(inst, e);
+        }}
+        className={`absolute rounded-lg border bg-white dark:bg-slate-900 select-none overflow-hidden flex flex-col ${
+          cursorMode === 'pan' ? 'pointer-events-none' : 'pointer-events-auto'
+        } ${selectionBorderClass}`}
+      >
+        <div
+          style={{ backgroundColor: headerBg, color: headerText }}
+          className="h-10 px-3 rounded-t-[7px] flex items-center justify-between gap-2 cursor-move shrink-0"
+        >
+          <span className="text-[14px] font-semibold truncate">{table.id}</span>
+          <span className="text-[11px] font-mono opacity-80 tabular-nums shrink-0">
+            {table.columns.length}c
+          </span>
+        </div>
+        {detailLevel !== 'names' && (
+          <div className="px-3 py-1.5 flex-1 min-h-0 overflow-hidden space-y-1 text-xs">
+            {previewCols.map((col) => (
+              <div
+                key={col.name}
+                className="flex items-center justify-between gap-2 text-slate-700 dark:text-slate-300"
+              >
+                <span className={col.pk ? 'font-semibold truncate' : 'truncate'}>
+                  {col.pk ? 'PK ' : fkSet?.has(col.name) ? 'FK ' : ''}
+                  {col.name}
+                </span>
+                <span className="font-mono text-[11px] text-slate-400 dark:text-slate-500 shrink-0">
+                  {col.type}
+                </span>
+              </div>
+            ))}
+            {hiddenCount > 0 && (
+              <div className="text-[11px] font-mono text-slate-400 dark:text-slate-500 tabular-nums pt-0.5">
+                +{hiddenCount} more fields
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   const visibleCols =
     detailLevel === 'names'
       ? []
@@ -77,6 +209,7 @@ export const TableCard: React.FC<TableCardProps> = ({
     <div
       data-table-card={table.id}
       data-pos-key={inst.posKey}
+      data-lod="full"
       data-selected={isSelected || isMultiSelected ? 'true' : 'false'}
       style={{
         left: pos.x,
@@ -84,27 +217,17 @@ export const TableCard: React.FC<TableCardProps> = ({
         width: TABLE_WIDTH,
       }}
       onMouseEnter={() => {
-        if (cursorMode !== 'pan') onHoverChange(true);
+        if (cursorMode !== 'pan') onHoverChange(table.id, true);
       }}
-      onMouseLeave={() => onHoverChange(false)}
+      onMouseLeave={() => onHoverChange(table.id, false)}
       onPointerDown={(e) => {
         if (cursorMode === 'pan') return;
         e.stopPropagation();
-        onStartDrag(e);
+        onStartDrag(inst, e);
       }}
       className={`absolute rounded-lg border bg-white dark:bg-slate-900 select-none transition-opacity ${
         cursorMode === 'pan' ? 'pointer-events-none' : 'pointer-events-auto'
-      } ${
-        focusState === 'dimmed'
-          ? 'opacity-25 hover:opacity-85 border-slate-300 dark:border-slate-700'
-          : isSelected || isMultiSelected || focusState === 'focused'
-          ? 'border-blue-600 ring-2 ring-blue-500/35 z-20'
-          : focusState === 'neighbor'
-          ? 'border-blue-400 dark:border-blue-500 ring-1 ring-blue-400/40 z-10'
-          : isHovered
-          ? 'border-slate-400 dark:border-slate-500 z-10'
-          : 'border-slate-300 dark:border-slate-700'
-      }`}
+      } ${selectionBorderClass}`}
     >
       {/* Table Header */}
       <div
@@ -131,7 +254,7 @@ export const TableCard: React.FC<TableCardProps> = ({
           >
             <button
               type="button"
-              onClick={onToggleColorPicker}
+              onClick={() => onToggleColorPicker(inst.posKey)}
               title="Customize table header color"
               className="p-1 rounded hover:bg-black/15 transition-colors"
             >
@@ -230,7 +353,7 @@ export const TableCard: React.FC<TableCardProps> = ({
                       title={`Drag to another column to create a Ref from ${table.id}.${col.name}`}
                       onPointerDown={(e) => {
                         e.stopPropagation();
-                        onStartConnectFk?.(col.name, 'left', e);
+                        onStartConnectFk?.(inst, col.name, 'left', e);
                       }}
                       className={`absolute -left-1.5 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full border-2 border-white dark:border-slate-900 bg-blue-600 dark:bg-blue-500 shadow-xs cursor-crosshair transition-opacity z-20 ${
                         isDropTarget
@@ -247,7 +370,7 @@ export const TableCard: React.FC<TableCardProps> = ({
                       title={`Drag to another column to create a Ref from ${table.id}.${col.name}`}
                       onPointerDown={(e) => {
                         e.stopPropagation();
-                        onStartConnectFk?.(col.name, 'right', e);
+                        onStartConnectFk?.(inst, col.name, 'right', e);
                       }}
                       className={`absolute -right-1.5 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full border-2 border-white dark:border-slate-900 bg-blue-600 dark:bg-blue-500 shadow-xs cursor-crosshair transition-opacity z-20 ${
                         isDropTarget
@@ -343,3 +466,5 @@ export const TableCard: React.FC<TableCardProps> = ({
     </div>
   );
 };
+
+export const TableCard = React.memo(TableCardComponent);

@@ -352,7 +352,8 @@ function layoutInstanceSubset(
   if (layerKeys.length === 1 && subsetInstances.length > 3) {
     const all = layersMap.get(layerKeys[0])!;
     layersMap.clear();
-    const cols = Math.min(3, Math.ceil(Math.sqrt(all.length)));
+    const maxCols = all.length > 24 ? 6 : all.length > 9 ? 4 : 3;
+    const cols = Math.min(maxCols, Math.ceil(Math.sqrt(all.length)));
     all.forEach((pk, idx) => {
       const col = idx % cols;
       if (!layersMap.has(col)) layersMap.set(col, []);
@@ -589,7 +590,14 @@ export function computeAutoLayout(
     orderedGroups.push(layoutById.get(bestId)!);
   }
 
-  const cols = orderedGroups.length <= 1 ? 1 : orderedGroups.length <= 6 ? 2 : 3;
+  const cols =
+    orderedGroups.length <= 1
+      ? 1
+      : orderedGroups.length <= 6
+      ? 2
+      : orderedGroups.length <= 12
+      ? 3
+      : 4;
   const groupGapX = 96;
   const groupGapY = 84;
   const startX = 80;

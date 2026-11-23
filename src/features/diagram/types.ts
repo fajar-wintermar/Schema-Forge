@@ -67,6 +67,7 @@ export const EDGE_ROUTING_STORAGE_KEY = 'schemaforge_diagram_edge_routing';
 export const CROSS_DOMAIN_EDGE_STORAGE_KEY =
   'schemaforge_diagram_cross_domain_edges';
 export const FOCUS_MODE_STORAGE_KEY = 'schemaforge_diagram_focus_mode';
+export const AUTO_LOD_STORAGE_KEY = 'schemaforge_diagram_auto_lod';
 
 export interface ViewportState {
   x: number;

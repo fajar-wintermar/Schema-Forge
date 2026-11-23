@@ -1,32 +1,25 @@
 import React from 'react';
-import { DetailLevel, TablePosition } from '../../../types/schema';
-import {
-  getTableHeight,
-  GroupBoundingBox,
-  TABLE_WIDTH,
-  TableInstance,
-} from '../../../utils/autoLayout';
+import { GroupBoundingBox, TABLE_WIDTH, TableInstance } from '../../../utils/autoLayout';
+import type { TableRect } from '../canvasGeometry';
 
 export interface DiagramMinimapProps {
   visibleGroupBoxes: GroupBoundingBox[];
   visibleInstances: TableInstance[];
-  positions: Record<string, TablePosition>;
-  detailLevel: DetailLevel;
-  fkColsByTable: Map<string, Set<string>>;
+  tableRects: Map<string, TableRect>;
   selectedTableId: string | null;
   darkMode: boolean;
   bounds: { minX: number; minY: number; width: number; height: number };
+  viewportRect?: { x: number; y: number; width: number; height: number };
 }
 
-export const DiagramMinimap: React.FC<DiagramMinimapProps> = ({
+const DiagramMinimapComponent: React.FC<DiagramMinimapProps> = ({
   visibleGroupBoxes,
   visibleInstances,
-  positions,
-  detailLevel,
-  fkColsByTable,
+  tableRects,
   selectedTableId,
   darkMode,
   bounds,
+  viewportRect,
 }) => {
   if (visibleInstances.length === 0) return null;
 
@@ -52,21 +45,15 @@ export const DiagramMinimap: React.FC<DiagramMinimapProps> = ({
           />
         ))}
         {visibleInstances.map((inst) => {
-          const p =
-            positions[inst.posKey] || positions[inst.table.id] || { x: 0, y: 0 };
-          const h = getTableHeight(
-            inst.table,
-            detailLevel,
-            fkColsByTable.get(inst.table.id),
-            inst.sharedGroups.length > 1
-          );
+          const rect = tableRects.get(inst.posKey);
+          if (!rect) return null;
           return (
             <rect
               key={inst.posKey}
-              x={p.x}
-              y={p.y}
+              x={rect.x}
+              y={rect.y}
               width={TABLE_WIDTH}
-              height={h}
+              height={rect.height}
               rx={12}
               fill={
                 selectedTableId === inst.table.id
@@ -78,7 +65,22 @@ export const DiagramMinimap: React.FC<DiagramMinimapProps> = ({
             />
           );
         })}
+        {viewportRect && (
+          <rect
+            x={viewportRect.x}
+            y={viewportRect.y}
+            width={viewportRect.width}
+            height={viewportRect.height}
+            fill="none"
+            stroke="#2563EB"
+            strokeOpacity={0.75}
+            strokeWidth={Math.max(4, bounds.width * 0.008)}
+            vectorEffect="non-scaling-stroke"
+          />
+        )}
       </svg>
     </div>
   );
 };
+
+export const DiagramMinimap = React.memo(DiagramMinimapComponent);

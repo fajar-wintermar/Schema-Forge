@@ -12,7 +12,7 @@
 - **Incremental SQL Migrations (`ALTER`)**: Compares any two saved version snapshots or Git commits to generate clean PostgreSQL and MySQL `ALTER TABLE`, `CREATE/DROP INDEX`, enum, and foreign-key migration scripts (keeping DBML documentation notes out of `.sql` DDL files).
 - **Domain-First Visual Organization & Focus Tools**: `TableGroup` containers (plus explicit filtering and scoped export for **Ungrouped** tables on the canvas without altering Docs), multi-domain shared tables, Focus Neighborhood mode (`F`), orthogonal/curved/bundled edge routing, custom table header colors, and sticky architecture notes.
 - **Built-In Schema Quality Linter & Automated Regression Suite**: Non-blocking Schema Quality Analyzer catches unindexed foreign keys, missing primary keys, `snake_case`/`camelCase` naming drift, nullable unique keys, and multi-table circular FK cycles, backed by Vitest unit tests and Playwright E2E smoke tests.
-- **Interactive Canvas Authoring**: Supports marquee/Shift multi-select, real-time snap alignment guides, multi-table align/distribute controls, and visual drag-from-column-to-column FK `Ref:` creation.
+- **150+ Table Canvas Virtualization & Interactive Authoring**: Supports tile-quantized spatial viewport culling, 3-tier automatic Level-of-Detail (Full / Compact / Minimal) rendering, rAF-coalesced 60fps panning/zooming, live minimap camera frame, marquee/Shift multi-select, real-time snap alignment guides, multi-table align/distribute controls, and visual drag-from-column-to-column FK `Ref:` creation.
 - **Local-First Security, Offline PWA & Edge Cloud Sync**: Persists locally in AES-256-GCM encrypted IndexedDB with full offline PWA support (including iOS & Firefox install guides), responsive grouped TopBar navigation, and optional Cloudflare D1 / Node SQLite sync with clean revocable/deletable versioned share links.
 
 ### Current Limitations (Cons)
@@ -69,7 +69,7 @@
   - Generate, edit, expire, and delete clean shareable links for live workspaces or pinned versions (e.g., `v1.2.0`) with toggleable PNG/SVG export permissions.
 - [ ] **Anchored Review Comments & Live Presence**
   - Evolve sticky notes into threaded, resolvable review comments anchored to specific tables, columns, or PR branches, with optional collaborative cursors.
-- [ ] **150+ Table Canvas Virtualization**
+- [x] **150+ Table Canvas Virtualization**
   - Viewport culling and level-of-detail rendering for smooth 60fps panning/zooming on massive enterprise schemas.
 
 ---
@@ -92,4 +92,3 @@
 2. **Prisma / Drizzle / OpenAPI Importers + ORM & Static Docs Bundle Exporters** — Expands adoption across full-stack TypeScript, Python, and API-first teams.
 3. **SchemaForge CLI / GitHub Action & Live DB Introspection Bridge** — Integrates SchemaForge into CI/CD checks and existing production databases.
 4. **Anchored Review Comments & Live Presence** — Evolves sticky notes into threaded team review feedback.
-5. **150+ Table Canvas Virtualization** — Ensures smooth 60fps rendering on massive enterprise schemas.
