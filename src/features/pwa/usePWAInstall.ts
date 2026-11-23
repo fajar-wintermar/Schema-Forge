@@ -10,6 +10,8 @@ export function usePWAInstall() {
     useState<BeforeInstallPromptEvent | null>(null);
   const [isInstalled, setIsInstalled] = useState(false);
   const [isIOS, setIsIOS] = useState(false);
+  const [isFirefox, setIsFirefox] = useState(false);
+  const [isAndroid, setIsAndroid] = useState(false);
 
   useEffect(() => {
     const isStandalone =
@@ -19,8 +21,9 @@ export function usePWAInstall() {
     setIsInstalled(isStandalone);
 
     const userAgent = window.navigator.userAgent.toLowerCase();
-    const isIOSDevice = /iphone|ipad|ipod/.test(userAgent);
-    setIsIOS(isIOSDevice);
+    setIsIOS(/iphone|ipad|ipod/.test(userAgent));
+    setIsFirefox(/firefox\//.test(userAgent) && !/seamonkey\//.test(userAgent));
+    setIsAndroid(/android/.test(userAgent));
 
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
@@ -60,6 +63,8 @@ export function usePWAInstall() {
     isInstallable: Boolean(deferredPrompt),
     isInstalled,
     isIOS,
+    isFirefox,
+    isAndroid,
     install,
   };
 }

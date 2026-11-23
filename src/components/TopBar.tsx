@@ -92,11 +92,13 @@ export const TopBar: React.FC<TopBarProps> = ({
   const [sourceMenuOpen, setSourceMenuOpen] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const [showIOSGuide, setShowIOSGuide] = useState(false);
+  const [showFirefoxGuide, setShowFirefoxGuide] = useState(false);
 
   const sourceMenuRef = useRef<HTMLDivElement>(null);
   const moreMenuRef = useRef<HTMLDivElement>(null);
 
-  const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
+  const { isInstallable, isInstalled, isIOS, isFirefox, isAndroid, install } =
+    usePWAInstall();
 
   useEffect(() => {
     if (!sourceMenuOpen && !moreMenuOpen) return;
@@ -141,7 +143,7 @@ export const TopBar: React.FC<TopBarProps> = ({
     ? `${githubLink.owner}/${githubLink.repo} (${githubLink.branch})`
     : 'Load or push DBML files';
 
-  const canInstallApp = !isInstalled && (isInstallable || isIOS);
+  const canInstallApp = !isInstalled && (isInstallable || isIOS || isFirefox);
 
   return (
     <>
@@ -481,6 +483,21 @@ export const TopBar: React.FC<TopBarProps> = ({
                       <span className="font-medium">Install on iPhone / iPad</span>
                     </button>
                   )}
+
+                  {isFirefox && !isInstalled && !isInstallable && !isIOS && (
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setMoreMenuOpen(false);
+                        setShowFirefoxGuide(true);
+                      }}
+                      className="w-full px-3 py-2 text-left text-xs text-blue-700 dark:text-blue-300 hover:bg-blue-50/70 dark:hover:bg-blue-950/40 flex items-center gap-2.5"
+                    >
+                      <MonitorDown className="w-4 h-4 shrink-0" />
+                      <span className="font-medium">Install on Firefox</span>
+                    </button>
+                  )}
                 </div>
               )}
             </div>
@@ -524,6 +541,78 @@ export const TopBar: React.FC<TopBarProps> = ({
             <button
               type="button"
               onClick={() => setShowIOSGuide(false)}
+              className="mt-4 w-full py-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-xs font-semibold text-slate-800 dark:text-slate-100 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
+            >
+              Got it
+            </button>
+          </div>
+        </div>
+      )}
+
+      {showFirefoxGuide && (
+        <div
+          onClick={() => setShowFirefoxGuide(false)}
+          className="fixed inset-0 z-50 bg-slate-950/50 backdrop-blur-xs flex items-center justify-center p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-md rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 shadow-xl"
+          >
+            <div className="flex items-center justify-between gap-2 mb-3">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-slate-50">
+                Install SchemaForge on Firefox
+              </h3>
+              <button
+                type="button"
+                onClick={() => setShowFirefoxGuide(false)}
+                className="p-1 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            {isAndroid ? (
+              <ol className="space-y-2 text-xs text-slate-600 dark:text-slate-300 list-decimal list-inside">
+                <li>
+                  Tap the <strong>⋮ Menu</strong> button in Firefox&apos;s
+                  toolbar.
+                </li>
+                <li>
+                  Tap <strong>Add app to Home screen</strong> (or{' '}
+                  <strong>Install</strong>).
+                </li>
+                <li>
+                  Launch SchemaForge from your Home Screen to use it offline in
+                  standalone mode.
+                </li>
+              </ol>
+            ) : (
+              <div className="space-y-2.5 text-xs text-slate-600 dark:text-slate-300">
+                <p>
+                  Firefox Desktop does not natively support browser-triggered{' '}
+                  <code className="font-mono">beforeinstallprompt</code>{' '}
+                  dialogs, so the direct install button is hidden by the browser.
+                </p>
+                <ul className="space-y-1.5 list-disc list-inside">
+                  <li>
+                    <strong>Firefox on Windows (143+):</strong> Click the{' '}
+                    <strong>Add tab to taskbar</strong> icon in the address bar.
+                  </li>
+                  <li>
+                    <strong>macOS / Linux / All Desktops:</strong> Install the{' '}
+                    <strong>PWAsForFirefox</strong> add-on, or open this URL in{' '}
+                    <strong>Chrome, Edge, or Brave</strong> for 1-click desktop
+                    installation.
+                  </li>
+                  <li>
+                    Offline Service Worker caching &amp; IndexedDB storage work
+                    normally inside your Firefox tab right now.
+                  </li>
+                </ul>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={() => setShowFirefoxGuide(false)}
               className="mt-4 w-full py-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-xs font-semibold text-slate-800 dark:text-slate-100 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors"
             >
               Got it
