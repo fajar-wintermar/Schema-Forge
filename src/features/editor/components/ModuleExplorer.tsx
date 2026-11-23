@@ -2,6 +2,7 @@ import React from 'react';
 import {
   ChevronDown,
   ChevronRight,
+  ChevronsLeft,
   Edit3,
   FileCode2,
   Folder,
@@ -32,6 +33,7 @@ interface ModuleExplorerProps {
   onRenameFile?: (oldPath: string, newPath: string) => void;
   onDeleteFile?: (path: string) => void;
   onFlattenToSingleFile?: () => void;
+  onHideExplorer?: () => void;
   newFileOpen: boolean;
   setNewFileOpen: React.Dispatch<React.SetStateAction<boolean>>;
   newFileName: string;
@@ -64,6 +66,7 @@ export const ModuleExplorer: React.FC<ModuleExplorerProps> = ({
   onRenameFile,
   onDeleteFile,
   onFlattenToSingleFile,
+  onHideExplorer,
   newFileOpen,
   setNewFileOpen,
   newFileName,
@@ -251,6 +254,17 @@ export const ModuleExplorer: React.FC<ModuleExplorerProps> = ({
               className="px-1.5 py-0.5 rounded text-[10px] font-medium text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/70 dark:hover:bg-slate-800"
             >
               Flatten
+            </button>
+          )}
+          {onHideExplorer && (
+            <button
+              type="button"
+              onClick={onHideExplorer}
+              title="Hide explorer"
+              aria-label="Hide explorer"
+              className="p-1 rounded text-slate-400 hover:text-slate-900 dark:hover:text-slate-100 hover:bg-slate-200/70 dark:hover:bg-slate-800 transition-colors"
+            >
+              <ChevronsLeft className="w-3.5 h-3.5" />
             </button>
           )}
         </div>

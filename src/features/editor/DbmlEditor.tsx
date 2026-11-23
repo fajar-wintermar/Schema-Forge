@@ -83,7 +83,46 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
   const [gotoValue, setGotoValue] = useState('');
 
   // Modular file explorer UI state
-  const [explorerOpen, setExplorerOpen] = useState(true);
+  const [explorerOpen, setExplorerOpen] = useState<boolean>(() => {
+    try {
+      const saved = localStorage.getItem('schemaforge_explorer_open');
+      return saved === null ? true : saved === 'true';
+    } catch {
+      return true;
+    }
+  });
+  const prevIsModularRef = useRef(isModular);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('schemaforge_explorer_open', String(explorerOpen));
+    } catch {
+      // Ignore storage failures
+    }
+  }, [explorerOpen]);
+
+  useEffect(() => {
+    if (!prevIsModularRef.current && isModular) {
+      setExplorerOpen(true);
+    }
+    prevIsModularRef.current = isModular;
+  }, [isModular]);
+
+  const [wordWrap, setWordWrap] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem('schemaforge_editor_word_wrap') === 'true';
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('schemaforge_editor_word_wrap', String(wordWrap));
+    } catch {
+      // Ignore storage failures
+    }
+  }, [wordWrap]);
   const [fileSearch, setFileSearch] = useState('');
   const [collapsedFolders, setCollapsedFolders] = useState<
     Record<string, boolean>
@@ -177,6 +216,34 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [findOpen, gotoOpen, isMergedPreview, openFindBar, openGotoLine]);
+
+  // Capture Alt+Z (and macOS Option+Z) before CodeMirror inserts Ω
+  useEffect(() => {
+    const handleWordWrapKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return;
+      if (!e.altKey || e.metaKey || e.ctrlKey || e.shiftKey) return;
+      if (e.code !== 'KeyZ' && e.key.toLowerCase() !== 'z') return;
+
+      const activeEl = document.activeElement;
+      const inEditor =
+        Boolean(editorWrapperRef.current?.contains(activeEl)) ||
+        (e.target instanceof Node &&
+          Boolean(editorWrapperRef.current?.contains(e.target))) ||
+        findOpen ||
+        gotoOpen;
+      if (!inEditor) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+      setWordWrap((w) => !w);
+    };
+
+    window.addEventListener('keydown', handleWordWrapKey, { capture: true });
+    return () =>
+      window.removeEventListener('keydown', handleWordWrapKey, {
+        capture: true,
+      });
+  }, [findOpen, gotoOpen]);
 
   // Reset inline rename/delete states and expand active file's parent folders
   useEffect(() => {
@@ -317,10 +384,13 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
         isMergedPreview={isMergedPreview}
         activeFilePath={activeFilePath}
         explorerOpen={explorerOpen}
+        otherFileErrorsCount={otherFileErrorsCount}
         onToggleExplorer={() => setExplorerOpen((o) => !o)}
         onEnableModularMode={onEnableModularMode}
         findOpen={findOpen}
         onOpenFind={() => openFindBar(false)}
+        wordWrap={wordWrap}
+        onToggleWordWrap={() => setWordWrap((w) => !w)}
         isMaximized={isMaximized}
         onToggleMaximize={onToggleMaximize}
         onMinimize={onMinimize}
@@ -345,6 +415,7 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
             onRenameFile={onRenameFile}
             onDeleteFile={onDeleteFile}
             onFlattenToSingleFile={onFlattenToSingleFile}
+            onHideExplorer={() => setExplorerOpen(false)}
             newFileOpen={newFileOpen}
             setNewFileOpen={setNewFileOpen}
             newFileName={newFileName}
@@ -448,6 +519,7 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
               partialNames={partialNames}
               activeFilePath={activeFilePath}
               isMergedPreview={isMergedPreview}
+              wordWrap={wordWrap}
               scrollToLine={scrollToLine}
               onOpenFind={openFindBar}
               onOpenGotoLine={openGotoLine}

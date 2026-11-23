@@ -17,6 +17,10 @@ export const ShortcutsModal: React.FC<ShortcutsModalProps> = ({
     { label: 'Find text in code editor', keys: [`${modKey}`, 'F'] },
     { label: 'Find & replace in code editor', keys: [`${modKey}`, 'H'] },
     { label: 'Go to line in code editor', keys: [`${modKey}`, 'G'] },
+    {
+      label: 'Toggle word wrap in code editor',
+      keys: [modKey === '⌘' ? '⌥' : 'Alt', 'Z'],
+    },
     { label: 'Toggle maximize / restore code editor', keys: [`${modKey}`, '⇧', 'E'] },
     { label: 'Open Import / Export studio', keys: [`${modKey}`, 'I'] },
     { label: 'Save version snapshot', keys: [`${modKey}`, 'S'] },

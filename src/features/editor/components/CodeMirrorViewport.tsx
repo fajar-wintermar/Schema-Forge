@@ -108,6 +108,7 @@ interface CodeMirrorViewportProps {
   partialNames: string[];
   activeFilePath?: string;
   isMergedPreview: boolean;
+  wordWrap?: boolean;
   scrollToLine?: number | null;
   onOpenFind: (withReplace: boolean) => void;
   onOpenGotoLine: () => void;
@@ -156,6 +157,7 @@ export const CodeMirrorViewport = React.forwardRef<
       partialNames,
       activeFilePath,
       isMergedPreview,
+      wordWrap = false,
       scrollToLine,
       onOpenFind,
       onOpenGotoLine,
@@ -177,6 +179,7 @@ export const CodeMirrorViewport = React.forwardRef<
     const themeCompartmentRef = useRef(new Compartment());
     const langCompartmentRef = useRef(new Compartment());
     const readOnlyCompartmentRef = useRef(new Compartment());
+    const wordWrapCompartmentRef = useRef(new Compartment());
 
     const onChangeRef = useRef(onChange);
     onChangeRef.current = onChange;
@@ -192,6 +195,9 @@ export const CodeMirrorViewport = React.forwardRef<
 
     const isMergedPreviewRef = useRef(isMergedPreview);
     isMergedPreviewRef.current = isMergedPreview;
+
+    const wordWrapRef = useRef(wordWrap);
+    wordWrapRef.current = wordWrap;
 
     const autocompleteRefs = useRef<DbmlAutocompleteContextRefs>({
       tables,
@@ -237,6 +243,9 @@ export const CodeMirrorViewport = React.forwardRef<
         langCompartmentRef.current.of(createDbmlStreamLanguage(enumNames)),
         readOnlyCompartmentRef.current.of(
           EditorState.readOnly.of(isMergedPreviewRef.current)
+        ),
+        wordWrapCompartmentRef.current.of(
+          wordWrapRef.current ? EditorView.lineWrapping : []
         ),
         Prec.highest(
           keymap.of([
@@ -516,6 +525,17 @@ export const CodeMirrorViewport = React.forwardRef<
         ),
       });
     }, [isMergedPreview]);
+
+    // Update word wrapping dynamically when toggled
+    useEffect(() => {
+      const view = viewRef.current;
+      if (!view) return;
+      view.dispatch({
+        effects: wordWrapCompartmentRef.current.reconfigure(
+          wordWrap ? EditorView.lineWrapping : []
+        ),
+      });
+    }, [wordWrap]);
 
     // Sync parse/semantic errors to line highlights & @codemirror/lint gutter
     useEffect(() => {
