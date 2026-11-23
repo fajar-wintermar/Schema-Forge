@@ -213,23 +213,6 @@ function formatCreateTable(table: TableDef, dialect: SqlDialect): string[] {
   out.push(colLines.join(',\n'));
   out.push(');');
 
-  if (dialect === 'postgres' && table.note) {
-    out.push(
-      `COMMENT ON TABLE ${tableIdent} IS '${escapeSqlString(table.note)}';`
-    );
-  }
-
-  for (const col of table.columns) {
-    if (dialect === 'postgres' && col.note) {
-      out.push(
-        `COMMENT ON COLUMN ${tableIdent}.${q(
-          col.name,
-          dialect
-        )} IS '${escapeSqlString(col.note)}';`
-      );
-    }
-  }
-
   return out;
 }
 
@@ -424,14 +407,6 @@ export function generateSqlMigration(
             dialect
           )} ${formatColumnDefinition(cd.after, dialect)};`
         );
-        if (dialect === 'postgres' && cd.after.note) {
-          tblStmts.push(
-            `COMMENT ON COLUMN ${tableIdent}.${q(
-              cd.after.name,
-              dialect
-            )} IS '${escapeSqlString(cd.after.note)}';`
-          );
-        }
       } else if (cd.status === 'modified' && cd.before && cd.after) {
         const before = cd.before;
         const after = cd.after;
@@ -524,16 +499,6 @@ export function generateSqlMigration(
               );
             }
           }
-
-          if ((before.note || '') !== (after.note || '')) {
-            tblStmts.push(
-              after.note
-                ? `COMMENT ON COLUMN ${tableIdent}.${colIdent} IS '${escapeSqlString(
-                    after.note
-                  )}';`
-                : `COMMENT ON COLUMN ${tableIdent}.${colIdent} IS NULL;`
-            );
-          }
         } else {
           // MySQL: MODIFY COLUMN requires full column specification
           const structuralChanged =
@@ -606,16 +571,6 @@ export function generateSqlMigration(
         );
       }
     });
-
-    if (dialect === 'postgres' && td.noteChanged) {
-      tblStmts.push(
-        td.noteChanged.to
-          ? `COMMENT ON TABLE ${tableIdent} IS '${escapeSqlString(
-              td.noteChanged.to
-            )}';`
-          : `COMMENT ON TABLE ${tableIdent} IS NULL;`
-      );
-    }
 
     if (tblStmts.length > 0) {
       alterTableStatements.push(`-- Table: ${tableAfter.id}`);

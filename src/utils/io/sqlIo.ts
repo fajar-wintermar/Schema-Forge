@@ -72,12 +72,6 @@ export function exportSchemaToSql(
     lines.push(colLines.join(',\n'));
     lines.push(');');
 
-    if (table.note && dialect === 'postgres') {
-      lines.push(
-        `COMMENT ON TABLE ${tableIdentifier} IS '${table.note.replace(/'/g, "''")}';`
-      );
-    }
-
     for (const idx of table.indexes) {
       const items =
         idx.items ||
