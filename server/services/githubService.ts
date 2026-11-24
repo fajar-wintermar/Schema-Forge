@@ -183,11 +183,11 @@ export async function getGithubRepoInfo(
       },
     };
   } catch (err) {
+    console.error('[githubService] getGithubRepoInfo failed:', err);
     return {
       ok: false,
       status: 502,
-      error:
-        err instanceof Error ? err.message : 'Failed to inspect repository.',
+      error: 'Failed to inspect repository.',
     };
   }
 }
@@ -269,10 +269,11 @@ export async function getGithubRepoTree(
       },
     };
   } catch (err) {
+    console.error('[githubService] getGithubRepoTree failed:', err);
     return {
       ok: false,
       status: 502,
-      error: err instanceof Error ? err.message : 'Failed to fetch file tree.',
+      error: 'Failed to fetch repository file tree.',
     };
   }
 }
@@ -336,11 +337,11 @@ export async function getGithubSingleFile(
       },
     };
   } catch (err) {
+    console.error('[githubService] getGithubSingleFile failed:', err);
     return {
       ok: false,
       status: 502,
-      error:
-        err instanceof Error ? err.message : 'Failed to fetch GitHub file.',
+      error: 'Failed to fetch GitHub file.',
     };
   }
 }
@@ -426,7 +427,10 @@ export async function getGithubModularFolder(
     if (session?.accessToken) {
       const gqlChunkSize = 40;
       for (let i = 0; i < dbmlItems.length; i += gqlChunkSize) {
-        const slice = dbmlItems.slice(i, i + gqlChunkSize);
+        const slice = dbmlItems
+          .slice(i, i + gqlChunkSize)
+          .filter((item) => /^[a-fA-F0-9]{40}$/.test(item.sha));
+        if (slice.length === 0) continue;
         const aliasFields = slice
           .map(
             (item, idx) =>
@@ -528,13 +532,11 @@ export async function getGithubModularFolder(
       },
     };
   } catch (err) {
+    console.error('[githubService] getGithubModularFolder failed:', err);
     return {
       ok: false,
       status: 502,
-      error:
-        err instanceof Error
-          ? err.message
-          : 'Failed to load modular schema folder.',
+      error: 'Failed to load modular schema folder.',
     };
   }
 }
@@ -617,13 +619,11 @@ export async function getGithubCommitHistory(
 
     return { ok: true, data: { commits } };
   } catch (err) {
+    console.error('[githubService] getGithubCommitHistory failed:', err);
     return {
       ok: false,
       status: 502,
-      error:
-        err instanceof Error
-          ? err.message
-          : 'Failed to fetch GitHub commit history.',
+      error: 'Failed to fetch GitHub commit history.',
     };
   }
 }
@@ -777,13 +777,11 @@ export async function initGithubRepositoryBranch(
       },
     };
   } catch (err) {
+    console.error('[githubService] initGithubRepositoryBranch failed:', err);
     return {
       ok: false,
       status: 502,
-      error:
-        err instanceof Error
-          ? err.message
-          : 'Failed to initialize repository branch.',
+      error: 'Failed to initialize repository branch.',
     };
   }
 }
@@ -986,10 +984,11 @@ export async function pushSingleGithubFile(
       },
     };
   } catch (err) {
+    console.error('[githubService] pushSingleGithubFile failed:', err);
     return {
       ok: false,
       status: 502,
-      error: err instanceof Error ? err.message : 'GitHub push failed.',
+      error: 'GitHub push failed.',
     };
   }
 }
@@ -1347,13 +1346,11 @@ export async function pushBatchGithubFiles(
       },
     };
   } catch (err) {
+    console.error('[githubService] pushBatchGithubFiles failed:', err);
     return {
       ok: false,
       status: 502,
-      error:
-        err instanceof Error
-          ? err.message
-          : 'Failed to push modular files to GitHub.',
+      error: 'Failed to push modular files to GitHub.',
     };
   }
 }

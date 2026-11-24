@@ -9,6 +9,7 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { GithubAuthStatus, GithubRepoInfo } from '../../../utils/remoteService';
+import { sanitizeExternalUrl } from '../../../utils/urlSafety';
 
 interface RepoSelectorCardProps {
   repoInput: string;
@@ -110,17 +111,20 @@ export const RepoSelectorCard: React.FC<RepoSelectorCardProps> = ({
                   {selectedRepo.canPush ? 'Push access' : 'Read-only'}
                 </span>
               )}
-              {selectedRepo.html_url && (
-                <a
-                  href={selectedRepo.html_url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  title="Open repository on GitHub"
-                  className="text-slate-400 hover:text-blue-600 dark:hover:text-blue-400"
-                >
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </a>
-              )}
+              {(() => {
+                const safeRepoUrl = sanitizeExternalUrl(selectedRepo.html_url);
+                return safeRepoUrl ? (
+                  <a
+                    href={safeRepoUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="Open repository on GitHub"
+                    className="text-slate-400 hover:text-blue-600 dark:hover:text-blue-400"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                ) : null;
+              })()}
             </div>
 
             <button

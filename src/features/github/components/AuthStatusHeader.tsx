@@ -9,6 +9,7 @@ import {
   X,
 } from 'lucide-react';
 import { GithubAuthStatus } from '../../../utils/remoteService';
+import { sanitizeExternalUrl } from '../../../utils/urlSafety';
 
 interface AuthStatusHeaderProps {
   authStatus: GithubAuthStatus | null;
@@ -49,11 +50,16 @@ export const AuthStatusHeader: React.FC<AuthStatusHeaderProps> = ({
           </span>
         ) : authStatus?.connected && authStatus.user ? (
           <div className="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 text-xs">
-            <img
-              src={authStatus.user.avatar_url}
-              alt={authStatus.user.login}
-              className="w-4 h-4 rounded-full"
-            />
+            {(() => {
+              const safeAvatar = sanitizeExternalUrl(authStatus.user.avatar_url);
+              return safeAvatar ? (
+                <img
+                  src={safeAvatar}
+                  alt={authStatus.user.login}
+                  className="w-4 h-4 rounded-full"
+                />
+              ) : null;
+            })()}
             <span className="font-medium text-slate-800 dark:text-slate-200">
               @{authStatus.user.login}
             </span>

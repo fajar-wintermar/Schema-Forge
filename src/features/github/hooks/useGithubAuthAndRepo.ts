@@ -17,6 +17,7 @@ import {
   parseGithubTargetInput,
   setStoredGithubSessionToken,
 } from '../../../utils/remoteService';
+import { isTrustedOAuthMessageOrigin } from '../../../utils/urlSafety';
 import { WorkspaceProject } from '../../../types/schema';
 
 export interface UseGithubAuthAndRepoParams {
@@ -191,12 +192,7 @@ export function useGithubAuthAndRepo({
   // Listen for OAuth popup completion
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
-      const origin = event.origin;
-      if (
-        origin !== window.location.origin &&
-        !origin.endsWith('.run.app') &&
-        !origin.includes('localhost')
-      ) {
+      if (!isTrustedOAuthMessageOrigin(event.origin)) {
         return;
       }
       if (

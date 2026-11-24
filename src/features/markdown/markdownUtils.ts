@@ -26,17 +26,28 @@ export function slugifyHeading(text: string): string {
 
 export function sanitizeHref(url: string): string | null {
   const trimmed = url.trim();
-  if (!trimmed) return null;
-  if (
-    trimmed.startsWith('https://') ||
-    trimmed.startsWith('http://') ||
-    trimmed.startsWith('mailto:') ||
-    trimmed.startsWith('#') ||
-    trimmed.startsWith('/')
-  ) {
+  if (!trimmed || /[\u0000-\u001f\u007f]/.test(trimmed)) {
+    return null;
+  }
+  if (trimmed.startsWith('//')) {
+    return null;
+  }
+  if (trimmed.startsWith('#') || trimmed.startsWith('/')) {
     return trimmed;
   }
-  return null;
+  try {
+    const parsed = new URL(trimmed);
+    if (
+      parsed.protocol === 'https:' ||
+      parsed.protocol === 'http:' ||
+      parsed.protocol === 'mailto:'
+    ) {
+      return trimmed;
+    }
+    return null;
+  } catch {
+    return null;
+  }
 }
 
 export function extractMarkdownHeadings(markdown: string): MarkdownHeading[] {

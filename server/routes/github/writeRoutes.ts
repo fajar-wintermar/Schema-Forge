@@ -1,192 +1,100 @@
 import { Hono } from 'hono';
-import { validator } from 'hono/validator';
+import { z } from 'zod';
 import type { AppEnv } from '../../types';
-import { isRecord, readBoolean, readString } from '../../lib/http';
+import { verifyMutatingRequestOrigin } from '../../lib/crypto';
+import { GITHUB_SLUG_REGEX, zValidate } from '../../lib/validation';
 import {
   initGithubRepositoryBranch,
   pushBatchGithubFiles,
   pushSingleGithubFile,
 } from '../../services/githubService';
 
-interface InitBranchBody {
-  owner: string;
-  repo: string;
-  branch?: string;
-}
+const ownerField = z
+  .string()
+  .trim()
+  .min(1, 'Missing repository owner.')
+  .max(100)
+  .regex(GITHUB_SLUG_REGEX, 'Invalid repository owner.');
 
-interface PushSingleBody {
-  owner: string;
-  repo: string;
-  path: string;
-  branch: string;
-  message: string;
-  content: string;
-  expectedSha?: string;
-  createNewBranch?: boolean;
-  newBranchName?: string;
-  forceWithLatestSha?: boolean;
-}
+const repoField = z
+  .string()
+  .trim()
+  .min(1, 'Missing repository name.')
+  .max(100)
+  .regex(GITHUB_SLUG_REGEX, 'Invalid repository name.');
 
-interface PushBatchBody {
-  owner: string;
-  repo: string;
-  branch: string;
-  message: string;
-  files: Array<{
-    path: string;
-    content: string;
-    expectedSha?: string;
-  }>;
-  createNewBranch?: boolean;
-  newBranchName?: string;
-  forceWithLatestSha?: boolean;
-}
+const initBranchBodySchema = z.object({
+  owner: ownerField,
+  repo: repoField,
+  branch: z.string().trim().min(1).max(200).optional(),
+});
+
+const pushSingleBodySchema = z.object({
+  owner: ownerField,
+  repo: repoField,
+  path: z.string().trim().min(1, 'File path is required.').max(500),
+  branch: z.string().trim().min(1, 'Branch is required.').max(200),
+  message: z.string().trim().min(1, 'Commit message is required.').max(1000),
+  content: z.string().max(5 * 1024 * 1024, 'File exceeds 5 MB limit.'),
+  expectedSha: z.string().max(128).optional(),
+  createNewBranch: z.boolean().optional(),
+  newBranchName: z.string().max(200).optional(),
+  forceWithLatestSha: z.boolean().optional(),
+});
+
+const pushBatchFileSchema = z.object({
+  path: z.string().trim().min(1, 'File path is required.').max(500),
+  content: z.string().max(5 * 1024 * 1024, 'File exceeds 5 MB limit.'),
+  expectedSha: z.string().max(128).optional(),
+});
+
+const pushBatchBodySchema = z.object({
+  owner: ownerField,
+  repo: repoField,
+  branch: z.string().trim().min(1, 'Branch is required.').max(200),
+  message: z.string().trim().min(1, 'Commit message is required.').max(1000),
+  files: z
+    .array(pushBatchFileSchema)
+    .min(1, 'Provide at least one file to push.')
+    .max(300, 'Too many files in a single batch push.'),
+  createNewBranch: z.boolean().optional(),
+  newBranchName: z.string().max(200).optional(),
+  forceWithLatestSha: z.boolean().optional(),
+});
 
 export const githubWriteRoutes = new Hono<{ Bindings: AppEnv }>()
-  .post(
-    '/init-branch',
-    validator('json', (value, c): InitBranchBody | Response => {
-      if (!isRecord(value)) {
-        return c.json({ error: 'Invalid JSON payload.' }, 400);
-      }
-      const owner = (readString(value, 'owner') || '').trim();
-      const repo = (readString(value, 'repo') || '').trim();
-      const branch = (readString(value, 'branch') || 'main').trim();
-      if (!owner || !repo || !branch) {
-        return c.json(
-          { error: 'Missing required fields: owner, repo, and branch.' },
-          400
-        );
-      }
-      return { owner, repo, branch };
-    }),
-    async (c) => {
-      const body = c.req.valid('json');
-      const result = await initGithubRepositoryBranch(c, {
-        owner: body.owner,
-        repo: body.repo,
-        branch: body.branch || 'main',
-      });
-      if (!result.ok) {
-        return c.json({ error: result.error }, result.status);
-      }
-      return c.json(result.data, 200);
+  .post('/init-branch', zValidate('json', initBranchBodySchema), async (c) => {
+    if (!verifyMutatingRequestOrigin(c)) {
+      return c.json({ error: 'Invalid request origin.' }, 403);
     }
-  )
-  .post(
-    '/push',
-    validator('json', (value, c): PushSingleBody | Response => {
-      if (!isRecord(value)) {
-        return c.json({ error: 'Invalid JSON payload.' }, 400);
-      }
-      const owner = (readString(value, 'owner') || '').trim();
-      const repo = (readString(value, 'repo') || '').trim();
-      const path = (readString(value, 'path') || '').trim();
-      const branch = (readString(value, 'branch') || '').trim();
-      const message = readString(value, 'message') || '';
-      const content = readString(value, 'content');
-      if (
-        !owner ||
-        !repo ||
-        !path ||
-        !branch ||
-        !message.trim() ||
-        content === undefined
-      ) {
-        return c.json(
-          {
-            error:
-              'Missing required fields: owner, repo, path, branch, message, content.',
-          },
-          400
-        );
-      }
-      const out: PushSingleBody = {
-        owner,
-        repo,
-        path,
-        branch,
-        message,
-        content,
-      };
-      const expectedSha = readString(value, 'expectedSha');
-      const createNewBranch = readBoolean(value, 'createNewBranch');
-      const newBranchName = readString(value, 'newBranchName');
-      const forceWithLatestSha = readBoolean(value, 'forceWithLatestSha');
-      if (expectedSha !== undefined) out.expectedSha = expectedSha;
-      if (createNewBranch !== undefined) out.createNewBranch = createNewBranch;
-      if (newBranchName !== undefined) out.newBranchName = newBranchName;
-      if (forceWithLatestSha !== undefined) {
-        out.forceWithLatestSha = forceWithLatestSha;
-      }
-      return out;
-    }),
-    async (c) => {
-      const result = await pushSingleGithubFile(c, c.req.valid('json'));
-      if (!result.ok) {
-        return c.json(
-          { error: result.error, code: result.code },
-          result.status
-        );
-      }
-      return c.json(result.data, 200);
+    const body = c.req.valid('json');
+    const result = await initGithubRepositoryBranch(c, {
+      owner: body.owner,
+      repo: body.repo,
+      branch: body.branch || 'main',
+    });
+    if (!result.ok) {
+      return c.json({ error: result.error }, result.status);
     }
-  )
-  .post(
-    '/push-batch',
-    validator('json', (value, c): PushBatchBody | Response => {
-      if (!isRecord(value)) {
-        return c.json({ error: 'Invalid JSON payload.' }, 400);
+    return c.json(result.data, 200);
+  })
+  .post('/push', zValidate('json', pushSingleBodySchema), async (c) => {
+    if (!verifyMutatingRequestOrigin(c)) {
+      return c.json({ error: 'Invalid request origin.' }, 403);
+    }
+    const result = await pushSingleGithubFile(c, c.req.valid('json'));
+    if (!result.ok) {
+      return c.json(
+        { error: result.error, code: result.code },
+        result.status
+      );
+    }
+    return c.json(result.data, 200);
+  })
+  .post('/push-batch', zValidate('json', pushBatchBodySchema), async (c) => {
+      if (!verifyMutatingRequestOrigin(c)) {
+        return c.json({ error: 'Invalid request origin.' }, 403);
       }
-      const owner = (readString(value, 'owner') || '').trim();
-      const repo = (readString(value, 'repo') || '').trim();
-      const branch = (readString(value, 'branch') || '').trim();
-      const message = readString(value, 'message') || '';
-      const rawFiles = Array.isArray(value.files) ? value.files : [];
-      const files: PushBatchBody['files'] = [];
-
-      for (const item of rawFiles) {
-        if (!isRecord(item)) continue;
-        const p = readString(item, 'path');
-        const content = readString(item, 'content');
-        if (p && content !== undefined) {
-          const sha = readString(item, 'expectedSha');
-          files.push(
-            sha !== undefined
-              ? { path: p, content, expectedSha: sha }
-              : { path: p, content }
-          );
-        }
-      }
-
-      if (!owner || !repo || !branch || !message.trim() || files.length === 0) {
-        return c.json(
-          {
-            error:
-              'Missing required fields: owner, repo, branch, message, and at least one file.',
-          },
-          400
-        );
-      }
-
-      const out: PushBatchBody = {
-        owner,
-        repo,
-        branch,
-        message,
-        files,
-      };
-      const createNewBranch = readBoolean(value, 'createNewBranch');
-      const newBranchName = readString(value, 'newBranchName');
-      const forceWithLatestSha = readBoolean(value, 'forceWithLatestSha');
-      if (createNewBranch !== undefined) out.createNewBranch = createNewBranch;
-      if (newBranchName !== undefined) out.newBranchName = newBranchName;
-      if (forceWithLatestSha !== undefined) {
-        out.forceWithLatestSha = forceWithLatestSha;
-      }
-      return out;
-    }),
-    async (c) => {
       const result = await pushBatchGithubFiles(c, c.req.valid('json'));
       if (!result.ok) {
         return c.json(

@@ -16,6 +16,7 @@ import { RepoSelectorCard } from './components/RepoSelectorCard';
 import { useGithubAuthAndRepo } from './hooks/useGithubAuthAndRepo';
 import { useGithubPushSync } from './hooks/useGithubPushSync';
 import { GitHubModalProps } from './types';
+import { sanitizeExternalUrl } from '../../utils/urlSafety';
 
 export const GitHubModal: React.FC<GitHubModalProps> = ({
   workspace,
@@ -223,15 +224,20 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
                   to <code className="font-mono">{push.pushSuccess.branch}</code>
                 </span>
               </div>
-              <a
-                href={push.pushSuccess.commitUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 font-semibold text-emerald-700 dark:text-emerald-300 hover:underline shrink-0"
-              >
-                <span>View on GitHub</span>
-                <ExternalLink className="w-3 h-3" />
-              </a>
+              {(() => {
+                const safeCommitUrl = sanitizeExternalUrl(push.pushSuccess.commitUrl);
+                return safeCommitUrl ? (
+                  <a
+                    href={safeCommitUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 font-semibold text-emerald-700 dark:text-emerald-300 hover:underline shrink-0"
+                  >
+                    <span>View on GitHub</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                ) : null;
+              })()}
             </div>
           )}
 
@@ -251,15 +257,22 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
                   (<code className="font-mono">schema.dbml</code> kept local)
                 </span>
               </div>
-              <a
-                href={push.batchPushSummary.commitUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="inline-flex items-center gap-1 font-semibold text-emerald-700 dark:text-emerald-300 hover:underline shrink-0"
-              >
-                <span>View Commit</span>
-                <ExternalLink className="w-3 h-3" />
-              </a>
+              {(() => {
+                const safeCommitUrl = sanitizeExternalUrl(
+                  push.batchPushSummary.commitUrl
+                );
+                return safeCommitUrl ? (
+                  <a
+                    href={safeCommitUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 font-semibold text-emerald-700 dark:text-emerald-300 hover:underline shrink-0"
+                  >
+                    <span>View Commit</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                ) : null;
+              })()}
             </div>
           )}
 

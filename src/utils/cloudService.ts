@@ -12,6 +12,7 @@ import {
   setStoredGithubSessionToken,
 } from './apiClient';
 import { getGithubAuthUrl, logoutGithub } from './remoteService';
+import { isTrustedOAuthMessageOrigin } from './urlSafety';
 
 export async function getCloudAuthStatus(
   signal?: AbortSignal
@@ -161,6 +162,7 @@ export async function fetchPublicShare(
     : await publicApiClient.api.share[':token'].$get(
         {
           param: { token: encodeURIComponent(token) },
+          query: {},
         },
         reqOptions
       );
@@ -207,12 +209,7 @@ export async function connectWithGithubOAuth(): Promise<void> {
     };
 
     const onMessage = (event: MessageEvent) => {
-      const origin = event.origin;
-      if (
-        origin !== window.location.origin &&
-        !origin.endsWith('.run.app') &&
-        !origin.includes('localhost')
-      ) {
+      if (!isTrustedOAuthMessageOrigin(event.origin)) {
         return;
       }
       if (!event.data || typeof event.data !== 'object') return;

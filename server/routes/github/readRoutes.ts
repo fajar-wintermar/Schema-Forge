@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
-import { validator } from 'hono/validator';
+import { z } from 'zod';
 import type { AppEnv } from '../../types';
+import { GITHUB_SLUG_REGEX, zValidate } from '../../lib/validation';
 import {
   getGithubCommitHistory,
   getGithubModularFolder,
@@ -9,160 +10,103 @@ import {
   getGithubSingleFile,
 } from '../../services/githubService';
 
-interface RepoInfoQuery {
-  owner: string;
-  repo: string;
-}
+const ownerField = z
+  .string()
+  .trim()
+  .min(1, 'Missing owner parameter.')
+  .max(100)
+  .regex(GITHUB_SLUG_REGEX, 'Invalid repository owner.');
 
-interface TreeQuery {
-  owner: string;
-  repo: string;
-  branch: string;
-}
+const repoField = z
+  .string()
+  .trim()
+  .min(1, 'Missing repo parameter.')
+  .max(100)
+  .regex(GITHUB_SLUG_REGEX, 'Invalid repository name.');
 
-interface FileQuery {
-  owner: string;
-  repo: string;
-  path: string;
-  ref?: string;
-}
+const repoInfoQuerySchema = z.object({
+  owner: ownerField,
+  repo: repoField,
+});
 
-interface FolderQuery {
-  owner: string;
-  repo: string;
-  branch: string;
-  folder: string;
-}
+const treeQuerySchema = z.object({
+  owner: ownerField,
+  repo: repoField,
+  branch: z.string().trim().min(1).max(200).optional(),
+});
 
-interface CommitsQuery {
-  owner: string;
-  repo: string;
-  branch?: string;
-  path?: string;
-  per_page?: string;
-}
+const fileQuerySchema = z.object({
+  owner: ownerField,
+  repo: repoField,
+  path: z.string().trim().min(1, 'Missing path parameter.').max(500),
+  ref: z.string().trim().min(1).max(200).optional(),
+});
 
-function readQueryStr(
-  query: Record<string, string | string[]>,
-  key: string
-): string {
-  const raw = query[key];
-  return typeof raw === 'string' ? raw.trim() : '';
-}
+const folderQuerySchema = z.object({
+  owner: ownerField,
+  repo: repoField,
+  branch: z.string().trim().max(200).optional(),
+  ref: z.string().trim().max(200).optional(),
+  folder: z.string().trim().max(300).optional(),
+});
 
-function readOptionalQueryStr(
-  query: Record<string, string | string[]>,
-  key: string
-): string | undefined {
-  const raw = query[key];
-  return typeof raw === 'string' && raw.trim() ? raw.trim() : undefined;
-}
+const commitsQuerySchema = z.object({
+  owner: ownerField,
+  repo: repoField,
+  branch: z.string().trim().min(1).max(200).optional(),
+  path: z.string().trim().min(1).max(500).optional(),
+  per_page: z.string().regex(/^\d{1,3}$/).optional(),
+});
 
 export const githubReadRoutes = new Hono<{ Bindings: AppEnv }>()
-  .get(
-    '/repo-info',
-    validator('query', (value, c): RepoInfoQuery | Response => {
-      const owner = readQueryStr(value, 'owner');
-      const repo = readQueryStr(value, 'repo');
-      if (!owner || !repo) {
-        return c.json({ error: 'Missing owner or repo parameter.' }, 400);
-      }
-      return { owner, repo };
-    }),
-    async (c) => {
-      const result = await getGithubRepoInfo(c, c.req.valid('query'));
-      if (!result.ok) {
-        return c.json({ error: result.error }, result.status);
-      }
-      return c.json(result.data, 200);
+  .get('/repo-info', zValidate('query', repoInfoQuerySchema), async (c) => {
+    const result = await getGithubRepoInfo(c, c.req.valid('query'));
+    if (!result.ok) {
+      return c.json({ error: result.error }, result.status);
     }
-  )
-  .get(
-    '/tree',
-    validator('query', (value, c): TreeQuery | Response => {
-      const owner = readQueryStr(value, 'owner');
-      const repo = readQueryStr(value, 'repo');
-      const branch = readQueryStr(value, 'branch') || 'main';
-      if (!owner || !repo || !branch) {
-        return c.json({ error: 'Missing owner, repo, or branch.' }, 400);
-      }
-      return { owner, repo, branch };
-    }),
-    async (c) => {
-      const result = await getGithubRepoTree(c, c.req.valid('query'));
-      if (!result.ok) {
-        return c.json({ error: result.error }, result.status);
-      }
-      return c.json(result.data, 200);
+    return c.json(result.data, 200);
+  })
+  .get('/tree', zValidate('query', treeQuerySchema), async (c) => {
+    const q = c.req.valid('query');
+    const result = await getGithubRepoTree(c, {
+      owner: q.owner,
+      repo: q.repo,
+      branch: q.branch || 'main',
+    });
+    if (!result.ok) {
+      return c.json({ error: result.error }, result.status);
     }
-  )
-  .get(
-    '/file',
-    validator('query', (value, c): FileQuery | Response => {
-      const owner = readQueryStr(value, 'owner');
-      const repo = readQueryStr(value, 'repo');
-      const path = readQueryStr(value, 'path');
-      const ref = readOptionalQueryStr(value, 'ref');
-      if (!owner || !repo || !path) {
-        return c.json({ error: 'Missing owner, repo, or path.' }, 400);
-      }
-      return ref ? { owner, repo, path, ref } : { owner, repo, path };
-    }),
-    async (c) => {
-      const result = await getGithubSingleFile(c, c.req.valid('query'));
-      if (!result.ok) {
-        return c.json({ error: result.error }, result.status);
-      }
-      return c.json(result.data, 200);
+    return c.json(result.data, 200);
+  })
+  .get('/file', zValidate('query', fileQuerySchema), async (c) => {
+    const result = await getGithubSingleFile(c, c.req.valid('query'));
+    if (!result.ok) {
+      return c.json({ error: result.error }, result.status);
     }
-  )
-  .get(
-    '/folder',
-    validator('query', (value, c): FolderQuery | Response => {
-      const owner = readQueryStr(value, 'owner');
-      const repo = readQueryStr(value, 'repo');
-      const branch =
-        readOptionalQueryStr(value, 'ref') ||
-        readOptionalQueryStr(value, 'branch') ||
-        'main';
-      const folder = (readOptionalQueryStr(value, 'folder') || 'schema').replace(
-        /^\/+|\/+$/g,
-        ''
+    return c.json(result.data, 200);
+  })
+  .get('/folder', zValidate('query', folderQuerySchema), async (c) => {
+    const q = c.req.valid('query');
+    const branch = q.ref || q.branch || 'main';
+    const folder = (q.folder || 'schema').replace(/^\/+|\/+$/g, '');
+    if (!folder) {
+      return c.json(
+        { error: 'Missing required parameters: owner, repo, branch, folder.' },
+        400
       );
-      if (!owner || !repo || !branch || !folder) {
-        return c.json(
-          { error: 'Missing required parameters: owner, repo, branch, folder.' },
-          400
-        );
-      }
-      return { owner, repo, branch, folder };
-    }),
-    async (c) => {
-      const result = await getGithubModularFolder(c, c.req.valid('query'));
-      if (!result.ok) {
-        return c.json({ error: result.error }, result.status);
-      }
-      return c.json(result.data, 200);
     }
-  )
-  .get(
-    '/commits',
-    validator('query', (value, c): CommitsQuery | Response => {
-      const owner = readQueryStr(value, 'owner');
-      const repo = readQueryStr(value, 'repo');
-      if (!owner || !repo) {
-        return c.json({ error: 'Missing owner or repo parameter.' }, 400);
-      }
-      const query: CommitsQuery = { owner, repo };
-      const branch = readOptionalQueryStr(value, 'branch');
-      const path = readOptionalQueryStr(value, 'path');
-      const per_page = readOptionalQueryStr(value, 'per_page');
-      if (branch) query.branch = branch;
-      if (path) query.path = path;
-      if (per_page) query.per_page = per_page;
-      return query;
-    }),
-    async (c) => {
+    const result = await getGithubModularFolder(c, {
+      owner: q.owner,
+      repo: q.repo,
+      branch,
+      folder,
+    });
+    if (!result.ok) {
+      return c.json({ error: result.error }, result.status);
+    }
+    return c.json(result.data, 200);
+  })
+  .get('/commits', zValidate('query', commitsQuerySchema), async (c) => {
       const q = c.req.valid('query');
       const parsedPerPage = q.per_page ? Number(q.per_page) : undefined;
       const result = await getGithubCommitHistory(c, {

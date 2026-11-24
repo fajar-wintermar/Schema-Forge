@@ -28,6 +28,7 @@ export interface D1DatabaseLike {
 
 export interface AppEnv {
   APP_URL?: string;
+  ALLOWED_ORIGINS?: string;
   GITHUB_CLIENT_ID?: string;
   GITHUB_CLIENT_SECRET?: string;
   SESSION_SECRET?: string;

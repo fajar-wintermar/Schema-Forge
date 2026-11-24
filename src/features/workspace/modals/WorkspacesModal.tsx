@@ -14,6 +14,7 @@ import {
   CloudAuthStatusResponse,
   WorkspaceProject,
 } from '../../../types/schema';
+import { sanitizeExternalUrl } from '../../../utils/urlSafety';
 
 interface WorkspacesModalProps {
   workspaces: WorkspaceProject[];
@@ -143,11 +144,18 @@ export const WorkspacesModal: React.FC<WorkspacesModalProps> = ({
               {cloudAuth.authenticated && cloudAuth.user ? (
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2 min-w-0">
-                    <img
-                      src={cloudAuth.user.avatar_url}
-                      alt={cloudAuth.user.login}
-                      className="w-6 h-6 rounded-full border border-slate-200 dark:border-slate-700"
-                    />
+                    {(() => {
+                      const safeAvatar = sanitizeExternalUrl(
+                        cloudAuth.user.avatar_url
+                      );
+                      return safeAvatar ? (
+                        <img
+                          src={safeAvatar}
+                          alt={cloudAuth.user.login}
+                          className="w-6 h-6 rounded-full border border-slate-200 dark:border-slate-700"
+                        />
+                      ) : null;
+                    })()}
                     <div className="min-w-0">
                       <div className="text-xs font-semibold text-slate-800 dark:text-slate-100 truncate">
                         Cloud Sync · @{cloudAuth.user.login}

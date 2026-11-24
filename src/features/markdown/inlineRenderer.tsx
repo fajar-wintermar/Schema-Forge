@@ -212,20 +212,23 @@ export function renderInlineMarkdown(
       const urlMatch = rest.match(/^https?:\/\/[^\s<>)\]]+/);
       if (urlMatch) {
         const cleanUrl = urlMatch[0].replace(/[.,;:!?]+$/, '');
-        flushBuffer();
-        nodes.push(
-          <a
-            key={`${keyPrefix}-auto-${tokenIdx++}`}
-            href={cleanUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-blue-600 dark:text-blue-400 underline decoration-blue-400/50 hover:decoration-blue-600"
-          >
-            {cleanUrl}
-          </a>
-        );
-        i += cleanUrl.length;
-        continue;
+        const safeUrl = sanitizeHref(cleanUrl);
+        if (safeUrl) {
+          flushBuffer();
+          nodes.push(
+            <a
+              key={`${keyPrefix}-auto-${tokenIdx++}`}
+              href={safeUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-blue-600 dark:text-blue-400 underline decoration-blue-400/50 hover:decoration-blue-600"
+            >
+              {safeUrl}
+            </a>
+          );
+          i += cleanUrl.length;
+          continue;
+        }
       }
     }
 

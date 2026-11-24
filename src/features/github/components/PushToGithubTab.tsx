@@ -20,6 +20,7 @@ import {
 import { GithubAuthStatus, GithubRepoInfo } from '../../../utils/remoteService';
 import { cleanFolderPrefix } from '../../../utils/schemaModules';
 import { SqlMigrationViewer } from '../../../components/SqlMigrationViewer';
+import { sanitizeExternalUrl } from '../../../utils/urlSafety';
 
 interface PushToGithubTabProps {
   workspace: WorkspaceProject;
@@ -390,17 +391,20 @@ export const PushToGithubTab: React.FC<PushToGithubTabProps> = ({
                   />
                   <span>Pull Latest</span>
                 </button>
-                {linked.htmlUrl && (
-                  <a
-                    href={linked.htmlUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-900 dark:hover:text-slate-100"
-                    title="Open file on GitHub"
-                  >
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </a>
-                )}
+                {(() => {
+                  const safeFileUrl = sanitizeExternalUrl(linked.htmlUrl);
+                  return safeFileUrl ? (
+                    <a
+                      href={safeFileUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-1.5 rounded-lg border border-slate-200 dark:border-slate-700 text-slate-500 hover:text-slate-900 dark:hover:text-slate-100"
+                      title="Open file on GitHub"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  ) : null;
+                })()}
               </div>
             </div>
           )}

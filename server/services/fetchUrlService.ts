@@ -144,14 +144,68 @@ export async function fetchRemoteDbmlFromUrl(
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 15000);
-    const response = await fetch(targetUrl, {
-      signal: controller.signal,
-      headers: {
-        'User-Agent': 'SchemaForge-DBML-Studio',
-        Accept: 'text/plain, text/x-dbml, application/octet-stream, */*',
-      },
-    });
-    clearTimeout(timer);
+    let response: Response;
+    let currentFetchUrl = targetUrl;
+    try {
+      const maxRedirects = 3;
+      let redirects = 0;
+      while (true) {
+        response = await fetch(currentFetchUrl, {
+          signal: controller.signal,
+          redirect: 'manual',
+          headers: {
+            'User-Agent': 'SchemaForge-DBML-Studio',
+            Accept: 'text/plain, text/x-dbml, application/octet-stream, */*',
+          },
+        });
+
+        if (
+          response.status >= 300 &&
+          response.status < 400 &&
+          response.headers.get('location')
+        ) {
+          if (redirects >= maxRedirects) {
+            return {
+              ok: false,
+              status: 400,
+              error: 'Too many redirects from remote URL.',
+            };
+          }
+          const location = response.headers.get('location') || '';
+          let nextUrl: URL;
+          try {
+            nextUrl = new URL(location, currentFetchUrl);
+          } catch {
+            return {
+              ok: false,
+              status: 400,
+              error: 'Invalid redirect URL.',
+            };
+          }
+          if (nextUrl.protocol !== 'http:' && nextUrl.protocol !== 'https:') {
+            return {
+              ok: false,
+              status: 400,
+              error: 'Redirect to unsupported URL scheme blocked.',
+            };
+          }
+          if (isDisallowedHostname(nextUrl.hostname)) {
+            return {
+              ok: false,
+              status: 400,
+              error: 'Redirect to local or private network URL is not allowed.',
+            };
+          }
+          currentFetchUrl = nextUrl.toString();
+          redirects++;
+          continue;
+        }
+        break;
+      }
+    } finally {
+      clearTimeout(timer);
+    }
+    targetUrl = currentFetchUrl;
 
     if (!response.ok) {
       return {
@@ -227,15 +281,18 @@ export async function fetchRemoteDbmlFromUrl(
       },
     };
   } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      return {
+        ok: false,
+        status: 504,
+        error: 'Timed out waiting for URL response (15s).',
+      };
+    }
+    console.error('[fetchUrlService] Remote fetch failed:', err);
     return {
       ok: false,
       status: 502,
-      error:
-        err instanceof Error
-          ? err.name === 'AbortError'
-            ? 'Timed out waiting for URL response (15s).'
-            : err.message
-          : 'Failed to fetch remote DBML file.',
+      error: 'Failed to fetch remote DBML file.',
     };
   }
 }

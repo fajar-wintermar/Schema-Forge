@@ -50,27 +50,76 @@ export function getSessionSecret(c: ApiContext): string {
   return ephemeralFallbackSecret;
 }
 
-export function verifyMutatingRequestOrigin(c: ApiContext): boolean {
-  // Requests carrying an encrypted session token header or explicit custom header are not simple cross-site form submits
-  if (c.req.header('x-github-session') || c.req.header('x-requested-with')) {
-    return true;
+export function getAllowedOrigins(c: ApiContext): Set<string> {
+  const allowed = new Set<string>();
+  try {
+    allowed.add(new URL(c.req.url).origin);
+  } catch {
+    // Ignore malformed request URL
   }
-  const origin = c.req.header('origin');
+
+  const forwardedProto =
+    c.req.header('x-forwarded-proto')?.split(',')[0]?.trim() ||
+    (() => {
+      try {
+        return new URL(c.req.url).protocol.replace(/:$/, '');
+      } catch {
+        return 'https';
+      }
+    })();
+  const forwardedHost = c.req.header('x-forwarded-host')?.split(',')[0]?.trim();
+  const hostHeader = c.req.header('host')?.trim();
+  if (forwardedHost) {
+    allowed.add(`${forwardedProto}://${forwardedHost}`);
+  }
+  if (hostHeader) {
+    allowed.add(`${forwardedProto}://${hostHeader}`);
+  }
+
+  const appUrl = getEnv(c, 'APP_URL');
+  if (appUrl && appUrl !== 'MY_APP_URL') {
+    try {
+      allowed.add(new URL(appUrl).origin);
+    } catch {
+      // Ignore invalid APP_URL
+    }
+  }
+
+  const extraOrigins = getEnv(c, 'ALLOWED_ORIGINS');
+  if (extraOrigins) {
+    for (const raw of extraOrigins.split(',')) {
+      const trimmed = raw.trim();
+      if (!trimmed || trimmed === '*') continue;
+      try {
+        allowed.add(new URL(trimmed).origin);
+      } catch {
+        // Ignore invalid origin entry
+      }
+    }
+  }
+
+  return allowed;
+}
+
+export function isAllowedCorsOrigin(origin: string, c: ApiContext): boolean {
   if (!origin) return false;
   try {
-    const originHost = new URL(origin).host;
-    const forwardedHost = c.req.header('x-forwarded-host');
-    const host =
-      forwardedHost || c.req.header('host') || new URL(c.req.url).host;
-    if (originHost === host) return true;
-    const appUrl = getEnv(c, 'APP_URL');
-    if (appUrl && appUrl !== 'MY_APP_URL') {
-      return new URL(appUrl).host === originHost;
-    }
-    return false;
+    const normalized = new URL(origin).origin;
+    return getAllowedOrigins(c).has(normalized);
   } catch {
     return false;
   }
+}
+
+export function verifyMutatingRequestOrigin(c: ApiContext): boolean {
+  const origin = c.req.header('origin');
+  if (origin) {
+    return isAllowedCorsOrigin(origin, c);
+  }
+  // When Origin is absent (e.g., same-origin or non-browser client), require explicit session/custom header
+  return Boolean(
+    c.req.header('x-github-session') || c.req.header('x-requested-with')
+  );
 }
 
 // ---------- Web-Standard Base64 & Web Crypto Helpers (Node + Cloudflare Edge) ----------

@@ -28,6 +28,18 @@ function escapeXml(str: string): string {
     .replace(/'/g, '&apos;');
 }
 
+function sanitizeSvgColor(raw: string | undefined, fallback: string): string {
+  if (!raw) return fallback;
+  const trimmed = raw.trim();
+  if (/^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(trimmed)) {
+    return trimmed;
+  }
+  if (/^[a-zA-Z]{3,20}$/.test(trimmed)) {
+    return trimmed.toLowerCase();
+  }
+  return fallback;
+}
+
 export function getContrastTextColor(hex?: string): string {
   if (!hex || !/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(hex)) return '#ffffff';
   let c = hex.slice(1);
@@ -199,7 +211,7 @@ export function buildDiagramSvg(params: {
 
   // 1. TableGroup containers
   for (const gb of groupBoxes) {
-    const gColor = gb.color || '#2563eb';
+    const gColor = sanitizeSvgColor(gb.color, '#2563eb');
     parts.push(
       `<rect x="${gb.x}" y="${gb.y}" width="${gb.width}" height="${gb.height}" rx="12" fill="${gColor}" fill-opacity="${
         darkMode ? '0.09' : '0.06'
@@ -255,12 +267,13 @@ export function buildDiagramSvg(params: {
       laneOffset: ((idx % 5) - 2) * 8,
     });
 
-    const edgeColor = r.color || edgeStroke;
+    const safeRefColor = r.color ? sanitizeSvgColor(r.color, '') : '';
+    const edgeColor = safeRefColor || edgeStroke;
     parts.push(
       `<path d="${pathD}" fill="none" stroke="${edgeColor}" stroke-width="1.6" />`
     );
     parts.push(`<circle cx="${anchors.x1}" cy="${anchors.y1}" r="3.5" fill="${edgeColor}" />`);
-    parts.push(`<circle cx="${anchors.x2}" cy="${anchors.y2}" r="3.5" fill="${r.color || '#2563eb'}" />`);
+    parts.push(`<circle cx="${anchors.x2}" cy="${anchors.y2}" r="3.5" fill="${safeRefColor || '#2563eb'}" />`);
   });
 
   // 3. Table cards
@@ -269,7 +282,10 @@ export function buildDiagramSvg(params: {
     const pos = positions[inst.posKey] || positions[table.id] || { x: 0, y: 0 };
     const isShared = inst.sharedGroups.length > 1;
     const h = getTableHeight(table, detailLevel, fkColsByTable.get(table.id), isShared);
-    const headerBg = table.headerColor || (darkMode ? '#1e293b' : '#0f172a');
+    const headerBg = sanitizeSvgColor(
+      table.headerColor,
+      darkMode ? '#1e293b' : '#0f172a'
+    );
     const headerText = getContrastTextColor(headerBg);
     const fkSet = fkColsByTable.get(table.id);
 

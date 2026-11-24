@@ -114,8 +114,23 @@ async function startServer() {
       return;
     }
 
-    const safeRel = path.normalize(decodeURIComponent(urlPath)).replace(/^(\.\.(\/|\\|$))+/, '');
-    let filePath = path.join(distDir, safeRel === '/' ? 'index.html' : safeRel);
+    let decodedPath: string;
+    try {
+      decodedPath = decodeURIComponent(urlPath);
+    } catch {
+      res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('Bad Request');
+      return;
+    }
+
+    const relPath = decodedPath.replace(/^\/+/, '');
+    let filePath = relPath
+      ? path.resolve(distDir, relPath)
+      : indexPath;
+
+    if (filePath !== distDir && !filePath.startsWith(`${distDir}${path.sep}`)) {
+      filePath = indexPath;
+    }
 
     if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
       filePath = indexPath;

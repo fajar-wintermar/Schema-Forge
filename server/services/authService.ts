@@ -219,10 +219,10 @@ export async function exchangeGithubOAuthCode(
 
     return { ok: true, sessionToken, user };
   } catch (err) {
+    console.error('[authService] OAuth callback exchange failed:', err);
     return {
       ok: false,
-      error:
-        err instanceof Error ? err.message : 'Unexpected OAuth callback error.',
+      error: 'Unexpected OAuth callback error.',
     };
   }
 }
