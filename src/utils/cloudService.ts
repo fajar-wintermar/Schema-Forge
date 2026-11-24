@@ -5,54 +5,70 @@ import {
   WorkspaceProject,
 } from '../types/schema';
 import {
-  apiRequest,
-  getGithubAuthUrl,
-  logoutGithub,
+  apiClient,
   notifyAuthChanged,
+  parseErrorResponse,
+  publicApiClient,
   setStoredGithubSessionToken,
-} from './remoteService';
+} from './apiClient';
+import { getGithubAuthUrl, logoutGithub } from './remoteService';
 
-export function getCloudAuthStatus(): Promise<CloudAuthStatusResponse> {
-  return apiRequest<CloudAuthStatusResponse>('/api/auth/me');
+export async function getCloudAuthStatus(): Promise<CloudAuthStatusResponse> {
+  const res = await apiClient.api.auth.me.$get();
+  if (!res.ok) {
+    throw await parseErrorResponse(res);
+  }
+  return await res.json();
 }
 
-export function listCloudWorkspaces(): Promise<{
+export async function listCloudWorkspaces(): Promise<{
   workspaces: WorkspaceProject[];
 }> {
-  return apiRequest<{ workspaces: WorkspaceProject[] }>('/api/workspaces');
+  const res = await apiClient.api.workspaces.$get();
+  if (!res.ok) {
+    throw await parseErrorResponse(res);
+  }
+  return await res.json();
 }
 
-export function saveCloudWorkspace(
+export async function saveCloudWorkspace(
   workspace: WorkspaceProject
 ): Promise<{ ok: boolean; revision: number; syncedAt: string }> {
-  return apiRequest<{ ok: boolean; revision: number; syncedAt: string }>(
-    `/api/workspaces/${encodeURIComponent(workspace.id)}`,
-    {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(workspace),
-    }
-  );
+  const res = await apiClient.api.workspaces[':id'].$put({
+    param: { id: encodeURIComponent(workspace.id) },
+    json: workspace,
+  });
+  if (!res.ok) {
+    throw await parseErrorResponse(res);
+  }
+  return await res.json();
 }
 
-export function deleteCloudWorkspace(id: string): Promise<{ ok: boolean }> {
-  return apiRequest<{ ok: boolean }>(
-    `/api/workspaces/${encodeURIComponent(id)}`,
-    {
-      method: 'DELETE',
-    }
-  );
+export async function deleteCloudWorkspace(
+  id: string
+): Promise<{ ok: boolean }> {
+  const res = await apiClient.api.workspaces[':id'].$delete({
+    param: { id: encodeURIComponent(id) },
+  });
+  if (!res.ok) {
+    throw await parseErrorResponse(res);
+  }
+  return await res.json();
 }
 
-export function listWorkspaceShares(
+export async function listWorkspaceShares(
   workspaceId: string
 ): Promise<{ shares: ShareLinkRecord[] }> {
-  return apiRequest<{ shares: ShareLinkRecord[] }>(
-    `/api/workspaces/${encodeURIComponent(workspaceId)}/shares`
-  );
+  const res = await apiClient.api.workspaces[':id'].shares.$get({
+    param: { id: encodeURIComponent(workspaceId) },
+  });
+  if (!res.ok) {
+    throw await parseErrorResponse(res);
+  }
+  return await res.json();
 }
 
-export function createWorkspaceShare(
+export async function createWorkspaceShare(
   workspaceId: string,
   payload: {
     label?: string;
@@ -63,17 +79,17 @@ export function createWorkspaceShare(
     expiresAt?: string | null;
   }
 ): Promise<{ share: ShareLinkRecord }> {
-  return apiRequest<{ share: ShareLinkRecord }>(
-    `/api/workspaces/${encodeURIComponent(workspaceId)}/shares`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    }
-  );
+  const res = await apiClient.api.workspaces[':id'].shares.$post({
+    param: { id: encodeURIComponent(workspaceId) },
+    json: payload,
+  });
+  if (!res.ok) {
+    throw await parseErrorResponse(res);
+  }
+  return await res.json();
 }
 
-export function updateWorkspaceShare(
+export async function updateWorkspaceShare(
   workspaceId: string,
   shareId: string,
   payload: {
@@ -85,50 +101,54 @@ export function updateWorkspaceShare(
     expiresAt?: string | null;
   }
 ): Promise<{ share: ShareLinkRecord }> {
-  return apiRequest<{ share: ShareLinkRecord }>(
-    `/api/workspaces/${encodeURIComponent(
-      workspaceId
-    )}/shares/${encodeURIComponent(shareId)}`,
-    {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    }
-  );
+  const res = await apiClient.api.workspaces[':id'].shares[':shareId'].$patch({
+    param: {
+      id: encodeURIComponent(workspaceId),
+      shareId: encodeURIComponent(shareId),
+    },
+    json: payload,
+  });
+  if (!res.ok) {
+    throw await parseErrorResponse(res);
+  }
+  return await res.json();
 }
 
-export function revokeWorkspaceShare(
+export async function revokeWorkspaceShare(
   workspaceId: string,
   shareId: string
 ): Promise<{ ok: boolean; revokedAt: string }> {
-  return apiRequest<{ ok: boolean; revokedAt: string }>(
-    `/api/workspaces/${encodeURIComponent(
-      workspaceId
-    )}/shares/${encodeURIComponent(shareId)}`,
-    {
-      method: 'DELETE',
-    }
-  );
+  const res = await apiClient.api.workspaces[':id'].shares[':shareId'].$delete({
+    param: {
+      id: encodeURIComponent(workspaceId),
+      shareId: encodeURIComponent(shareId),
+    },
+  });
+  if (!res.ok) {
+    throw await parseErrorResponse(res);
+  }
+  return await res.json();
 }
 
 export async function fetchPublicShare(
   token: string,
   versionTag?: string | null
 ): Promise<SharedWorkspacePayload> {
-  const path = versionTag
-    ? `/api/share/${encodeURIComponent(token)}/${encodeURIComponent(versionTag)}`
-    : `/api/share/${encodeURIComponent(token)}`;
-  const res = await fetch(path, { method: 'GET' });
-  const data = await res.json().catch(() => ({}));
+  const res = versionTag
+    ? await publicApiClient.api.share[':token'][':versionTag'].$get({
+        param: {
+          token: encodeURIComponent(token),
+          versionTag: encodeURIComponent(versionTag),
+        },
+      })
+    : await publicApiClient.api.share[':token'].$get({
+        param: { token: encodeURIComponent(token) },
+      });
+
   if (!res.ok) {
-    const err = new Error(
-      (data as { error?: string }).error ||
-        `Unable to load shared schema (${res.status})`
-    ) as Error & { status?: number };
-    err.status = res.status;
-    throw err;
+    throw await parseErrorResponse(res, 'Unable to load shared schema');
   }
-  return data as SharedWorkspacePayload;
+  return await res.json();
 }
 
 export function buildShareUrl(
@@ -175,25 +195,31 @@ export async function connectWithGithubOAuth(): Promise<void> {
       ) {
         return;
       }
-      if (
-        event.data?.type === 'OAUTH_AUTH_SUCCESS' &&
-        event.data?.provider === 'github'
-      ) {
+      if (!event.data || typeof event.data !== 'object') return;
+      const msgType = Reflect.get(event.data, 'type');
+      const provider = Reflect.get(event.data, 'provider');
+
+      if (msgType === 'OAUTH_AUTH_SUCCESS' && provider === 'github') {
         settled = true;
         cleanup();
-        if (typeof event.data.sessionToken === 'string') {
-          setStoredGithubSessionToken(event.data.sessionToken);
+        const sessionToken = Reflect.get(event.data, 'sessionToken');
+        if (typeof sessionToken === 'string') {
+          setStoredGithubSessionToken(sessionToken);
         } else {
           notifyAuthChanged();
         }
         resolve();
-      } else if (
-        event.data?.type === 'OAUTH_AUTH_ERROR' &&
-        event.data?.provider === 'github'
-      ) {
+      } else if (msgType === 'OAUTH_AUTH_ERROR' && provider === 'github') {
         settled = true;
         cleanup();
-        reject(new Error(event.data.error || 'GitHub sign-in failed.'));
+        const errText = Reflect.get(event.data, 'error');
+        reject(
+          new Error(
+            typeof errText === 'string' && errText
+              ? errText
+              : 'GitHub sign-in failed.'
+          )
+        );
       }
     };
 

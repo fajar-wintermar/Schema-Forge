@@ -448,19 +448,21 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     }
 
     if (crossDomainMode === 'show') {
+      const emptyBundles: CrossDomainBundle[] = [];
       return {
         renderedEdges: visibleEdges,
-        crossDomainBundles: [] as CrossDomainBundle[],
+        crossDomainBundles: emptyBundles,
         anchorBoxByDomain: boxMap,
       };
     }
 
     if (crossDomainMode === 'hide') {
+      const emptyBundles: CrossDomainBundle[] = [];
       return {
         renderedEdges: visibleEdges.filter(
           (e) => e.fromInst.groupName === e.toInst.groupName
         ),
-        crossDomainBundles: [] as CrossDomainBundle[],
+        crossDomainBundles: emptyBundles,
         anchorBoxByDomain: boxMap,
       };
     }
@@ -562,22 +564,23 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
 
   useEffect(() => {
     const onPointerDownOutside = (e: PointerEvent) => {
+      if (!(e.target instanceof Node)) return;
       if (
         filterMenuRef.current &&
-        !filterMenuRef.current.contains(e.target as Node)
+        !filterMenuRef.current.contains(e.target)
       ) {
         setDomainMenuOpen(false);
       }
       if (
         detailMenuRef.current &&
-        !detailMenuRef.current.contains(e.target as Node)
+        !detailMenuRef.current.contains(e.target)
       ) {
         setDetailMenuOpen(false);
       }
     };
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
-      const target = e.target as HTMLElement | null;
+      const target = e.target instanceof HTMLElement ? e.target : null;
       if (
         target &&
         (target.tagName === 'INPUT' ||
@@ -1379,7 +1382,8 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         }
         if (
           e.target === e.currentTarget ||
-          (e.target as HTMLElement).dataset.canvasBg === 'true'
+          (e.target instanceof HTMLElement &&
+            e.target.dataset.canvasBg === 'true')
         ) {
           setColorPickerPosKey(null);
           if (cursorMode === 'marquee' || e.shiftKey) {

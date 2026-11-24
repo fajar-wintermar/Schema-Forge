@@ -43,6 +43,19 @@ interface ShareModalProps {
 
 type ExpirationMode = 'never' | '1' | '7' | '30' | '90' | 'custom';
 
+function parseExpirationMode(value: string): ExpirationMode {
+  switch (value) {
+    case '1':
+    case '7':
+    case '30':
+    case '90':
+    case 'custom':
+      return value;
+    default:
+      return 'never';
+  }
+}
+
 function formatLocalDateTimeInput(date: Date): string {
   const pad = (n: number) => String(n).padStart(2, '0');
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(
@@ -575,7 +588,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                     <select
                       value={expiresMode}
                       onChange={(e) => {
-                        const mode = e.target.value as ExpirationMode;
+                        const mode = parseExpirationMode(e.target.value);
                         setExpiresMode(mode);
                         if (mode === 'custom' && !customExpiresAt) {
                           setCustomExpiresAt(getDefaultCustomExpirationValue());
@@ -936,8 +949,9 @@ export const ShareModal: React.FC<ShareModalProps> = ({
                                   <select
                                     value={editExpiresMode}
                                     onChange={(e) => {
-                                      const mode = e.target
-                                        .value as ExpirationMode;
+                                      const mode = parseExpirationMode(
+                                        e.target.value
+                                      );
                                       setEditExpiresMode(mode);
                                       if (
                                         mode === 'custom' &&

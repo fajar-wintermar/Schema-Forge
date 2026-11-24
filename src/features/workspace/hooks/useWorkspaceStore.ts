@@ -164,8 +164,11 @@ export function useWorkspaceStore({
   useEffect(() => {
     let mounted = true;
     (async () => {
-      const savedTheme = await getMetaValue<boolean>('darkMode');
-      if (mounted && typeof savedTheme === 'boolean') {
+      const savedTheme = await getMetaValue(
+        'darkMode',
+        (value): value is boolean => typeof value === 'boolean'
+      );
+      if (mounted && savedTheme !== null) {
         setDarkMode(savedTheme);
       }
 
@@ -176,7 +179,10 @@ export function useWorkspaceStore({
         list = [seed];
       }
 
-      const lastActive = await getMetaValue<string>('activeWorkspaceId');
+      const lastActive = await getMetaValue(
+        'activeWorkspaceId',
+        (value): value is string => typeof value === 'string'
+      );
       let target = list.find((w) => w.id === lastActive)?.id || list[0].id;
 
       const params = new URLSearchParams(window.location.search);

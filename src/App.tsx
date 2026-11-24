@@ -559,7 +559,7 @@ export default function App() {
       {/* Compact responsive toolbar for narrow viewports */}
       <div className="flex lg:hidden items-center justify-between gap-2 px-3 py-1.5 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-xs overflow-x-auto">
         <div className="flex items-center gap-1">
-          {(['split', 'diagram', 'docs'] as ViewMode[]).map((m) => (
+          {(['split', 'diagram', 'docs'] as const satisfies readonly ViewMode[]).map((m) => (
             <button
               key={m}
               type="button"

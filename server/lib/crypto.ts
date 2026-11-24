@@ -1,16 +1,29 @@
 import { getCookie } from 'hono/cookie';
-import type { ApiContext, AppEnv, GithubSessionPayload } from '../types';
+import type {
+  ApiContext,
+  AppEnv,
+  GithubSessionPayload,
+  GithubUserSummary,
+  OAuthStatePayload,
+} from '../types';
+import { isRecord } from './http';
+
+function readNodeProcessEnv(key: keyof AppEnv): string {
+  if (!('process' in globalThis)) return '';
+  const maybeProcess = Reflect.get(globalThis, 'process');
+  if (!isRecord(maybeProcess)) return '';
+  const maybeEnv = maybeProcess.env;
+  if (!isRecord(maybeEnv)) return '';
+  const val = maybeEnv[key];
+  return typeof val === 'string' ? val.trim() : '';
+}
 
 export function getEnv(c: ApiContext, key: keyof AppEnv): string {
   const bindingVal = c.env?.[key];
   if (typeof bindingVal === 'string' && bindingVal.trim()) {
     return bindingVal.trim();
   }
-  const procEnv = (
-    globalThis as { process?: { env?: Record<string, string | undefined> } }
-  ).process?.env;
-  const nodeVal = procEnv?.[key];
-  return typeof nodeVal === 'string' ? nodeVal.trim() : '';
+  return readNodeProcessEnv(key);
 }
 
 export function getAppUrl(c: ApiContext): string {
@@ -47,7 +60,8 @@ export function verifyMutatingRequestOrigin(c: ApiContext): boolean {
   try {
     const originHost = new URL(origin).host;
     const forwardedHost = c.req.header('x-forwarded-host');
-    const host = forwardedHost || c.req.header('host') || new URL(c.req.url).host;
+    const host =
+      forwardedHost || c.req.header('host') || new URL(c.req.url).host;
     if (originHost === host) return true;
     const appUrl = getEnv(c, 'APP_URL');
     if (appUrl && appUrl !== 'MY_APP_URL') {
@@ -130,7 +144,8 @@ export async function encryptToken<T>(
 
 export async function decryptToken<T>(
   token: string,
-  secret: string
+  secret: string,
+  guard: (value: unknown) => value is T
 ): Promise<T | null> {
   try {
     const raw = base64UrlToBytes(token);
@@ -144,10 +159,43 @@ export async function decryptToken<T>(
       body
     );
     const text = new TextDecoder().decode(decryptedBuf);
-    return JSON.parse(text) as T;
+    const parsed: unknown = JSON.parse(text);
+    return guard(parsed) ? parsed : null;
   } catch {
     return null;
   }
+}
+
+export function isOAuthStatePayload(value: unknown): value is OAuthStatePayload {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.nonce === 'string' &&
+    typeof value.exp === 'number' &&
+    Number.isFinite(value.exp)
+  );
+}
+
+export function isGithubUserSummary(value: unknown): value is GithubUserSummary {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.login === 'string' &&
+    (value.id === undefined || typeof value.id === 'number') &&
+    (value.name === null || typeof value.name === 'string') &&
+    typeof value.avatar_url === 'string' &&
+    typeof value.html_url === 'string'
+  );
+}
+
+export function isGithubSessionPayload(
+  value: unknown
+): value is GithubSessionPayload {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.accessToken === 'string' &&
+    value.accessToken.length > 0 &&
+    typeof value.iat === 'number' &&
+    isGithubUserSummary(value.user)
+  );
 }
 
 export function randomHex(byteLen = 16): string {
@@ -161,19 +209,21 @@ export async function getGithubSession(
   const secret = getSessionSecret(c);
   const headerToken = c.req.header('x-github-session');
   if (headerToken && headerToken.trim()) {
-    const parsed = await decryptToken<GithubSessionPayload>(
+    const parsed = await decryptToken(
       headerToken.trim(),
-      secret
+      secret,
+      isGithubSessionPayload
     );
-    if (parsed?.accessToken && parsed.user?.login) return parsed;
+    if (parsed && parsed.user.login) return parsed;
   }
   const cookieToken = getCookie(c, 'sf_gh_session');
   if (cookieToken) {
-    const parsed = await decryptToken<GithubSessionPayload>(
+    const parsed = await decryptToken(
       cookieToken,
-      secret
+      secret,
+      isGithubSessionPayload
     );
-    if (parsed?.accessToken && parsed.user?.login) return parsed;
+    if (parsed && parsed.user.login) return parsed;
   }
   return null;
 }

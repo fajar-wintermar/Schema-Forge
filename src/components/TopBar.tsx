@@ -104,7 +104,8 @@ export const TopBar: React.FC<TopBarProps> = ({
     if (!sourceMenuOpen && !moreMenuOpen) return;
 
     const handlePointerDown = (e: MouseEvent) => {
-      const target = e.target as Node;
+      if (!(e.target instanceof Node)) return;
+      const target = e.target;
       if (
         sourceMenuOpen &&
         sourceMenuRef.current &&

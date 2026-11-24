@@ -26,7 +26,7 @@ export const CardinalityLegend: React.FC = () => (
       <span>Cardinality Legend</span>
     </div>
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
-      {(['>', '<', '-', '<>'] as RefRelation[]).map((rel) => {
+      {(['>', '<', '-', '<>'] as const satisfies readonly RefRelation[]).map((rel) => {
         const meta = CARDINALITY_META[rel];
         return (
           <div

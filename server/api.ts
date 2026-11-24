@@ -9,17 +9,18 @@ import { workspaceRoutes } from './routes/workspaces';
 
 export type { AppEnv } from './types';
 
-export const api = new Hono<{ Bindings: AppEnv }>();
+export const routes = new Hono<{ Bindings: AppEnv }>()
+  .use('/api/*', async (c, next) => {
+    if (c.env?.DB && !c.req.path.startsWith('/api/fetch-url')) {
+      await ensureMigrations(c.env.DB);
+    }
+    await next();
+  })
+  .route('/api/auth', authRoutes)
+  .route('/api/fetch-url', fetchUrlRoutes)
+  .route('/api/github', githubRoutes)
+  .route('/api/workspaces', workspaceRoutes)
+  .route('/api', shareRoutes);
 
-api.use('/api/*', async (c, next) => {
-  if (c.env?.DB && !c.req.path.startsWith('/api/fetch-url')) {
-    await ensureMigrations(c.env.DB);
-  }
-  await next();
-});
-
-api.route('/', authRoutes);
-api.route('/', fetchUrlRoutes);
-api.route('/', githubRoutes);
-api.route('/', workspaceRoutes);
-api.route('/', shareRoutes);
+export const api = routes;
+export type AppType = typeof routes;

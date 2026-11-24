@@ -5,6 +5,7 @@ import {
   generateNonExtractableAesKey,
   hasWebCryptoAes,
   isSealedWorkspaceRecord,
+  isWorkspaceProject,
   sealWorkspace,
   type StoredWorkspaceRecord,
   unsealWorkspace,
@@ -19,6 +20,14 @@ const MASTER_KEY_ID = 'workspace_master_key';
 const FALLBACK_SALT_STORAGE_KEY = 'schemaforge_vault_salt';
 
 const dbKeyPromiseMap = new WeakMap<IDBDatabase, Promise<CryptoKey | null>>();
+
+function extractCryptoKey(result: unknown): CryptoKey | null {
+  if (!result || typeof result !== 'object') return null;
+  const maybeKey = Reflect.get(result, 'key');
+  return typeof CryptoKey !== 'undefined' && maybeKey instanceof CryptoKey
+    ? maybeKey
+    : null;
+}
 
 function openDb(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -61,8 +70,7 @@ async function readKeystoreEntry(db: IDBDatabase): Promise<CryptoKey | null> {
     const tx = db.transaction(STORE_KEYSTORE, 'readonly');
     const req = tx.objectStore(STORE_KEYSTORE).get(MASTER_KEY_ID);
     req.onsuccess = () => {
-      const res = req.result as { id: string; key?: CryptoKey } | undefined;
-      resolve(res?.key || null);
+      resolve(extractCryptoKey(req.result));
     };
     req.onerror = () => reject(req.error);
   });
@@ -79,9 +87,9 @@ async function storeKeystoreEntryIfMissing(
     let chosenKey = candidate;
 
     getReq.onsuccess = () => {
-      const existing = getReq.result as { id: string; key?: CryptoKey } | undefined;
-      if (existing?.key) {
-        chosenKey = existing.key;
+      const existingKey = extractCryptoKey(getReq.result);
+      if (existingKey) {
+        chosenKey = existingKey;
         return;
       }
       try {
@@ -146,14 +154,6 @@ async function getLocalStorageAesKey(): Promise<{
   }
 }
 
-function isLegacyPlaintextWorkspace(
-  value: unknown
-): value is WorkspaceProject {
-  if (!value || typeof value !== 'object') return false;
-  const obj = value as Record<string, unknown>;
-  return typeof obj.id === 'string' && typeof obj.dbml === 'string';
-}
-
 export async function loadAllWorkspaces(): Promise<WorkspaceProject[]> {
   try {
     const db = await openDb();
@@ -163,7 +163,8 @@ export async function loadAllWorkspaces(): Promise<WorkspaceProject[]> {
       const tx = db.transaction(STORE_WORKSPACES, 'readonly');
       const store = tx.objectStore(STORE_WORKSPACES);
       const req = store.getAll();
-      req.onsuccess = () => resolve((req.result as unknown[]) || []);
+      req.onsuccess = () =>
+        resolve(Array.isArray(req.result) ? req.result : []);
       req.onerror = () => reject(req.error);
     });
 
@@ -176,7 +177,7 @@ export async function loadAllWorkspaces(): Promise<WorkspaceProject[]> {
         if (decrypted) {
           workspaces.push(decrypted);
         }
-      } else if (isLegacyPlaintextWorkspace(row)) {
+      } else if (isWorkspaceProject(row)) {
         workspaces.push(row);
         legacyToUpgrade.push(row);
       }
@@ -196,7 +197,7 @@ export async function loadAllWorkspaces(): Promise<WorkspaceProject[]> {
     const raw = localStorage.getItem('schemaforge_workspaces');
     if (!raw) return [];
     try {
-      const parsed = JSON.parse(raw) as unknown[];
+      const parsed: unknown = JSON.parse(raw);
       if (!Array.isArray(parsed)) return [];
       const { key, salt } = await getLocalStorageAesKey();
       const out: WorkspaceProject[] = [];
@@ -206,7 +207,7 @@ export async function loadAllWorkspaces(): Promise<WorkspaceProject[]> {
         if (isSealedWorkspaceRecord(item)) {
           const decrypted = await unsealWorkspace(item, key, salt);
           if (decrypted) out.push(decrypted);
-        } else if (isLegacyPlaintextWorkspace(item)) {
+        } else if (isWorkspaceProject(item)) {
           out.push(item);
           hadLegacy = true;
         }
@@ -275,20 +276,35 @@ export async function deleteWorkspace(id: string): Promise<void> {
   }
 }
 
-export async function getMetaValue<T>(key: string): Promise<T | null> {
+export async function getMetaValue<T>(
+  key: string,
+  guard: (value: unknown) => value is T
+): Promise<T | null> {
   try {
     const db = await openDb();
-    return await new Promise((resolve, reject) => {
+    return await new Promise<T | null>((resolve, reject) => {
       const tx = db.transaction(STORE_META, 'readonly');
       const req = tx.objectStore(STORE_META).get(key);
       req.onsuccess = () => {
-        resolve(req.result ? (req.result.value as T) : null);
+        const result: unknown = req.result;
+        if (!result || typeof result !== 'object') {
+          resolve(null);
+          return;
+        }
+        const value = Reflect.get(result, 'value');
+        resolve(guard(value) ? value : null);
       };
       req.onerror = () => reject(req.error);
     });
   } catch {
     const raw = localStorage.getItem(`schemaforge_meta_${key}`);
-    return raw ? (JSON.parse(raw) as T) : null;
+    if (!raw) return null;
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      return guard(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
   }
 }
 

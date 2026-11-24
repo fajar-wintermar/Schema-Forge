@@ -224,8 +224,8 @@ function formatTableOrPartialBlock(
   const headerOptStr =
     headerOpts.length > 0 ? ` [${headerOpts.join(', ')}]` : '';
   const aliasStr =
-    kind === 'Table' && (def as TableDef).alias
-      ? ` as ${formatSegment((def as TableDef).alias!)}`
+    kind === 'Table' && 'alias' in def && def.alias
+      ? ` as ${formatSegment(def.alias)}`
       : '';
   const headerName =
     kind === 'Table' ? formatQualifiedId(def.id) : formatSegment(def.name);

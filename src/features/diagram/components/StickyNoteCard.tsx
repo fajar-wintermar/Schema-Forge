@@ -58,7 +58,7 @@ const StickyNoteCardComponent: React.FC<StickyNoteCardProps> = ({
         >
           {!readOnly &&
             (
-              ['amber', 'sky', 'emerald', 'rose', 'slate'] as StickyNoteColor[]
+              ['amber', 'sky', 'emerald', 'rose', 'slate'] as const satisfies readonly StickyNoteColor[]
             ).map((c) => (
               <button
                 key={c}

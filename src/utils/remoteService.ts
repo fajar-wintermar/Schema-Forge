@@ -1,61 +1,73 @@
-export interface RemoteFetchResult {
-  content: string;
-  originalUrl: string;
-  resolvedUrl: string;
-  filename: string;
-  githubMeta?: {
-    owner: string;
-    repo: string;
-    branch: string;
-    path: string;
-    sha?: string;
-    htmlUrl?: string;
-  } | null;
-}
+import type { InferResponseType } from 'hono/client';
+import {
+  apiClient,
+  AUTH_CHANGED_EVENT,
+  getStoredGithubSessionToken,
+  notifyAuthChanged,
+  parseErrorResponse,
+  setStoredGithubSessionToken,
+} from './apiClient';
 
-export interface GithubUser {
-  login: string;
-  name: string | null;
-  avatar_url: string;
-  html_url: string;
-}
+export {
+  AUTH_CHANGED_EVENT,
+  getStoredGithubSessionToken,
+  notifyAuthChanged,
+  setStoredGithubSessionToken,
+};
 
-export interface GithubAuthStatus {
-  configured: boolean;
-  connected: boolean;
-  user: GithubUser | null;
-  callbackUrl: string;
-}
+export type RemoteFetchResult = InferResponseType<
+  (typeof apiClient.api)['fetch-url']['$post'],
+  200
+>;
 
+export type GithubAuthStatus = InferResponseType<
+  typeof apiClient.api.auth.github.status.$get,
+  200
+>;
 
-export interface GithubRepoInfo {
-  full_name: string;
-  owner: string;
-  repo: string;
-  default_branch: string;
-  private: boolean;
-  html_url: string;
-  canPush: boolean;
-  branches: string[];
-  isEmpty?: boolean;
-}
+export type GithubUser = NonNullable<GithubAuthStatus['user']>;
 
-export interface GithubTreeFile {
-  path: string;
-  size: number;
-  sha: string;
-  isDbml: boolean;
-}
+export type GithubRepoInfo = InferResponseType<
+  (typeof apiClient.api.github)['repo-info']['$get'],
+  200
+>;
 
-export interface GithubFileResult {
-  content: string;
-  sha: string;
-  path: string;
-  branch: string;
-  htmlUrl?: string;
-  owner: string;
-  repo: string;
-}
+export type GithubTreeResponse = InferResponseType<
+  typeof apiClient.api.github.tree.$get,
+  200
+>;
+
+export type GithubTreeFile = GithubTreeResponse['files'][number];
+
+export type GithubFileResult = InferResponseType<
+  typeof apiClient.api.github.file.$get,
+  200
+>;
+
+export type GithubInitBranchResult = InferResponseType<
+  (typeof apiClient.api.github)['init-branch']['$post'],
+  200
+>;
+
+export type GithubFolderResult = InferResponseType<
+  typeof apiClient.api.github.folder.$get,
+  200
+>;
+
+export type GithubCommitInfo = InferResponseType<
+  typeof apiClient.api.github.commits.$get,
+  200
+>['commits'][number];
+
+export type GithubPushResult = InferResponseType<
+  typeof apiClient.api.github.push.$post,
+  200
+>;
+
+export type GithubBatchPushResult = InferResponseType<
+  (typeof apiClient.api.github)['push-batch']['$post'],
+  200
+>;
 
 export interface GithubPushPayload {
   owner: string;
@@ -68,159 +80,6 @@ export interface GithubPushPayload {
   createNewBranch?: boolean;
   newBranchName?: string;
   forceWithLatestSha?: boolean;
-}
-
-export interface GithubPushResult {
-  sha: string;
-  path: string;
-  branch: string;
-  htmlUrl: string;
-  commitSha: string;
-  commitUrl: string;
-}
-
-const SESSION_STORAGE_KEY = 'sf_gh_session_token';
-
-export function getStoredGithubSessionToken(): string | null {
-  try {
-    return sessionStorage.getItem(SESSION_STORAGE_KEY);
-  } catch {
-    return null;
-  }
-}
-
-export const AUTH_CHANGED_EVENT = 'schemaforge:auth-changed';
-
-export function notifyAuthChanged(): void {
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
-  }
-}
-
-export function setStoredGithubSessionToken(token: string | null): void {
-  try {
-    if (token) sessionStorage.setItem(SESSION_STORAGE_KEY, token);
-    else sessionStorage.removeItem(SESSION_STORAGE_KEY);
-  } catch {
-    // Ignore storage quota / private mode restrictions
-  }
-  notifyAuthChanged();
-}
-
-export async function apiRequest<T>(
-  url: string,
-  init: RequestInit = {}
-): Promise<T> {
-  const token = getStoredGithubSessionToken();
-  const headers: Record<string, string> = {
-    'X-Requested-With': 'SchemaForge',
-    ...(init.headers as Record<string, string> | undefined),
-  };
-  if (token) {
-    headers['x-github-session'] = token;
-  }
-  const res = await fetch(url, {
-    ...init,
-    credentials: 'include',
-    headers,
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const err = new Error(
-      (data as { error?: string }).error ||
-        `Request failed (${res.status})`
-    ) as Error & { status?: number; code?: string };
-    err.status = res.status;
-    err.code = (data as { code?: string }).code;
-    throw err;
-  }
-  return data as T;
-}
-
-export function fetchDbmlFromUrl(url: string): Promise<RemoteFetchResult> {
-  return apiRequest<RemoteFetchResult>('/api/fetch-url', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ url }),
-  });
-}
-
-export function getGithubAuthStatus(): Promise<GithubAuthStatus> {
-  return apiRequest<GithubAuthStatus>('/api/auth/github/status');
-}
-
-export function getGithubAuthUrl(): Promise<{ url: string }> {
-  return apiRequest<{ url: string }>('/api/auth/github/url');
-}
-
-export async function logoutGithub(): Promise<void> {
-  setStoredGithubSessionToken(null);
-  await apiRequest<{ ok: boolean }>('/api/auth/github/logout', {
-    method: 'POST',
-  });
-  notifyAuthChanged();
-}
-
-export interface GithubInitBranchResult {
-  branch: string;
-  initialized: boolean;
-  alreadyExists?: boolean;
-  commitSha?: string;
-  commitUrl?: string;
-}
-
-export function initGithubBranch(
-  owner: string,
-  repo: string,
-  branch = 'main'
-): Promise<GithubInitBranchResult> {
-  return apiRequest<GithubInitBranchResult>('/api/github/init-branch', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ owner, repo, branch }),
-  });
-}
-
-export function getGithubRepoInfo(
-  owner: string,
-  repo: string
-): Promise<GithubRepoInfo> {
-  const qs = new URLSearchParams({ owner, repo });
-  return apiRequest<GithubRepoInfo>(`/api/github/repo-info?${qs.toString()}`);
-}
-
-export function getGithubTree(
-  owner: string,
-  repo: string,
-  branch: string
-): Promise<{ files: GithubTreeFile[]; truncated: boolean; isEmpty?: boolean }> {
-  const qs = new URLSearchParams({ owner, repo, branch });
-  return apiRequest<{ files: GithubTreeFile[]; truncated: boolean; isEmpty?: boolean }>(
-    `/api/github/tree?${qs.toString()}`
-  );
-}
-
-export function getGithubFile(
-  owner: string,
-  repo: string,
-  path: string,
-  ref?: string
-): Promise<GithubFileResult> {
-  const qs = new URLSearchParams({ owner, repo, path });
-  if (ref) qs.set('ref', ref);
-  return apiRequest<GithubFileResult>(`/api/github/file?${qs.toString()}`);
-}
-
-export interface GithubFolderResult {
-  owner: string;
-  repo: string;
-  branch: string;
-  folder: string;
-  files: Array<{
-    path: string;
-    content: string;
-    sha: string;
-  }>;
 }
 
 export interface GithubBatchPushPayload {
@@ -238,74 +97,158 @@ export interface GithubBatchPushPayload {
   forceWithLatestSha?: boolean;
 }
 
-export interface GithubBatchPushResult {
-  branch: string;
-  commitSha: string;
-  commitUrl: string;
-  files: Array<{
-    path: string;
-    sha: string;
-    htmlUrl: string;
-  }>;
+export async function fetchDbmlFromUrl(
+  url: string
+): Promise<RemoteFetchResult> {
+  const res = await apiClient.api['fetch-url'].$post({
+    json: { url },
+  });
+  if (!res.ok) {
+    throw await parseErrorResponse(res);
+  }
+  return await res.json();
 }
 
-export interface GithubCommitInfo {
-  sha: string;
-  shortSha: string;
-  message: string;
-  authorName: string;
-  authorLogin: string | null;
-  date: string;
-  htmlUrl: string;
+export async function getGithubAuthStatus(): Promise<GithubAuthStatus> {
+  const res = await apiClient.api.auth.github.status.$get();
+  if (!res.ok) {
+    throw await parseErrorResponse(res);
+  }
+  return await res.json();
 }
 
-export function getGithubCommits(params: {
+export async function getGithubAuthUrl(): Promise<{ url: string }> {
+  const res = await apiClient.api.auth.github.url.$get();
+  if (!res.ok) {
+    throw await parseErrorResponse(res);
+  }
+  return await res.json();
+}
+
+export async function logoutGithub(): Promise<void> {
+  setStoredGithubSessionToken(null);
+  const res = await apiClient.api.auth.github.logout.$post();
+  if (!res.ok) {
+    throw await parseErrorResponse(res);
+  }
+  notifyAuthChanged();
+}
+
+export async function initGithubBranch(
+  owner: string,
+  repo: string,
+  branch = 'main'
+): Promise<GithubInitBranchResult> {
+  const res = await apiClient.api.github['init-branch'].$post({
+    json: { owner, repo, branch },
+  });
+  if (!res.ok) {
+    throw await parseErrorResponse(res);
+  }
+  return await res.json();
+}
+
+export async function getGithubRepoInfo(
+  owner: string,
+  repo: string
+): Promise<GithubRepoInfo> {
+  const res = await apiClient.api.github['repo-info'].$get({
+    query: { owner, repo },
+  });
+  if (!res.ok) {
+    throw await parseErrorResponse(res);
+  }
+  return await res.json();
+}
+
+export async function getGithubTree(
+  owner: string,
+  repo: string,
+  branch: string
+): Promise<GithubTreeResponse> {
+  const res = await apiClient.api.github.tree.$get({
+    query: { owner, repo, branch },
+  });
+  if (!res.ok) {
+    throw await parseErrorResponse(res);
+  }
+  return await res.json();
+}
+
+export async function getGithubFile(
+  owner: string,
+  repo: string,
+  path: string,
+  ref?: string
+): Promise<GithubFileResult> {
+  const res = await apiClient.api.github.file.$get({
+    query: { owner, repo, path, ref },
+  });
+  if (!res.ok) {
+    throw await parseErrorResponse(res);
+  }
+  return await res.json();
+}
+
+export async function getGithubCommits(params: {
   owner: string;
   repo: string;
   branch?: string;
   path?: string;
   perPage?: number;
 }): Promise<{ commits: GithubCommitInfo[] }> {
-  const qs = new URLSearchParams({
-    owner: params.owner,
-    repo: params.repo,
+  const res = await apiClient.api.github.commits.$get({
+    query: {
+      owner: params.owner,
+      repo: params.repo,
+      branch: params.branch,
+      path: params.path,
+      per_page: params.perPage ? String(params.perPage) : undefined,
+    },
   });
-  if (params.branch) qs.set('branch', params.branch);
-  if (params.path) qs.set('path', params.path);
-  if (params.perPage) qs.set('per_page', String(params.perPage));
-  return apiRequest<{ commits: GithubCommitInfo[] }>(
-    `/api/github/commits?${qs.toString()}`
-  );
+  if (!res.ok) {
+    throw await parseErrorResponse(res);
+  }
+  return await res.json();
 }
 
-export function getGithubFolderFiles(
+export async function getGithubFolderFiles(
   owner: string,
   repo: string,
   branch: string,
   folder: string
 ): Promise<GithubFolderResult> {
-  const qs = new URLSearchParams({ owner, repo, branch, folder });
-  return apiRequest<GithubFolderResult>(`/api/github/folder?${qs.toString()}`);
+  const res = await apiClient.api.github.folder.$get({
+    query: { owner, repo, branch, folder },
+  });
+  if (!res.ok) {
+    throw await parseErrorResponse(res);
+  }
+  return await res.json();
 }
 
-export function pushGithubBatch(
+export async function pushGithubBatch(
   payload: GithubBatchPushPayload
 ): Promise<GithubBatchPushResult> {
-  return apiRequest<GithubBatchPushResult>('/api/github/push-batch', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+  const res = await apiClient.api.github['push-batch'].$post({
+    json: payload,
   });
+  if (!res.ok) {
+    throw await parseErrorResponse(res);
+  }
+  return await res.json();
 }
 
-export function pushGithubFile(
+export async function pushGithubFile(
   payload: GithubPushPayload
 ): Promise<GithubPushResult> {
-  return apiRequest<GithubPushResult>('/api/github/push', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+  const res = await apiClient.api.github.push.$post({
+    json: payload,
   });
+  if (!res.ok) {
+    throw await parseErrorResponse(res);
+  }
+  return await res.json();
 }
 
 export function parseGithubTargetInput(raw: string): {
@@ -318,7 +261,9 @@ export function parseGithubTargetInput(raw: string): {
   if (!trimmed) return null;
 
   // Match "owner/repo"
-  const shortMatch = trimmed.match(/^([a-zA-Z0-9_.-]+)\/([a-zA-Z0-9_.-]+?)(?:\.git)?$/);
+  const shortMatch = trimmed.match(
+    /^([a-zA-Z0-9_.-]+)\/([a-zA-Z0-9_.-]+?)(?:\.git)?$/
+  );
   if (shortMatch) {
     return { owner: shortMatch[1], repo: shortMatch[2] };
   }
@@ -332,10 +277,18 @@ export function parseGithubTargetInput(raw: string): {
     ) {
       const owner = parts[0];
       const repo = parts[1].replace(/\.git$/, '');
-      if (parts.length >= 5 && (parts[2] === 'blob' || parts[2] === 'tree' || parts[2] === 'raw')) {
+      if (
+        parts.length >= 5 &&
+        (parts[2] === 'blob' || parts[2] === 'tree' || parts[2] === 'raw')
+      ) {
         const branch = decodeURIComponent(parts[3]);
         const path = decodeURIComponent(parts.slice(4).join('/'));
-        return { owner, repo, branch, path: parts[2] === 'tree' ? undefined : path };
+        return {
+          owner,
+          repo,
+          branch,
+          path: parts[2] === 'tree' ? undefined : path,
+        };
       }
       return { owner, repo };
     }

@@ -1,4 +1,12 @@
 import type { ParsedGithubUrlMeta } from '../types';
+import {
+  isRecord,
+  readBoolean,
+  readJsonUnknown,
+  readString,
+  toErrorStatus,
+  type ErrorStatusCode,
+} from './http';
 
 export function isDisallowedHostname(hostname: string): boolean {
   const h = hostname.toLowerCase();
@@ -29,7 +37,9 @@ export function encodeGithubPath(filePath: string): string {
     .join('/');
 }
 
-export function parseGithubFileUrl(inputUrl: string): ParsedGithubUrlMeta | null {
+export function parseGithubFileUrl(
+  inputUrl: string
+): ParsedGithubUrlMeta | null {
   try {
     const u = new URL(inputUrl);
     if (u.hostname === 'github.com' || u.hostname === 'www.github.com') {
@@ -70,14 +80,12 @@ export async function githubApiFetch(
   accessToken?: string,
   init: RequestInit = {}
 ): Promise<Response> {
-  const headers: Record<string, string> = {
-    Accept: 'application/vnd.github+json',
-    'User-Agent': 'SchemaForge-DBML-Studio',
-    'X-GitHub-Api-Version': '2022-11-28',
-    ...(init.headers as Record<string, string> | undefined),
-  };
+  const headers = new Headers(init.headers);
+  headers.set('Accept', 'application/vnd.github+json');
+  headers.set('User-Agent', 'SchemaForge-DBML-Studio');
+  headers.set('X-GitHub-Api-Version', '2022-11-28');
   if (accessToken) {
-    headers.Authorization = `Bearer ${accessToken}`;
+    headers.set('Authorization', `Bearer ${accessToken}`);
   }
   return fetch(`https://api.github.com${endpoint}`, {
     ...init,
@@ -98,7 +106,7 @@ export async function isGithubRepoEmpty(
       accessToken
     );
     if (!res.ok) return false;
-    const branches = (await res.json()) as unknown[];
+    const branches = await readJsonUnknown(res);
     return Array.isArray(branches) && branches.length === 0;
   } catch {
     return false;
@@ -119,8 +127,21 @@ export interface CommitInlineTreeResult {
 
 export interface CommitInlineTreeFailure {
   ok: false;
-  status: number;
+  status: ErrorStatusCode;
   error: string;
+}
+
+function collectBlobShas(treeVal: unknown, target: Map<string, string>): void {
+  if (!Array.isArray(treeVal)) return;
+  for (const entry of treeVal) {
+    if (!isRecord(entry)) continue;
+    const type = readString(entry, 'type');
+    const path = readString(entry, 'path');
+    const sha = readString(entry, 'sha');
+    if (type === 'blob' && path && sha) {
+      target.set(path, sha);
+    }
+  }
 }
 
 /**
@@ -169,43 +190,44 @@ export async function commitInlineTree(params: {
       }),
     }
   );
-  const newTreeJson = (await newTreeRes.json()) as {
-    sha?: string;
-    tree?: Array<{ path: string; type: string; sha: string }>;
-    truncated?: boolean;
-    message?: string;
-  };
-  if (!newTreeRes.ok || !newTreeJson.sha) {
+  const newTreeJson = await readJsonUnknown(newTreeRes);
+  const newTreeRecord = isRecord(newTreeJson) ? newTreeJson : {};
+  const newTreeSha = readString(newTreeRecord, 'sha');
+  if (!newTreeRes.ok || !newTreeSha) {
     return {
       ok: false,
-      status: newTreeRes.status || 400,
-      error: newTreeJson.message || 'Failed to construct commit tree.',
+      status: toErrorStatus(newTreeRes.status, 400),
+      error:
+        readString(newTreeRecord, 'message') ||
+        'Failed to construct commit tree.',
     };
   }
 
   const newCommitRes = await githubApiFetch(
-    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/commits`,
+    `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
+      repo
+    )}/git/commits`,
     accessToken,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         message,
-        tree: newTreeJson.sha,
+        tree: newTreeSha,
         parents: [parentCommitSha],
       }),
     }
   );
-  const newCommitJson = (await newCommitRes.json()) as {
-    sha?: string;
-    html_url?: string;
-    message?: string;
-  };
-  if (!newCommitRes.ok || !newCommitJson.sha) {
+  const newCommitJson = await readJsonUnknown(newCommitRes);
+  const newCommitRecord = isRecord(newCommitJson) ? newCommitJson : {};
+  const newCommitSha = readString(newCommitRecord, 'sha');
+  if (!newCommitRes.ok || !newCommitSha) {
     return {
       ok: false,
-      status: newCommitRes.status || 400,
-      error: newCommitJson.message || 'Failed to create Git commit.',
+      status: toErrorStatus(newCommitRes.status, 400),
+      error:
+        readString(newCommitRecord, 'message') ||
+        'Failed to create Git commit.',
     };
   }
 
@@ -218,50 +240,51 @@ export async function commitInlineTree(params: {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        sha: newCommitJson.sha,
+        sha: newCommitSha,
         force: false,
       }),
     }
   );
-  const updateRefJson = (await updateRefRes.json()) as { message?: string };
+  const updateRefJson = await readJsonUnknown(updateRefRes);
+  const updateRefRecord = isRecord(updateRefJson) ? updateRefJson : {};
   if (!updateRefRes.ok) {
     return {
       ok: false,
-      status: conflictOn422 && updateRefRes.status === 422 ? 409 : updateRefRes.status || 400,
-      error: updateRefJson.message || refAdvanceErrorMessage,
+      status:
+        conflictOn422 && updateRefRes.status === 422
+          ? 409
+          : toErrorStatus(updateRefRes.status, 400),
+      error:
+        readString(updateRefRecord, 'message') || refAdvanceErrorMessage,
     };
   }
 
   const resolvedShas = new Map<string, string>();
-  for (const entry of newTreeJson.tree || []) {
-    if (entry.type === 'blob') resolvedShas.set(entry.path, entry.sha);
-  }
+  collectBlobShas(newTreeRecord.tree, resolvedShas);
   if (
-    newTreeJson.truncated ||
+    readBoolean(newTreeRecord, 'truncated') ||
     files.some((f) => !resolvedShas.has(f.cleanPath))
   ) {
     const fullTreeRes = await githubApiFetch(
       `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(
         repo
-      )}/git/trees/${encodeURIComponent(newTreeJson.sha)}?recursive=1`,
+      )}/git/trees/${encodeURIComponent(newTreeSha)}?recursive=1`,
       accessToken
     );
     if (fullTreeRes.ok) {
-      const fullTreeJson = (await fullTreeRes.json()) as {
-        tree?: Array<{ path: string; type: string; sha: string }>;
-      };
-      for (const entry of fullTreeJson.tree || []) {
-        if (entry.type === 'blob') resolvedShas.set(entry.path, entry.sha);
+      const fullTreeJson = await readJsonUnknown(fullTreeRes);
+      if (isRecord(fullTreeJson)) {
+        collectBlobShas(fullTreeJson.tree, resolvedShas);
       }
     }
   }
 
   return {
     ok: true,
-    commitSha: newCommitJson.sha,
+    commitSha: newCommitSha,
     commitUrl:
-      newCommitJson.html_url ||
-      `https://github.com/${owner}/${repo}/commit/${newCommitJson.sha}`,
+      readString(newCommitRecord, 'html_url') ||
+      `https://github.com/${owner}/${repo}/commit/${newCommitSha}`,
     files: files.map((f) => ({
       path: f.cleanPath,
       sha: resolvedShas.get(f.cleanPath) || '',
@@ -282,7 +305,7 @@ export async function createBranchRef(params: {
   newBranch: string;
   baseSha: string;
   accessToken: string;
-}): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
+}): Promise<{ ok: true } | { ok: false; status: ErrorStatusCode; error: string }> {
   const { owner, repo, newBranch, baseSha, accessToken } = params;
   const createRefRes = await githubApiFetch(
     `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/refs`,
@@ -296,12 +319,15 @@ export async function createBranchRef(params: {
       }),
     }
   );
-  const createRefJson = (await createRefRes.json()) as { message?: string };
+  const createRefJson = await readJsonUnknown(createRefRes);
+  const createRefRecord = isRecord(createRefJson) ? createRefJson : {};
   if (!createRefRes.ok) {
     return {
       ok: false,
-      status: createRefRes.status || 400,
-      error: createRefJson.message || `Failed to create branch "${newBranch}".`,
+      status: toErrorStatus(createRefRes.status, 400),
+      error:
+        readString(createRefRecord, 'message') ||
+        `Failed to create branch "${newBranch}".`,
     };
   }
   return { ok: true };
@@ -322,18 +348,17 @@ export async function fetchBlobText(params: {
     )}/git/blobs/${encodeURIComponent(sha)}`,
     accessToken
   );
-  const blobJson = (await blobRes.json()) as {
-    content?: string;
-    encoding?: string;
-    message?: string;
-  };
-  if (!blobRes.ok || typeof blobJson.content !== 'string') {
-    throw new Error(blobJson.message || `Failed to read blob for ${path}`);
+  const blobJson = await readJsonUnknown(blobRes);
+  const blobRecord = isRecord(blobJson) ? blobJson : {};
+  const rawContent = readString(blobRecord, 'content');
+  if (!blobRes.ok || rawContent === undefined) {
+    throw new Error(
+      readString(blobRecord, 'message') || `Failed to read blob for ${path}`
+    );
   }
   const content =
-    blobJson.encoding === 'base64'
-      ? decodeBase64(blobJson.content)
-      : blobJson.content;
+    readString(blobRecord, 'encoding') === 'base64'
+      ? decodeBase64(rawContent)
+      : rawContent;
   return { path, content, sha };
 }
-

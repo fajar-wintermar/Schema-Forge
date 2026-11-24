@@ -47,6 +47,18 @@ interface ParsedBracketSettings {
   refValues: string[];
 }
 
+function toRefRelation(value: string): RefRelation | null {
+  switch (value) {
+    case '>':
+    case '<':
+    case '-':
+    case '<>':
+      return value;
+    default:
+      return null;
+  }
+}
+
 export function parseDbml(source: string): ParsedSchema {
   const errors: ParseError[] = [];
   const tokens = tokenizeDbml(source, errors);
@@ -519,10 +531,11 @@ export function parseDbml(source: string): ParsedSchema {
 
       for (const rawRef of colRefValues) {
         const opMatch = rawRef.trim().match(/^(<>|[><-])\s*(.+)$/);
-        if (opMatch) {
+        const relation = opMatch ? toRefRelation(opMatch[1]) : null;
+        if (opMatch && relation) {
           inlineRefs.push({
             fromCol: colName,
-            relation: opMatch[1] as RefRelation,
+            relation,
             targetRaw: opMatch[2].trim(),
             onDelete: colSettings['delete'],
             onUpdate: colSettings['update'],
@@ -616,10 +629,9 @@ export function parseDbml(source: string): ParsedSchema {
       settings = parseBracketSettings().settings;
     }
 
-    const relIdx = exprTokens.findIndex((t) =>
-      ['>', '<', '-', '<>'].includes(t.value)
-    );
-    if (relIdx === -1) {
+    const relIdx = exprTokens.findIndex((t) => toRefRelation(t.value) !== null);
+    const relation = relIdx !== -1 ? toRefRelation(exprTokens[relIdx].value) : null;
+    if (relIdx === -1 || !relation) {
       errors.push({
         line: startLine,
         message: `Invalid Ref syntax: missing relationship operator (>, <, -, <>)`,
@@ -627,7 +639,6 @@ export function parseDbml(source: string): ParsedSchema {
       return null;
     }
 
-    const relation = exprTokens[relIdx].value as RefRelation;
     const leftTokens = exprTokens.slice(0, relIdx);
     const rightTokens = exprTokens.slice(relIdx + 1);
 

@@ -5,6 +5,7 @@ import {
   SchemaModuleFile,
   WorkspaceProject,
 } from '../../../types/schema';
+import { ApiClientError } from '../../../utils/apiClient';
 import {
   getGithubFile,
   getGithubFolderFiles,
@@ -318,11 +319,17 @@ export function useGithubPushSync({
 
       loadRepoDetails(targetOwner, targetRepo, result.branch);
     } catch (err) {
-      const e = err as Error & { code?: string; status?: number };
-      if (e.code === 'SHA_CONFLICT' || e.status === 409) {
+      if (
+        err instanceof ApiClientError &&
+        (err.code === 'SHA_CONFLICT' || err.status === 409)
+      ) {
         setShaConflict(true);
       }
-      onError(e.message || 'Failed to push modular files to GitHub.');
+      onError(
+        err instanceof Error
+          ? err.message
+          : 'Failed to push modular files to GitHub.'
+      );
     } finally {
       setPushing(false);
     }
@@ -398,11 +405,17 @@ export function useGithubPushSync({
 
       loadRepoDetails(targetOwner, targetRepo, result.branch, result.path);
     } catch (err) {
-      const e = err as Error & { code?: string; status?: number };
-      if (e.code === 'SHA_CONFLICT' || e.status === 409) {
+      if (
+        err instanceof ApiClientError &&
+        (err.code === 'SHA_CONFLICT' || err.status === 409)
+      ) {
         setShaConflict(true);
       }
-      onError(e.message || 'Failed to push changes to GitHub.');
+      onError(
+        err instanceof Error
+          ? err.message
+          : 'Failed to push changes to GitHub.'
+      );
     } finally {
       setPushing(false);
     }

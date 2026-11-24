@@ -13,13 +13,29 @@ export interface StoredWorkspaceRecord {
   sealedPayload: SealedWorkspaceBlob;
 }
 
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value && typeof value === 'object' && !Array.isArray(value));
+}
+
+export function isWorkspaceProject(value: unknown): value is WorkspaceProject {
+  if (!isPlainRecord(value)) return false;
+  return (
+    typeof value.id === 'string' &&
+    typeof value.name === 'string' &&
+    typeof value.dbml === 'string' &&
+    isPlainRecord(value.tablePositions) &&
+    isPlainRecord(value.groupMeta) &&
+    Array.isArray(value.stickyNotes) &&
+    Array.isArray(value.versions)
+  );
+}
+
 export function isSealedWorkspaceRecord(
   value: unknown
 ): value is StoredWorkspaceRecord {
-  if (!value || typeof value !== 'object') return false;
-  const rec = value as Record<string, unknown>;
-  if (typeof rec.id !== 'string' || !rec.sealedPayload) return false;
-  const sealed = rec.sealedPayload as Record<string, unknown>;
+  if (!isPlainRecord(value) || typeof value.id !== 'string') return false;
+  if (!isPlainRecord(value.sealedPayload)) return false;
+  const sealed = value.sealedPayload;
   return (
     sealed.v === 1 &&
     (sealed.alg === 'AES-GCM' || sealed.alg === 'STREAM-V1') &&
@@ -38,18 +54,21 @@ function bytesToBase64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
-function base64ToBytes(b64: string): Uint8Array {
+function base64ToBytes(b64: string): Uint8Array<ArrayBuffer> {
   const binary = atob(b64);
-  const out = new Uint8Array(binary.length);
+  const out = new Uint8Array(new ArrayBuffer(binary.length));
   for (let i = 0; i < binary.length; i++) {
     out[i] = binary.charCodeAt(i);
   }
   return out;
 }
 
-function randomBytes(len: number): Uint8Array {
-  const out = new Uint8Array(len);
-  if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+function randomBytes(len: number): Uint8Array<ArrayBuffer> {
+  const out = new Uint8Array(new ArrayBuffer(len));
+  if (
+    typeof crypto !== 'undefined' &&
+    typeof crypto.getRandomValues === 'function'
+  ) {
     crypto.getRandomValues(out);
   } else {
     for (let i = 0; i < len; i++) {
@@ -63,8 +82,14 @@ function randomBytes(len: number): Uint8Array {
  * Fallback stream transform used only when Web Crypto (`crypto.subtle`) is unavailable
  * (for example, non-HTTPS LAN origins). Ensures DBML is never persisted as readable plaintext.
  */
-function streamTransform(data: Uint8Array, iv: Uint8Array, secretHint: string): Uint8Array {
-  const seed = new TextEncoder().encode(`SchemaForge::LocalVault::${secretHint}`);
+function streamTransform(
+  data: Uint8Array,
+  iv: Uint8Array,
+  secretHint: string
+): Uint8Array {
+  const seed = new TextEncoder().encode(
+    `SchemaForge::LocalVault::${secretHint}`
+  );
   const out = new Uint8Array(data.length);
   let state = 0x811c9dc5;
   for (let i = 0; i < iv.length; i++) {
@@ -100,7 +125,9 @@ export async function generateNonExtractableAesKey(): Promise<CryptoKey> {
   );
 }
 
-export async function deriveFallbackAesKey(saltB64: string): Promise<CryptoKey> {
+export async function deriveFallbackAesKey(
+  saltB64: string
+): Promise<CryptoKey> {
   const origin =
     typeof window !== 'undefined' && window.location?.origin
       ? window.location.origin
@@ -118,7 +145,7 @@ export async function deriveFallbackAesKey(saltB64: string): Promise<CryptoKey> 
   return crypto.subtle.deriveKey(
     {
       name: 'PBKDF2',
-      salt: base64ToBytes(saltB64).buffer as ArrayBuffer,
+      salt: base64ToBytes(saltB64),
       iterations: 60000,
       hash: 'SHA-256',
     },
@@ -134,14 +161,16 @@ export async function sealWorkspace(
   aesKey: CryptoKey | null,
   fallbackSecret = 'default'
 ): Promise<StoredWorkspaceRecord> {
-  const jsonBytes = new TextEncoder().encode(JSON.stringify(workspace));
+  const encoded = new TextEncoder().encode(JSON.stringify(workspace));
+  const jsonBytes = new Uint8Array(new ArrayBuffer(encoded.byteLength));
+  jsonBytes.set(encoded);
   const iv = randomBytes(12);
 
   if (aesKey && hasWebCryptoAes()) {
     const encrypted = await crypto.subtle.encrypt(
-      { name: 'AES-GCM', iv: iv.buffer as ArrayBuffer },
+      { name: 'AES-GCM', iv },
       aesKey,
-      jsonBytes.buffer as ArrayBuffer
+      jsonBytes
     );
     return {
       id: workspace.id,
@@ -181,17 +210,19 @@ export async function unsealWorkspace(
     if (alg === 'AES-GCM') {
       if (!aesKey || !hasWebCryptoAes()) return null;
       const decrypted = await crypto.subtle.decrypt(
-        { name: 'AES-GCM', iv: ivBytes.buffer as ArrayBuffer },
+        { name: 'AES-GCM', iv: ivBytes },
         aesKey,
-        ctBytes.buffer as ArrayBuffer
+        ctBytes
       );
       const json = new TextDecoder().decode(new Uint8Array(decrypted));
-      return JSON.parse(json) as WorkspaceProject;
+      const parsed: unknown = JSON.parse(json);
+      return isWorkspaceProject(parsed) ? parsed : null;
     }
 
     const plainBytes = streamTransform(ctBytes, ivBytes, fallbackSecret);
     const json = new TextDecoder().decode(plainBytes);
-    return JSON.parse(json) as WorkspaceProject;
+    const parsed: unknown = JSON.parse(json);
+    return isWorkspaceProject(parsed) ? parsed : null;
   } catch {
     return null;
   }
