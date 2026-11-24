@@ -13,18 +13,28 @@ import {
 } from './apiClient';
 import { getGithubAuthUrl, logoutGithub } from './remoteService';
 
-export async function getCloudAuthStatus(): Promise<CloudAuthStatusResponse> {
-  const res = await apiClient.api.auth.me.$get();
+export async function getCloudAuthStatus(
+  signal?: AbortSignal
+): Promise<CloudAuthStatusResponse> {
+  const res = await apiClient.api.auth.me.$get(
+    undefined,
+    signal ? { init: { signal } } : undefined
+  );
   if (!res.ok) {
     throw await parseErrorResponse(res);
   }
   return await res.json();
 }
 
-export async function listCloudWorkspaces(): Promise<{
+export async function listCloudWorkspaces(
+  signal?: AbortSignal
+): Promise<{
   workspaces: WorkspaceProject[];
 }> {
-  const res = await apiClient.api.workspaces.$get();
+  const res = await apiClient.api.workspaces.$get(
+    undefined,
+    signal ? { init: { signal } } : undefined
+  );
   if (!res.ok) {
     throw await parseErrorResponse(res);
   }
@@ -57,11 +67,13 @@ export async function deleteCloudWorkspace(
 }
 
 export async function listWorkspaceShares(
-  workspaceId: string
+  workspaceId: string,
+  signal?: AbortSignal
 ): Promise<{ shares: ShareLinkRecord[] }> {
-  const res = await apiClient.api.workspaces[':id'].shares.$get({
-    param: { id: encodeURIComponent(workspaceId) },
-  });
+  const res = await apiClient.api.workspaces[':id'].shares.$get(
+    { param: { id: encodeURIComponent(workspaceId) } },
+    signal ? { init: { signal } } : undefined
+  );
   if (!res.ok) {
     throw await parseErrorResponse(res);
   }
@@ -132,18 +144,26 @@ export async function revokeWorkspaceShare(
 
 export async function fetchPublicShare(
   token: string,
-  versionTag?: string | null
+  versionTag?: string | null,
+  signal?: AbortSignal
 ): Promise<SharedWorkspacePayload> {
+  const reqOptions = signal ? { init: { signal } } : undefined;
   const res = versionTag
-    ? await publicApiClient.api.share[':token'][':versionTag'].$get({
-        param: {
-          token: encodeURIComponent(token),
-          versionTag: encodeURIComponent(versionTag),
+    ? await publicApiClient.api.share[':token'][':versionTag'].$get(
+        {
+          param: {
+            token: encodeURIComponent(token),
+            versionTag: encodeURIComponent(versionTag),
+          },
         },
-      })
-    : await publicApiClient.api.share[':token'].$get({
-        param: { token: encodeURIComponent(token) },
-      });
+        reqOptions
+      )
+    : await publicApiClient.api.share[':token'].$get(
+        {
+          param: { token: encodeURIComponent(token) },
+        },
+        reqOptions
+      );
 
   if (!res.ok) {
     throw await parseErrorResponse(res, 'Unable to load shared schema');

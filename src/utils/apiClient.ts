@@ -16,6 +16,13 @@ export class ApiClientError extends Error {
   }
 }
 
+export function isAbortError(error: unknown): boolean {
+  if (error instanceof DOMException && error.name === 'AbortError') {
+    return true;
+  }
+  return error instanceof Error && error.name === 'AbortError';
+}
+
 export function getStoredGithubSessionToken(): string | null {
   try {
     return sessionStorage.getItem(SESSION_STORAGE_KEY);

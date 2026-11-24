@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { isAbortError } from '../../../utils/apiClient';
 import {
   getGithubAuthStatus,
   getGithubAuthUrl,
@@ -79,22 +80,48 @@ export function useGithubAuthAndRepo({
   const [openInNewWorkspace, setOpenInNewWorkspace] = useState(true);
   const [loadingFile, setLoadingFile] = useState(false);
 
+  const authAbortRef = useRef<AbortController | null>(null);
+  const repoAbortRef = useRef<AbortController | null>(null);
+  const copyTimerRef = useRef<number | null>(null);
+  const autoLoadedKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    return () => {
+      authAbortRef.current?.abort();
+      repoAbortRef.current?.abort();
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+    };
+  }, []);
+
   const refreshAuthStatus = useCallback(async () => {
+    authAbortRef.current?.abort();
+    const controller = new AbortController();
+    authAbortRef.current = controller;
+
     setAuthLoading(true);
     try {
-      const status = await getGithubAuthStatus();
+      const status = await getGithubAuthStatus(controller.signal);
+      if (controller.signal.aborted) return;
       setAuthStatus(status);
     } catch (err) {
+      if (isAbortError(err) || controller.signal.aborted) return;
       onError(
         err instanceof Error ? err.message : 'Failed to check GitHub status.'
       );
     } finally {
-      setAuthLoading(false);
+      if (!controller.signal.aborted) {
+        setAuthLoading(false);
+      }
     }
   }, [onError]);
 
   useEffect(() => {
-    refreshAuthStatus();
+    void refreshAuthStatus();
+    return () => {
+      authAbortRef.current?.abort();
+    };
   }, [refreshAuthStatus]);
 
   const loadRepoDetails = useCallback(
@@ -104,10 +131,15 @@ export function useGithubAuthAndRepo({
       preferredBranch?: string,
       preferredPath?: string
     ) => {
+      repoAbortRef.current?.abort();
+      const controller = new AbortController();
+      repoAbortRef.current = controller;
+
       onError(null);
       setTreeLoading(true);
       try {
-        const info = await getGithubRepoInfo(owner, repo);
+        const info = await getGithubRepoInfo(owner, repo, controller.signal);
+        if (controller.signal.aborted) return;
         setSelectedRepo(info);
         setRepoInput(info.full_name);
 
@@ -126,7 +158,13 @@ export function useGithubAuthAndRepo({
           return;
         }
 
-        const { files } = await getGithubTree(owner, repo, branchToUse);
+        const { files } = await getGithubTree(
+          owner,
+          repo,
+          branchToUse,
+          controller.signal
+        );
+        if (controller.signal.aborted) return;
         setTreeFiles(files);
         if (preferredPath) {
           setSelectedFilePath(preferredPath);
@@ -135,13 +173,16 @@ export function useGithubAuthAndRepo({
           setSelectedFilePath(firstDbml?.path || '');
         }
       } catch (err) {
+        if (isAbortError(err) || controller.signal.aborted) return;
         setSelectedRepo(null);
         setTreeFiles([]);
         onError(
           err instanceof Error ? err.message : 'Failed to inspect repository.'
         );
       } finally {
-        setTreeLoading(false);
+        if (!controller.signal.aborted) {
+          setTreeLoading(false);
+        }
       }
     },
     [onError]
@@ -167,9 +208,9 @@ export function useGithubAuthAndRepo({
         }
         setConnecting(false);
         onError(null);
-        refreshAuthStatus().then(() => {
+        void refreshAuthStatus().then(() => {
           if (selectedRepo) {
-            loadRepoDetails(
+            void loadRepoDetails(
               selectedRepo.owner,
               selectedRepo.repo,
               selectedBranch
@@ -189,14 +230,24 @@ export function useGithubAuthAndRepo({
   }, [refreshAuthStatus, selectedRepo, selectedBranch, loadRepoDetails, onError]);
 
   useEffect(() => {
-    if (authLoading) return;
-    if (repoLinked && !selectedRepo) {
-      loadRepoDetails(repoLinked.owner, repoLinked.repo, repoLinked.branch);
-    } else if (linked && !selectedRepo) {
-      loadRepoDetails(linked.owner, linked.repo, linked.branch, linked.path);
+    if (authLoading || selectedRepo) return;
+    if (repoLinked) {
+      const key = `repo:${repoLinked.owner}/${repoLinked.repo}:${repoLinked.branch}`;
+      if (autoLoadedKeyRef.current === key) return;
+      autoLoadedKeyRef.current = key;
+      void loadRepoDetails(repoLinked.owner, repoLinked.repo, repoLinked.branch);
+    } else if (linked) {
+      const key = `file:${linked.owner}/${linked.repo}:${linked.branch}:${linked.path}`;
+      if (autoLoadedKeyRef.current === key) return;
+      autoLoadedKeyRef.current = key;
+      void loadRepoDetails(
+        linked.owner,
+        linked.repo,
+        linked.branch,
+        linked.path
+      );
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authLoading, repoLinked?.owner, repoLinked?.repo, linked?.owner, linked?.repo]);
+  }, [authLoading, selectedRepo, repoLinked, linked, loadRepoDetails]);
 
   const handleBranchChange = async (nextBranch: string) => {
     setSelectedBranch(nextBranch);
@@ -205,25 +256,34 @@ export function useGithubAuthAndRepo({
       setTreeFiles([]);
       return;
     }
+    repoAbortRef.current?.abort();
+    const controller = new AbortController();
+    repoAbortRef.current = controller;
+
     setTreeLoading(true);
     onError(null);
     try {
       const { files } = await getGithubTree(
         selectedRepo.owner,
         selectedRepo.repo,
-        nextBranch
+        nextBranch,
+        controller.signal
       );
+      if (controller.signal.aborted) return;
       setTreeFiles(files);
       if (!files.some((f) => f.path === selectedFilePath)) {
         const firstDbml = files.find((f) => f.isDbml);
         setSelectedFilePath(firstDbml?.path || '');
       }
     } catch (err) {
+      if (isAbortError(err) || controller.signal.aborted) return;
       onError(
         err instanceof Error ? err.message : 'Failed to load branch files.'
       );
     } finally {
-      setTreeLoading(false);
+      if (!controller.signal.aborted) {
+        setTreeLoading(false);
+      }
     }
   };
 
@@ -374,19 +434,19 @@ export function useGithubAuthAndRepo({
       .sort((a, b) => b.count - a.count || a.folder.localeCompare(b.folder));
   }, [treeFiles]);
 
-  useEffect(() => {
-    if (dbmlFolders.length === 0) {
-      setSelectedFolderToLoad('');
-    } else if (
-      !selectedFolderToLoad ||
-      !dbmlFolders.some((d) => d.folder === selectedFolderToLoad)
+  const effectiveFolderToLoad = useMemo(() => {
+    if (dbmlFolders.length === 0) return '';
+    if (
+      selectedFolderToLoad &&
+      dbmlFolders.some((d) => d.folder === selectedFolderToLoad)
     ) {
-      setSelectedFolderToLoad(dbmlFolders[0].folder);
+      return selectedFolderToLoad;
     }
+    return dbmlFolders[0].folder;
   }, [dbmlFolders, selectedFolderToLoad]);
 
   const handleLoadSelectedFolder = async () => {
-    if (!selectedRepo || !selectedFolderToLoad || !onLoadGithubFolder) return;
+    if (!selectedRepo || !effectiveFolderToLoad || !onLoadGithubFolder) return;
     setLoadingFolder(true);
     onError(null);
     try {
@@ -394,7 +454,7 @@ export function useGithubAuthAndRepo({
         selectedRepo.owner,
         selectedRepo.repo,
         selectedBranch,
-        selectedFolderToLoad
+        effectiveFolderToLoad
       );
       onLoadGithubFolder(result, openInNewWorkspace);
       onClose();
@@ -423,7 +483,13 @@ export function useGithubAuthAndRepo({
     try {
       await navigator.clipboard.writeText(authStatus.callbackUrl);
       setCopiedCallback(true);
-      window.setTimeout(() => setCopiedCallback(false), 1800);
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+      copyTimerRef.current = window.setTimeout(() => {
+        copyTimerRef.current = null;
+        setCopiedCallback(false);
+      }, 1800);
     } catch {
       // Ignore clipboard write errors
     }
@@ -451,7 +517,7 @@ export function useGithubAuthAndRepo({
     selectedFilePath,
     setSelectedFilePath,
     dbmlFolders,
-    selectedFolderToLoad,
+    selectedFolderToLoad: effectiveFolderToLoad,
     setSelectedFolderToLoad,
     loadingFolder,
     openInNewWorkspace,

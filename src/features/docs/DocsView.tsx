@@ -69,55 +69,60 @@ export const DocsView: React.FC<DocsViewProps> = ({
     });
   }, [sectionRequest]);
 
-  // Reset to overview if active table, note, or group no longer exists after workspace switch
-  useEffect(() => {
-    if (
-      section.kind === 'table' &&
-      !schema.tables.some((t) => t.id === section.tableId)
-    ) {
-      setSection({ kind: 'overview' });
-    } else if (
-      section.kind === 'note' &&
-      !schema.notes.some((n) => n.id === section.noteId)
-    ) {
-      setSection({ kind: 'overview' });
-    } else if (
-      section.kind === 'group' &&
-      !schema.tableGroups.some((g) => g.name === section.groupName)
-    ) {
-      setSection({ kind: 'overview' });
-    }
-  }, [schema.tables, schema.notes, schema.tableGroups, section]);
-
-  // Reset pagination when filters change
-  useEffect(() => {
+  const handleSetSearch = useCallback((q: string) => {
+    setSearch(q);
     setOverviewPage(1);
-  }, [search, selectedDomains, overviewPageSize, schema.tables.length]);
+  }, []);
 
-  useEffect(() => {
+  const handleSetOverviewPageSize = useCallback((size: number) => {
+    setOverviewPageSize(size);
+    setOverviewPage(1);
+  }, []);
+
+  const handleSetRelSearch = useCallback((q: string) => {
+    setRelSearch(q);
     setRelPage(1);
-  }, [relSearch, selectedDomains, relPageSize, schema.refs.length]);
+  }, []);
 
-  useEffect(() => {
+  const handleSetRelPageSize = useCallback((size: number) => {
+    setRelPageSize(size);
+    setRelPage(1);
+  }, []);
+
+  const handleSetEnumSearch = useCallback((q: string) => {
+    setEnumSearch(q);
     setEnumPage(1);
-  }, [enumSearch, enumPageSize, schema.enums.length]);
+  }, []);
 
-  useEffect(() => {
+  const handleSetEnumPageSize = useCallback((size: number) => {
+    setEnumPageSize(size);
+    setEnumPage(1);
+  }, []);
+
+  const handleSetGroupsSearch = useCallback((q: string) => {
+    setGroupsSearch(q);
     setGroupsPage(1);
-  }, [groupsSearch, groupsPageSize, schema.tableGroups.length, selectedDomains]);
+  }, []);
 
-  useEffect(() => {
+  const handleSetGroupsPageSize = useCallback((size: number) => {
+    setGroupsPageSize(size);
+    setGroupsPage(1);
+  }, []);
+
+  const handleSetNotesSearch = useCallback((q: string) => {
+    setNotesSearch(q);
     setNotesPage(1);
-  }, [
-    notesSearch,
-    noteCategory,
-    notesPageSize,
-    schema.notes.length,
-    schema.tables.length,
-    schema.tableGroups.length,
-    schema.enums.length,
-    stickyNotes.length,
-  ]);
+  }, []);
+
+  const handleSetNoteCategory = useCallback((cat: NoteCategory) => {
+    setNoteCategory(cat);
+    setNotesPage(1);
+  }, []);
+
+  const handleSetNotesPageSize = useCallback((size: number) => {
+    setNotesPageSize(size);
+    setNotesPage(1);
+  }, []);
 
   const fkLookup = useMemo(() => {
     const map = new Map<
@@ -380,11 +385,16 @@ export const DocsView: React.FC<DocsViewProps> = ({
       ? schema.tableGroups.find((g) => g.name === section.groupName) || null
       : null;
 
-  useEffect(() => {
+  // Derive safe active section during render when a referenced entity is removed
+  const resolvedSection: DocsSection = useMemo(() => {
+    if (section.kind === 'table' && !activeTable) return { kind: 'overview' };
+    if (section.kind === 'note' && !activeNote) return { kind: 'overview' };
+    if (section.kind === 'group' && !activeGroup) return { kind: 'overview' };
     if (section.kind === 'noteDetail' && !activeNoteEntry) {
-      setSection({ kind: 'notes' });
+      return { kind: 'notes' };
     }
-  }, [section, activeNoteEntry]);
+    return section;
+  }, [section, activeTable, activeNote, activeGroup, activeNoteEntry]);
 
   const updateScrollTopVisibility = useCallback(() => {
     const pane = mainPaneRef.current;
@@ -400,7 +410,7 @@ export const DocsView: React.FC<DocsViewProps> = ({
     return () => {
       pane.removeEventListener('scroll', handleScroll);
     };
-  }, [updateScrollTopVisibility, section]);
+  }, [updateScrollTopVisibility]);
 
   const handleScrollToTop = () => {
     mainPaneRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
@@ -409,6 +419,7 @@ export const DocsView: React.FC<DocsViewProps> = ({
   const navigateSection = (next: DocsSection) => {
     setSection(next);
     mainPaneRef.current?.scrollTo({ top: 0 });
+    setShowScrollTop(false);
   };
 
   const openTableDetail = (tableId: string) => {
@@ -430,7 +441,7 @@ export const DocsView: React.FC<DocsViewProps> = ({
       {navOpen && (
         <DocsSidebar
           schema={schema}
-          section={section}
+          section={resolvedSection}
           activeTableId={activeTableId}
           orderedAllTables={orderedAllTables}
           treeFlatTables={treeFlatTables}
@@ -485,7 +496,7 @@ export const DocsView: React.FC<DocsViewProps> = ({
       </button>
 
       <div ref={mainPaneRef} className="flex-1 h-full overflow-y-auto min-w-0">
-        {section.kind === 'table' && activeTable && (
+        {resolvedSection.kind === 'table' && activeTable && (
           <TableDetailPage
             schema={schema}
             activeTable={activeTable}
@@ -504,7 +515,7 @@ export const DocsView: React.FC<DocsViewProps> = ({
           />
         )}
 
-        {section.kind === 'note' && activeNote && (
+        {resolvedSection.kind === 'note' && activeNote && (
           <StandaloneNotePage
             activeNote={activeNote}
             navOpen={navOpen}
@@ -515,7 +526,7 @@ export const DocsView: React.FC<DocsViewProps> = ({
           />
         )}
 
-        {section.kind === 'noteDetail' && activeNoteEntry && (
+        {resolvedSection.kind === 'noteDetail' && activeNoteEntry && (
           <NoteDetailPage
             activeNoteEntry={activeNoteEntry}
             allNoteEntries={allNoteEntries}
@@ -529,7 +540,7 @@ export const DocsView: React.FC<DocsViewProps> = ({
           />
         )}
 
-        {section.kind === 'group' && activeGroup && (
+        {resolvedSection.kind === 'group' && activeGroup && (
           <GroupDetailPage
             activeGroup={activeGroup}
             stickyNotes={stickyNotes}
@@ -543,7 +554,7 @@ export const DocsView: React.FC<DocsViewProps> = ({
           />
         )}
 
-        {section.kind === 'enums' && (
+        {resolvedSection.kind === 'enums' && (
           <EnumsPage
             totalEnums={schema.enums.length}
             filteredEnums={filteredEnums}
@@ -555,15 +566,15 @@ export const DocsView: React.FC<DocsViewProps> = ({
             navOpen={navOpen}
             modKey={modKey}
             onToggleNav={onToggleNav}
-            onSetEnumSearch={setEnumSearch}
+            onSetEnumSearch={handleSetEnumSearch}
             onSetEnumPage={setEnumPage}
-            onSetEnumPageSize={setEnumPageSize}
+            onSetEnumPageSize={handleSetEnumPageSize}
             onNavigateSection={navigateSection}
             onOpenTableDetail={openTableDetail}
           />
         )}
 
-        {section.kind === 'partials' && (
+        {resolvedSection.kind === 'partials' && (
           <PartialsPage
             partials={schema.tablePartials}
             tables={schema.tables}
@@ -577,7 +588,7 @@ export const DocsView: React.FC<DocsViewProps> = ({
           />
         )}
 
-        {section.kind === 'relationships' && (
+        {resolvedSection.kind === 'relationships' && (
           <RelationshipsPage
             filteredRefs={filteredRefs}
             pagedRefs={pagedRefs}
@@ -587,15 +598,15 @@ export const DocsView: React.FC<DocsViewProps> = ({
             navOpen={navOpen}
             modKey={modKey}
             onToggleNav={onToggleNav}
-            onSetRelSearch={setRelSearch}
+            onSetRelSearch={handleSetRelSearch}
             onSetRelPage={setRelPage}
-            onSetRelPageSize={setRelPageSize}
+            onSetRelPageSize={handleSetRelPageSize}
             onNavigateSection={navigateSection}
             onOpenTableDetail={openTableDetail}
           />
         )}
 
-        {section.kind === 'groups' && (
+        {resolvedSection.kind === 'groups' && (
           <TableGroupsPage
             totalSchemaGroups={schema.tableGroups.length}
             filteredGroups={filteredTableGroups}
@@ -606,15 +617,15 @@ export const DocsView: React.FC<DocsViewProps> = ({
             navOpen={navOpen}
             modKey={modKey}
             onToggleNav={onToggleNav}
-            onSetGroupsSearch={setGroupsSearch}
+            onSetGroupsSearch={handleSetGroupsSearch}
             onSetGroupsPage={setGroupsPage}
-            onSetGroupsPageSize={setGroupsPageSize}
+            onSetGroupsPageSize={handleSetGroupsPageSize}
             onNavigateSection={navigateSection}
             onOpenTableDetail={openTableDetail}
           />
         )}
 
-        {section.kind === 'notes' && (
+        {resolvedSection.kind === 'notes' && (
           <AllNotesPage
             totalAllNotes={allNoteEntries.length}
             filteredNotes={filteredNoteEntries}
@@ -627,15 +638,15 @@ export const DocsView: React.FC<DocsViewProps> = ({
             navOpen={navOpen}
             modKey={modKey}
             onToggleNav={onToggleNav}
-            onSetNotesSearch={setNotesSearch}
-            onSetNoteCategory={setNoteCategory}
+            onSetNotesSearch={handleSetNotesSearch}
+            onSetNoteCategory={handleSetNoteCategory}
             onSetNotesPage={setNotesPage}
-            onSetNotesPageSize={setNotesPageSize}
+            onSetNotesPageSize={handleSetNotesPageSize}
             onNavigateSection={navigateSection}
           />
         )}
 
-        {section.kind === 'overview' && (
+        {resolvedSection.kind === 'overview' && (
           <OverviewPage
             schema={schema}
             navOpen={navOpen}
@@ -653,9 +664,9 @@ export const DocsView: React.FC<DocsViewProps> = ({
             selectedDomains={selectedDomains}
             mainPaneRef={mainPaneRef}
             onToggleNav={onToggleNav}
-            onSetSearch={setSearch}
+            onSetSearch={handleSetSearch}
             onSetOverviewPage={setOverviewPage}
-            onSetOverviewPageSize={setOverviewPageSize}
+            onSetOverviewPageSize={handleSetOverviewPageSize}
             onClearDomainFilter={onClearDomainFilter}
             onNavigateSection={navigateSection}
             onOpenTableDetail={openTableDetail}

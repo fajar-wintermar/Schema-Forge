@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
   Check,
@@ -9,6 +9,7 @@ import {
   X,
 } from 'lucide-react';
 import { UrlFileLink } from '../types/schema';
+import { isAbortError } from '../utils/apiClient';
 import { fetchDbmlFromUrl, RemoteFetchResult } from '../utils/remoteService';
 
 interface OpenUrlModalProps {
@@ -31,6 +32,18 @@ export const OpenUrlModal: React.FC<OpenUrlModalProps> = ({
   const [error, setError] = useState<string | null>(null);
   const [copiedShare, setCopiedShare] = useState(false);
 
+  const abortRef = useRef<AbortController | null>(null);
+  const copyTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+    };
+  }, []);
+
   const activeShareTarget = urlInput.trim() || currentUrlLink?.url || '';
   const shareableViewerUrl =
     activeShareTarget && typeof window !== 'undefined'
@@ -44,18 +57,26 @@ export const OpenUrlModal: React.FC<OpenUrlModalProps> = ({
       setError('Enter a DBML URL to load.');
       return;
     }
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     setLoading(true);
     setError(null);
     try {
-      const result = await fetchDbmlFromUrl(target);
+      const result = await fetchDbmlFromUrl(target, controller.signal);
+      if (controller.signal.aborted) return;
       onLoadUrlResult(result, openAsNew);
       onClose();
     } catch (err) {
+      if (isAbortError(err) || controller.signal.aborted) return;
       setError(
         err instanceof Error ? err.message : 'Failed to load DBML from URL.'
       );
     } finally {
-      setLoading(false);
+      if (!controller.signal.aborted) {
+        setLoading(false);
+      }
     }
   };
 
@@ -64,7 +85,13 @@ export const OpenUrlModal: React.FC<OpenUrlModalProps> = ({
     try {
       await navigator.clipboard.writeText(shareableViewerUrl);
       setCopiedShare(true);
-      window.setTimeout(() => setCopiedShare(false), 1800);
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+      copyTimerRef.current = window.setTimeout(() => {
+        copyTimerRef.current = null;
+        setCopiedShare(false);
+      }, 1800);
     } catch {
       // Ignore clipboard failure
     }

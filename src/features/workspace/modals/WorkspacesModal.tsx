@@ -51,6 +51,7 @@ export const WorkspacesModal: React.FC<WorkspacesModalProps> = ({
   const [syncingId, setSyncingId] = useState<string | null>(null);
   const [syncingAll, setSyncingAll] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [syncError, setSyncError] = useState<string | null>(null);
 
   const localOnlyCount = workspaces.filter(
     (w) => w.syncOrigin !== 'cloud'
@@ -79,8 +80,16 @@ export const WorkspacesModal: React.FC<WorkspacesModalProps> = ({
 
   const handleSyncOne = async (id: string) => {
     setSyncingId(id);
+    setSyncError(null);
     try {
-      await onSyncWorkspace(id);
+      const synced = await onSyncWorkspace(id);
+      if (!synced) {
+        setSyncError('Failed to sync workspace to cloud. Please try again.');
+      }
+    } catch (err) {
+      setSyncError(
+        err instanceof Error ? err.message : 'Failed to sync workspace to cloud.'
+      );
     } finally {
       setSyncingId(null);
     }
@@ -88,8 +97,13 @@ export const WorkspacesModal: React.FC<WorkspacesModalProps> = ({
 
   const handleSyncAll = async () => {
     setSyncingAll(true);
+    setSyncError(null);
     try {
       await onSyncAllLocal();
+    } catch (err) {
+      setSyncError(
+        err instanceof Error ? err.message : 'Failed to sync local workspaces.'
+      );
     } finally {
       setSyncingAll(false);
     }
@@ -252,8 +266,22 @@ export const WorkspacesModal: React.FC<WorkspacesModalProps> = ({
             )}
           </div>
 
+          {syncError && (
+            <div
+              role="alert"
+              className="px-3 py-2 rounded-lg border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/40 text-xs text-rose-700 dark:text-rose-300"
+            >
+              {syncError}
+            </div>
+          )}
+
           <div className="space-y-2 max-h-64 overflow-y-auto">
-            {workspaces.map((ws) => {
+            {workspaces.length === 0 ? (
+              <div className="py-6 text-center rounded-lg border border-dashed border-slate-200 dark:border-slate-800 text-xs text-slate-500 dark:text-slate-400">
+                No workspaces yet. Create a project above to get started.
+              </div>
+            ) : (
+            workspaces.map((ws) => {
               const isActive = ws.id === activeId;
               const isCloud = ws.syncOrigin === 'cloud';
               return (
@@ -331,7 +359,7 @@ export const WorkspacesModal: React.FC<WorkspacesModalProps> = ({
                   </div>
                 </div>
               );
-            })}
+            }))}
           </div>
         </div>
       </div>

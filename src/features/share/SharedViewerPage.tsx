@@ -1,4 +1,12 @@
-import React, { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import React, {
+  lazy,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
 import {
   AlertCircle,
   BookOpen,
@@ -9,11 +17,15 @@ import {
   Loader2,
   Lock,
   Moon,
+  RefreshCw,
   Search,
   Sun,
 } from 'lucide-react';
+import { AsyncEmptyState } from '../../components/AsyncStateView';
 import { BrandLogo } from '../../components/BrandLogo';
+import { ErrorBoundary } from '../../components/ErrorBoundary';
 import { InspectorDrawer } from '../../components/InspectorDrawer';
+import { useModKey } from '../../hooks/useModKey';
 import {
   CommandItem,
   CommandTargetView,
@@ -29,6 +41,7 @@ import {
   TablePosition,
   ViewMode,
 } from '../../types/schema';
+import { isAbortError } from '../../utils/apiClient';
 import { autoLayoutSingleGroup, computeAutoLayout } from '../../utils/autoLayout';
 import { fetchPublicShare } from '../../utils/cloudService';
 import {
@@ -107,11 +120,28 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [exportingPng, setExportingPng] = useState(false);
   const [exportFeedback, setExportFeedback] = useState<string | null>(null);
+  const [reloadNonce, setReloadNonce] = useState(0);
+  const feedbackTimerRef = useRef<number | null>(null);
 
-  const modKey = useMemo(() => {
-    if (typeof navigator === 'undefined') return '⌘';
-    const platform = navigator.platform || navigator.userAgent || '';
-    return /Mac|iPod|iPhone|iPad/i.test(platform) ? '⌘' : 'Ctrl+';
+  const modKey = useModKey();
+
+  const showExportFeedback = useCallback((msg: string, duration = 2200) => {
+    setExportFeedback(msg);
+    if (feedbackTimerRef.current !== null) {
+      window.clearTimeout(feedbackTimerRef.current);
+    }
+    feedbackTimerRef.current = window.setTimeout(() => {
+      feedbackTimerRef.current = null;
+      setExportFeedback(null);
+    }, duration);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (feedbackTimerRef.current !== null) {
+        window.clearTimeout(feedbackTimerRef.current);
+      }
+    };
   }, []);
 
   const resetEphemeralLayout = useCallback((nextPayload: SharedWorkspacePayload) => {
@@ -127,30 +157,39 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
     setHasCustomLayout(false);
   }, []);
 
-  const loadShare = useCallback(
-    async (versionTag: string | null) => {
-      setLoading(true);
-      setError(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    setLoading(true);
+    setError(null);
+
+    (async () => {
       try {
-        const res = await fetchPublicShare(token, versionTag);
+        const res = await fetchPublicShare(
+          token,
+          selectedVersionTag,
+          controller.signal
+        );
+        if (controller.signal.aborted) return;
         setPayload(res);
         setViewMode(res.share.defaultView);
         resetEphemeralLayout(res);
         setFocusRequest({ type: 'fit', nonce: Date.now() });
       } catch (err) {
+        if (isAbortError(err) || controller.signal.aborted) return;
         setError(
           err instanceof Error ? err.message : 'Unable to load shared schema.'
         );
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
       }
-    },
-    [token, resetEphemeralLayout]
-  );
+    })();
 
-  useEffect(() => {
-    void loadShare(selectedVersionTag);
-  }, [loadShare, selectedVersionTag]);
+    return () => {
+      controller.abort();
+    };
+  }, [token, selectedVersionTag, reloadNonce, resetEphemeralLayout]);
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -272,13 +311,12 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
           scale,
           selectedDomains,
         });
-        setExportFeedback(`Exported ${scale}x PNG`);
-        setTimeout(() => setExportFeedback(null), 2200);
+        showExportFeedback(`Exported ${scale}x PNG`);
       } catch (err) {
-        setExportFeedback(
-          err instanceof Error ? err.message : 'Failed to export PNG'
+        showExportFeedback(
+          err instanceof Error ? err.message : 'Failed to export PNG',
+          3000
         );
-        setTimeout(() => setExportFeedback(null), 3000);
       } finally {
         setExportingPng(false);
       }
@@ -292,6 +330,7 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
       viewStickyNotes,
       darkMode,
       selectedDomains,
+      showExportFeedback,
     ]
   );
 
@@ -312,8 +351,7 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
       svg,
       'image/svg+xml;charset=utf-8'
     );
-    setExportFeedback('Exported SVG');
-    setTimeout(() => setExportFeedback(null), 2200);
+    showExportFeedback('Exported SVG');
   }, [
     payload,
     parsedSchema,
@@ -323,6 +361,7 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
     darkMode,
     safeExportBaseName,
     selectedDomains,
+    showExportFeedback,
   ]);
 
   const handleExecuteCommand = (
@@ -395,19 +434,33 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
           <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
             {error || 'This shareable link could not be found or has been revoked.'}
           </p>
-          <button
-            type="button"
-            onClick={onForkToStudio}
-            className="px-4 py-2 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white"
-          >
-            Open SchemaForge Studio
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setReloadNonce((n) => n + 1)}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Retry</span>
+            </button>
+            <button
+              type="button"
+              onClick={onForkToStudio}
+              className="px-4 py-2 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white"
+            >
+              Open SchemaForge Studio
+            </button>
+          </div>
         </div>
       </div>
     );
   }
 
   const effectiveViewMode: ViewMode = viewMode === 'docs' ? 'docs' : 'diagram';
+  const isEmptySchema =
+    parsedSchema.tables.length === 0 &&
+    parsedSchema.enums.length === 0 &&
+    parsedSchema.notes.length === 0;
 
   return (
     <div className="h-screen w-screen flex flex-col overflow-hidden bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-slate-100">
@@ -605,95 +658,137 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
       </header>
 
       <div className="flex-1 flex min-h-0 overflow-hidden relative">
-        {viewMode === 'docs' ? (
-          <Suspense
-            fallback={
-              <div className="flex-1 flex items-center justify-center text-sm text-slate-500">
-                Loading documentation...
-              </div>
-            }
-          >
-            <DocsView
-              schema={parsedSchema}
-              stickyNotes={viewStickyNotes}
-              navOpen={docsNavOpen}
-              onToggleNav={() => setDocsNavOpen((o) => !o)}
-              modKey={modKey}
-              sectionRequest={docsSectionRequest}
-              onSelectTable={(id) => {
-                setSelectedTableId(id);
-                setViewMode('diagram');
-                setFocusRequest({ type: 'table', id, nonce: Date.now() });
-              }}
-            />
-          </Suspense>
-        ) : (
-          <>
-            <DiagramCanvas
-              schema={parsedSchema}
-              positions={viewPositions}
-              onUpdatePositions={handleUpdateViewPositions}
-              detailLevel={viewDetailLevel}
-              onChangeDetailLevel={setViewDetailLevel}
-              selectedDomains={selectedDomains}
-              onChangeSelectedDomains={setSelectedDomains}
-              selectedTableId={selectedTableId}
-              highlightedColumn={highlightedColumn}
-              onSelectTable={(id) => {
-                setSelectedTableId(id);
-                if (!id || id !== highlightedColumn?.tableId) {
-                  setHighlightedColumn(null);
+        {isEmptySchema ? (
+          <div className="flex-1 flex items-center justify-center p-6">
+            <div className="max-w-md w-full">
+              <AsyncEmptyState
+                title="Shared schema is empty"
+                description="This workspace snapshot does not contain any tables, enums, or schema notes yet."
+                action={
+                  <button
+                    type="button"
+                    onClick={onForkToStudio}
+                    className="px-4 py-2 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white"
+                  >
+                    Open SchemaForge Studio
+                  </button>
                 }
-              }}
-              onChangeTableHeaderColor={() => {}}
-              onAssignTableToGroup={() => {}}
-              onEditGroup={() => {}}
-              onAutoLayout={handleViewAutoLayout}
-              onAutoLayoutGroup={handleViewAutoLayoutGroup}
-              stickyNotes={viewStickyNotes}
-              onAddStickyNote={() => {}}
-              onUpdateStickyNote={handleMoveViewStickyNote}
-              onDeleteStickyNote={() => {}}
-              focusRequest={focusRequest}
-              darkMode={darkMode}
-              readOnly={true}
-              onResetLayout={handleResetViewLayout}
-              hasCustomLayout={hasCustomLayout}
-            />
-            {selectedTable && (
-              <InspectorDrawer
-                table={selectedTable}
+              />
+            </div>
+          </div>
+        ) : viewMode === 'docs' ? (
+          <ErrorBoundary
+            title="Unable to render shared documentation"
+            resetKeys={[token, selectedVersionTag, viewMode]}
+          >
+            <Suspense
+              fallback={
+                <div className="flex-1 flex items-center justify-center text-sm text-slate-500">
+                  Loading documentation...
+                </div>
+              }
+            >
+              <DocsView
                 schema={parsedSchema}
-                onClose={() => setSelectedTableId(null)}
+                stickyNotes={viewStickyNotes}
+                navOpen={docsNavOpen}
+                onToggleNav={() => setDocsNavOpen((o) => !o)}
+                modKey={modKey}
+                sectionRequest={docsSectionRequest}
                 onSelectTable={(id) => {
                   setSelectedTableId(id);
+                  setViewMode('diagram');
                   setFocusRequest({ type: 'table', id, nonce: Date.now() });
                 }}
-                onSetTableGroups={() => {}}
-                onChangeTableHeaderColor={() => {}}
-                onJumpToCode={() => {}}
-                onAddLinkedStickyNote={() => {}}
-                readOnly={true}
               />
+            </Suspense>
+          </ErrorBoundary>
+        ) : (
+          <>
+            <ErrorBoundary
+              title="Unable to render shared diagram"
+              resetKeys={[token, selectedVersionTag, viewMode]}
+            >
+              <DiagramCanvas
+                schema={parsedSchema}
+                positions={viewPositions}
+                onUpdatePositions={handleUpdateViewPositions}
+                detailLevel={viewDetailLevel}
+                onChangeDetailLevel={setViewDetailLevel}
+                selectedDomains={selectedDomains}
+                onChangeSelectedDomains={setSelectedDomains}
+                selectedTableId={selectedTableId}
+                highlightedColumn={highlightedColumn}
+                onSelectTable={(id) => {
+                  setSelectedTableId(id);
+                  if (!id || id !== highlightedColumn?.tableId) {
+                    setHighlightedColumn(null);
+                  }
+                }}
+                onChangeTableHeaderColor={() => {}}
+                onAssignTableToGroup={() => {}}
+                onEditGroup={() => {}}
+                onAutoLayout={handleViewAutoLayout}
+                onAutoLayoutGroup={handleViewAutoLayoutGroup}
+                stickyNotes={viewStickyNotes}
+                onAddStickyNote={() => {}}
+                onUpdateStickyNote={handleMoveViewStickyNote}
+                onDeleteStickyNote={() => {}}
+                focusRequest={focusRequest}
+                darkMode={darkMode}
+                readOnly={true}
+                onResetLayout={handleResetViewLayout}
+                hasCustomLayout={hasCustomLayout}
+              />
+            </ErrorBoundary>
+            {selectedTable && (
+              <ErrorBoundary
+                compact
+                title="Inspector failed to render"
+                resetKeys={[selectedTable.id]}
+                onReset={() => setSelectedTableId(null)}
+              >
+                <InspectorDrawer
+                  table={selectedTable}
+                  schema={parsedSchema}
+                  onClose={() => setSelectedTableId(null)}
+                  onSelectTable={(id) => {
+                    setSelectedTableId(id);
+                    setFocusRequest({ type: 'table', id, nonce: Date.now() });
+                  }}
+                  onSetTableGroups={() => {}}
+                  onChangeTableHeaderColor={() => {}}
+                  onJumpToCode={() => {}}
+                  onAddLinkedStickyNote={() => {}}
+                  readOnly={true}
+                />
+              </ErrorBoundary>
             )}
           </>
         )}
       </div>
 
-      <Suspense fallback={null}>
-        {commandPaletteOpen && (
-          <CommandPaletteModal
-            open={commandPaletteOpen}
-            schema={parsedSchema}
-            stickyNotes={viewStickyNotes}
-            viewMode={effectiveViewMode}
-            modKey={modKey}
-            readOnly={true}
-            onClose={() => setCommandPaletteOpen(false)}
-            onSelectCommand={handleExecuteCommand}
-          />
-        )}
-      </Suspense>
+      <ErrorBoundary
+        compact
+        title="Command palette unavailable"
+        resetKeys={[commandPaletteOpen]}
+        onReset={() => setCommandPaletteOpen(false)}
+      >
+        <Suspense fallback={null}>
+          {commandPaletteOpen && (
+            <CommandPaletteModal
+              open={commandPaletteOpen}
+              schema={parsedSchema}
+              stickyNotes={viewStickyNotes}
+              viewMode={effectiveViewMode}
+              modKey={modKey}
+              readOnly={true}
+              onClose={() => setCommandPaletteOpen(false)}
+              onSelectCommand={handleExecuteCommand}
+            />
+          )}
+        </Suspense>
+      </ErrorBoundary>
     </div>
   );
 };

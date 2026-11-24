@@ -98,27 +98,39 @@ export interface GithubBatchPushPayload {
 }
 
 export async function fetchDbmlFromUrl(
-  url: string
+  url: string,
+  signal?: AbortSignal
 ): Promise<RemoteFetchResult> {
-  const res = await apiClient.api['fetch-url'].$post({
-    json: { url },
-  });
+  const res = await apiClient.api['fetch-url'].$post(
+    { json: { url } },
+    signal ? { init: { signal } } : undefined
+  );
   if (!res.ok) {
     throw await parseErrorResponse(res);
   }
   return await res.json();
 }
 
-export async function getGithubAuthStatus(): Promise<GithubAuthStatus> {
-  const res = await apiClient.api.auth.github.status.$get();
+export async function getGithubAuthStatus(
+  signal?: AbortSignal
+): Promise<GithubAuthStatus> {
+  const res = await apiClient.api.auth.github.status.$get(
+    undefined,
+    signal ? { init: { signal } } : undefined
+  );
   if (!res.ok) {
     throw await parseErrorResponse(res);
   }
   return await res.json();
 }
 
-export async function getGithubAuthUrl(): Promise<{ url: string }> {
-  const res = await apiClient.api.auth.github.url.$get();
+export async function getGithubAuthUrl(
+  signal?: AbortSignal
+): Promise<{ url: string }> {
+  const res = await apiClient.api.auth.github.url.$get(
+    undefined,
+    signal ? { init: { signal } } : undefined
+  );
   if (!res.ok) {
     throw await parseErrorResponse(res);
   }
@@ -150,11 +162,13 @@ export async function initGithubBranch(
 
 export async function getGithubRepoInfo(
   owner: string,
-  repo: string
+  repo: string,
+  signal?: AbortSignal
 ): Promise<GithubRepoInfo> {
-  const res = await apiClient.api.github['repo-info'].$get({
-    query: { owner, repo },
-  });
+  const res = await apiClient.api.github['repo-info'].$get(
+    { query: { owner, repo } },
+    signal ? { init: { signal } } : undefined
+  );
   if (!res.ok) {
     throw await parseErrorResponse(res);
   }
@@ -164,11 +178,13 @@ export async function getGithubRepoInfo(
 export async function getGithubTree(
   owner: string,
   repo: string,
-  branch: string
+  branch: string,
+  signal?: AbortSignal
 ): Promise<GithubTreeResponse> {
-  const res = await apiClient.api.github.tree.$get({
-    query: { owner, repo, branch },
-  });
+  const res = await apiClient.api.github.tree.$get(
+    { query: { owner, repo, branch } },
+    signal ? { init: { signal } } : undefined
+  );
   if (!res.ok) {
     throw await parseErrorResponse(res);
   }
@@ -179,11 +195,13 @@ export async function getGithubFile(
   owner: string,
   repo: string,
   path: string,
-  ref?: string
+  ref?: string,
+  signal?: AbortSignal
 ): Promise<GithubFileResult> {
-  const res = await apiClient.api.github.file.$get({
-    query: { owner, repo, path, ref },
-  });
+  const res = await apiClient.api.github.file.$get(
+    { query: { owner, repo, path, ref } },
+    signal ? { init: { signal } } : undefined
+  );
   if (!res.ok) {
     throw await parseErrorResponse(res);
   }
@@ -196,16 +214,20 @@ export async function getGithubCommits(params: {
   branch?: string;
   path?: string;
   perPage?: number;
+  signal?: AbortSignal;
 }): Promise<{ commits: GithubCommitInfo[] }> {
-  const res = await apiClient.api.github.commits.$get({
-    query: {
-      owner: params.owner,
-      repo: params.repo,
-      branch: params.branch,
-      path: params.path,
-      per_page: params.perPage ? String(params.perPage) : undefined,
+  const res = await apiClient.api.github.commits.$get(
+    {
+      query: {
+        owner: params.owner,
+        repo: params.repo,
+        branch: params.branch,
+        path: params.path,
+        per_page: params.perPage ? String(params.perPage) : undefined,
+      },
     },
-  });
+    params.signal ? { init: { signal: params.signal } } : undefined
+  );
   if (!res.ok) {
     throw await parseErrorResponse(res);
   }
@@ -216,11 +238,13 @@ export async function getGithubFolderFiles(
   owner: string,
   repo: string,
   branch: string,
-  folder: string
+  folder: string,
+  signal?: AbortSignal
 ): Promise<GithubFolderResult> {
-  const res = await apiClient.api.github.folder.$get({
-    query: { owner, repo, branch, folder },
-  });
+  const res = await apiClient.api.github.folder.$get(
+    { query: { owner, repo, branch, folder } },
+    signal ? { init: { signal } } : undefined
+  );
   if (!res.ok) {
     throw await parseErrorResponse(res);
   }

@@ -12,6 +12,7 @@ import {
   ViewMode,
   WorkspaceProject,
 } from '../../../types/schema';
+import { isAbortError } from '../../../utils/apiClient';
 import { computeAutoLayout } from '../../../utils/autoLayout';
 import {
   connectWithGithubOAuth,
@@ -46,41 +47,65 @@ export function useWorkspaceStore({
   const [workspaces, setWorkspaces] = useState<WorkspaceProject[]>([]);
   const [activeId, setActiveId] = useState<string>('');
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [bootstrapNonce, setBootstrapNonce] = useState(0);
   const [darkMode, setDarkMode] = useState(false);
 
   const [cloudAuth, setCloudAuth] = useState<CloudAuthStatusResponse | null>(
     null
   );
-  const [cloudSyncStatus, setCloudSyncStatus] =
+  const [rawCloudSyncStatus, setRawCloudSyncStatus] =
     useState<CloudSyncStatus>('local');
 
   const saveTimerRef = useRef<number | null>(null);
   const cloudSaveTimerRef = useRef<number | null>(null);
+  const syncAbortRef = useRef<AbortController | null>(null);
   const workspacesRef = useRef<WorkspaceProject[]>([]);
   const cloudAuthRef = useRef<CloudAuthStatusResponse | null>(null);
 
-  useEffect(() => {
-    workspacesRef.current = workspaces;
-  }, [workspaces]);
+  const onInitViewModeRef = useRef(onInitViewMode);
+  const onInitSidebarOpenRef = useRef(onInitSidebarOpen);
+  const onFocusFitRef = useRef(onFocusFit);
+  const onResetSelectionRef = useRef(onResetSelection);
+
+  onInitViewModeRef.current = onInitViewMode;
+  onInitSidebarOpenRef.current = onInitSidebarOpen;
+  onFocusFitRef.current = onFocusFit;
+  onResetSelectionRef.current = onResetSelection;
+  workspacesRef.current = workspaces;
+  cloudAuthRef.current = cloudAuth;
 
   useEffect(() => {
-    cloudAuthRef.current = cloudAuth;
-  }, [cloudAuth]);
+    return () => {
+      if (saveTimerRef.current !== null) {
+        window.clearTimeout(saveTimerRef.current);
+      }
+      if (cloudSaveTimerRef.current !== null) {
+        window.clearTimeout(cloudSaveTimerRef.current);
+      }
+      syncAbortRef.current?.abort();
+    };
+  }, []);
 
   const mergeAndReconcileCloud = useCallback(
     async (
       auth: CloudAuthStatusResponse,
-      baseLocalList?: WorkspaceProject[]
+      baseLocalList?: WorkspaceProject[],
+      signal?: AbortSignal
     ) => {
       if (!auth.cloudEnabled || !auth.authenticated) {
-        setCloudSyncStatus('local');
+        setRawCloudSyncStatus('local');
         return;
       }
 
-      setCloudSyncStatus('syncing');
+      setRawCloudSyncStatus('syncing');
       try {
-        const { workspaces: cloudList } = await listCloudWorkspaces();
+        const { workspaces: cloudList } = await listCloudWorkspaces(signal);
+        if (signal?.aborted) return;
+
         const localList = baseLocalList || (await loadAllWorkspaces());
+        if (signal?.aborted) return;
+
         const localById = new Map(localList.map((w) => [w.id, w]));
         const mergedMap = new Map<string, WorkspaceProject>();
 
@@ -89,6 +114,7 @@ export function useWorkspaceStore({
         }
 
         for (const cws of cloudList) {
+          if (signal?.aborted) return;
           const existing = localById.get(cws.id);
           if (!existing) {
             await saveWorkspace(cws);
@@ -102,8 +128,10 @@ export function useWorkspaceStore({
           if (cloudTime > localTime + 500) {
             await saveWorkspace(cws);
             mergedMap.set(cws.id, cws);
-          } else if (existing.syncOrigin === 'cloud' && localTime > cloudTime + 500) {
-            // Local cloud workspace has newer offline edits; push to cloud
+          } else if (
+            existing.syncOrigin === 'cloud' &&
+            localTime > cloudTime + 500
+          ) {
             try {
               const res = await saveCloudWorkspace(existing);
               const synced: WorkspaceProject = {
@@ -129,14 +157,16 @@ export function useWorkspaceStore({
           }
         }
 
+        if (signal?.aborted) return;
         const sorted = Array.from(mergedMap.values()).sort(
           (a, b) =>
             new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
         );
         setWorkspaces(sorted);
-        setCloudSyncStatus('synced');
-      } catch {
-        setCloudSyncStatus(
+        setRawCloudSyncStatus('synced');
+      } catch (err) {
+        if (isAbortError(err) || signal?.aborted) return;
+        setRawCloudSyncStatus(
           typeof navigator !== 'undefined' && !navigator.onLine
             ? 'offline'
             : 'error'
@@ -147,13 +177,19 @@ export function useWorkspaceStore({
   );
 
   const refreshCloudSync = useCallback(async () => {
+    syncAbortRef.current?.abort();
+    const controller = new AbortController();
+    syncAbortRef.current = controller;
+
     try {
-      const auth = await getCloudAuthStatus();
+      const auth = await getCloudAuthStatus(controller.signal);
+      if (controller.signal.aborted) return;
       setCloudAuth(auth);
       cloudAuthRef.current = auth;
-      await mergeAndReconcileCloud(auth);
-    } catch {
-      setCloudSyncStatus(
+      await mergeAndReconcileCloud(auth, undefined, controller.signal);
+    } catch (err) {
+      if (isAbortError(err) || controller.signal.aborted) return;
+      setRawCloudSyncStatus(
         typeof navigator !== 'undefined' && !navigator.onLine
           ? 'offline'
           : 'local'
@@ -162,130 +198,151 @@ export function useWorkspaceStore({
   }, [mergeAndReconcileCloud]);
 
   useEffect(() => {
-    let mounted = true;
+    const controller = new AbortController();
+    const { signal } = controller;
+
     (async () => {
-      const savedTheme = await getMetaValue(
-        'darkMode',
-        (value): value is boolean => typeof value === 'boolean'
-      );
-      if (mounted && savedTheme !== null) {
-        setDarkMode(savedTheme);
-      }
+      setLoading(true);
+      setLoadError(null);
 
-      let list = await loadAllWorkspaces();
-      if (list.length === 0) {
-        const seed = createInitialWorkspace();
-        await saveWorkspace(seed);
-        list = [seed];
-      }
+      try {
+        const savedTheme = await getMetaValue(
+          'darkMode',
+          (value): value is boolean => typeof value === 'boolean'
+        );
+        if (signal.aborted) return;
+        if (savedTheme !== null) {
+          setDarkMode(savedTheme);
+        }
 
-      const lastActive = await getMetaValue(
-        'activeWorkspaceId',
-        (value): value is string => typeof value === 'string'
-      );
-      let target = list.find((w) => w.id === lastActive)?.id || list[0].id;
+        let list = await loadAllWorkspaces();
+        if (signal.aborted) return;
+        if (list.length === 0) {
+          const seed = createInitialWorkspace();
+          await saveWorkspace(seed);
+          list = [seed];
+        }
 
-      const params = new URLSearchParams(window.location.search);
-      const viewParam = params.get('view');
-      if (
-        mounted &&
-        (viewParam === 'split' || viewParam === 'diagram' || viewParam === 'docs')
-      ) {
-        onInitViewMode(viewParam);
-        onInitSidebarOpen(viewParam === 'diagram');
-      }
+        const lastActive = await getMetaValue(
+          'activeWorkspaceId',
+          (value): value is string => typeof value === 'string'
+        );
+        if (signal.aborted) return;
 
-      const urlParam = params.get('url')?.trim();
-      if (urlParam) {
-        try {
-          const remote = await fetchDbmlFromUrl(urlParam);
-          const parsedRemote = parseDbml(remote.content);
-          const positions = computeAutoLayout(parsedRemote, 'full');
-          const now = new Date().toISOString();
-          const baseName =
-            parsedRemote.project.name ||
-            remote.filename.replace(/\.dbml$/i, '') ||
-            'Remote DBML';
-          const remoteWs: WorkspaceProject = {
-            id: `ws_url_${Date.now()}`,
-            name: baseName,
-            description: `Loaded from ${remote.originalUrl}`,
-            dbml: remote.content,
-            tablePositions: positions,
-            groupMeta: {},
-            stickyNotes: [],
-            detailLevel: 'full',
-            versions: [
-              {
-                id: `ver_${Date.now()}`,
-                tag: 'v1.0.0',
-                title: 'Loaded from URL',
-                description: remote.originalUrl,
-                dbml: remote.content,
-                tablePositions: positions,
-                stickyNotes: [],
-                createdAt: now,
-                isPublished: true,
+        let target = list.find((w) => w.id === lastActive)?.id || list[0].id;
+
+        const params = new URLSearchParams(window.location.search);
+        const viewParam = params.get('view');
+        if (
+          viewParam === 'split' ||
+          viewParam === 'diagram' ||
+          viewParam === 'docs'
+        ) {
+          onInitViewModeRef.current(viewParam);
+          onInitSidebarOpenRef.current(viewParam === 'diagram');
+        }
+
+        const urlParam = params.get('url')?.trim();
+        if (urlParam) {
+          try {
+            const remote = await fetchDbmlFromUrl(urlParam, signal);
+            if (signal.aborted) return;
+
+            const parsedRemote = parseDbml(remote.content);
+            const positions = computeAutoLayout(parsedRemote, 'full');
+            const now = new Date().toISOString();
+            const baseName =
+              parsedRemote.project.name ||
+              remote.filename.replace(/\.dbml$/i, '') ||
+              'Remote DBML';
+            const remoteWs: WorkspaceProject = {
+              id: `ws_url_${Date.now()}`,
+              name: baseName,
+              description: `Loaded from ${remote.originalUrl}`,
+              dbml: remote.content,
+              tablePositions: positions,
+              groupMeta: {},
+              stickyNotes: [],
+              detailLevel: 'full',
+              versions: [
+                {
+                  id: `ver_${Date.now()}`,
+                  tag: 'v1.0.0',
+                  title: 'Loaded from URL',
+                  description: remote.originalUrl,
+                  dbml: remote.content,
+                  tablePositions: positions,
+                  stickyNotes: [],
+                  createdAt: now,
+                  isPublished: true,
+                },
+              ],
+              urlLink: {
+                url: remote.originalUrl,
+                resolvedUrl: remote.resolvedUrl,
+                loadedAt: now,
               },
-            ],
-            urlLink: {
-              url: remote.originalUrl,
-              resolvedUrl: remote.resolvedUrl,
-              loadedAt: now,
-            },
-            githubLink:
-              remote.githubMeta && remote.githubMeta.sha
-                ? {
-                    owner: remote.githubMeta.owner,
-                    repo: remote.githubMeta.repo,
-                    branch: remote.githubMeta.branch,
-                    path: remote.githubMeta.path,
-                    sha: remote.githubMeta.sha,
-                    htmlUrl: remote.githubMeta.htmlUrl,
-                    lastSyncedDbml: remote.content,
-                    lastSyncedAt: now,
-                  }
-                : undefined,
-            createdAt: now,
-            updatedAt: now,
-            syncOrigin: 'local',
-          };
-          await saveWorkspace(remoteWs);
-          await setMetaValue('activeWorkspaceId', remoteWs.id);
-          list = [remoteWs, ...list];
-          target = remoteWs.id;
-          if (mounted) {
-            showToast(`Loaded ${remote.filename} from URL`);
-          }
-        } catch (err) {
-          if (mounted) {
-            showToast(
-              err instanceof Error
-                ? `Failed to load URL: ${err.message}`
-                : 'Failed to load DBML from URL'
-            );
+              githubLink:
+                remote.githubMeta && remote.githubMeta.sha
+                  ? {
+                      owner: remote.githubMeta.owner,
+                      repo: remote.githubMeta.repo,
+                      branch: remote.githubMeta.branch,
+                      path: remote.githubMeta.path,
+                      sha: remote.githubMeta.sha,
+                      htmlUrl: remote.githubMeta.htmlUrl,
+                      lastSyncedDbml: remote.content,
+                      lastSyncedAt: now,
+                    }
+                  : undefined,
+              createdAt: now,
+              updatedAt: now,
+              syncOrigin: 'local',
+            };
+            await saveWorkspace(remoteWs);
+            await setMetaValue('activeWorkspaceId', remoteWs.id);
+            list = [remoteWs, ...list];
+            target = remoteWs.id;
+            if (!signal.aborted) {
+              showToast(`Loaded ${remote.filename} from URL`);
+            }
+          } catch (err) {
+            if (!isAbortError(err) && !signal.aborted) {
+              showToast(
+                err instanceof Error
+                  ? `Failed to load URL: ${err.message}`
+                  : 'Failed to load DBML from URL'
+              );
+            }
           }
         }
-      }
 
-      if (mounted) {
+        if (signal.aborted) return;
         setWorkspaces(list);
         setActiveId(target);
         setLoading(false);
-        onFocusFit();
-      }
+        onFocusFitRef.current();
 
-      // Check cloud auth & reconcile in background without blocking local-first render
-      try {
-        const auth = await getCloudAuthStatus();
-        if (!mounted) return;
-        setCloudAuth(auth);
-        cloudAuthRef.current = auth;
-        if (auth.cloudEnabled && auth.authenticated) {
-          await mergeAndReconcileCloud(auth, list);
+        // Check cloud auth & reconcile in background without blocking local-first render
+        try {
+          const auth = await getCloudAuthStatus(signal);
+          if (signal.aborted) return;
+          setCloudAuth(auth);
+          cloudAuthRef.current = auth;
+          if (auth.cloudEnabled && auth.authenticated) {
+            await mergeAndReconcileCloud(auth, list, signal);
+          }
+        } catch {
+          // Keep local IndexedDB mode seamlessly
         }
-      } catch {
-        // Keep local IndexedDB mode seamlessly
+      } catch (err) {
+        if (isAbortError(err) || signal.aborted) return;
+        setLoadError(
+          err instanceof Error
+            ? err.message
+            : 'Unable to load local workspaces.'
+        );
+        setLoading(false);
       }
     })();
 
@@ -295,19 +352,21 @@ export function useWorkspaceStore({
     window.addEventListener(AUTH_CHANGED_EVENT, onAuthChanged);
 
     return () => {
-      mounted = false;
+      controller.abort();
       window.removeEventListener(AUTH_CHANGED_EVENT, onAuthChanged);
     };
-    // Initial bootstrap runs once cleanly on mount
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showToast]);
+  }, [bootstrapNonce, mergeAndReconcileCloud, refreshCloudSync, showToast]);
+
+  const retryBootstrap = useCallback(() => {
+    setBootstrapNonce((n) => n + 1);
+  }, []);
 
   // Apply dark mode class on <html>
   useEffect(() => {
     const root = document.documentElement;
     if (darkMode) root.classList.add('dark');
     else root.classList.remove('dark');
-    setMetaValue('darkMode', darkMode);
+    void setMetaValue('darkMode', darkMode);
   }, [darkMode]);
 
   const activeWorkspace = useMemo(
@@ -315,29 +374,29 @@ export function useWorkspaceStore({
     [workspaces, activeId]
   );
 
-  // Sync active status indicator when switching between local and cloud workspaces
-  useEffect(() => {
-    if (!activeWorkspace) return;
+  // Derived sync status avoids redundant setState inside an effect on workspace switch
+  const cloudSyncStatus: CloudSyncStatus = useMemo(() => {
     if (
-      activeWorkspace.syncOrigin === 'cloud' &&
-      cloudAuth?.authenticated &&
-      cloudAuth?.cloudEnabled
+      !activeWorkspace ||
+      activeWorkspace.syncOrigin !== 'cloud' ||
+      !cloudAuth?.authenticated ||
+      !cloudAuth?.cloudEnabled
     ) {
-      setCloudSyncStatus((prev) =>
-        prev === 'syncing' || prev === 'error' || prev === 'offline'
-          ? prev
-          : 'synced'
-      );
-    } else {
-      setCloudSyncStatus('local');
+      return 'local';
     }
-  }, [activeWorkspace, cloudAuth?.authenticated, cloudAuth?.cloudEnabled]);
+    return rawCloudSyncStatus === 'local' ? 'synced' : rawCloudSyncStatus;
+  }, [
+    activeWorkspace,
+    cloudAuth?.authenticated,
+    cloudAuth?.cloudEnabled,
+    rawCloudSyncStatus,
+  ]);
 
   const pushWorkspaceToCloud = useCallback(
     async (ws: WorkspaceProject): Promise<WorkspaceProject | null> => {
       const auth = cloudAuthRef.current;
       if (!auth?.cloudEnabled || !auth?.authenticated) return null;
-      setCloudSyncStatus('syncing');
+      setRawCloudSyncStatus('syncing');
       try {
         const res = await saveCloudWorkspace(ws);
         const syncedWs: WorkspaceProject = {
@@ -350,10 +409,10 @@ export function useWorkspaceStore({
         setWorkspaces((prev) =>
           prev.map((item) => (item.id === ws.id ? syncedWs : item))
         );
-        setCloudSyncStatus('synced');
+        setRawCloudSyncStatus('synced');
         return syncedWs;
       } catch {
-        setCloudSyncStatus(
+        setRawCloudSyncStatus(
           typeof navigator !== 'undefined' && !navigator.onLine
             ? 'offline'
             : 'error'
@@ -375,9 +434,12 @@ export function useWorkspaceStore({
             updatedAt: new Date().toISOString(),
           };
           updatedSnapshot = next;
-          if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+          if (saveTimerRef.current !== null) {
+            window.clearTimeout(saveTimerRef.current);
+          }
           saveTimerRef.current = window.setTimeout(() => {
-            saveWorkspace(next);
+            saveTimerRef.current = null;
+            void saveWorkspace(next);
           }, 250);
 
           const auth = cloudAuthRef.current;
@@ -386,11 +448,12 @@ export function useWorkspaceStore({
             auth?.cloudEnabled &&
             auth?.authenticated
           ) {
-            setCloudSyncStatus('syncing');
-            if (cloudSaveTimerRef.current) {
+            setRawCloudSyncStatus('syncing');
+            if (cloudSaveTimerRef.current !== null) {
               window.clearTimeout(cloudSaveTimerRef.current);
             }
             cloudSaveTimerRef.current = window.setTimeout(() => {
+              cloudSaveTimerRef.current = null;
               if (updatedSnapshot) {
                 void pushWorkspaceToCloud(updatedSnapshot);
               }
@@ -404,15 +467,12 @@ export function useWorkspaceStore({
     [activeId, pushWorkspaceToCloud]
   );
 
-  const selectWorkspace = useCallback(
-    (id: string) => {
-      setActiveId(id);
-      onResetSelection();
-      setMetaValue('activeWorkspaceId', id);
-      onFocusFit();
-    },
-    [onResetSelection, onFocusFit]
-  );
+  const selectWorkspace = useCallback((id: string) => {
+    setActiveId(id);
+    onResetSelectionRef.current();
+    void setMetaValue('activeWorkspaceId', id);
+    onFocusFitRef.current();
+  }, []);
 
   const addAndSelectWorkspace = useCallback(
     async (ws: WorkspaceProject) => {
@@ -439,7 +499,7 @@ export function useWorkspaceStore({
         const next = prev.filter((w) => w.id !== id);
         if (id === activeId && next.length > 0) {
           setActiveId(next[0].id);
-          setMetaValue('activeWorkspaceId', next[0].id);
+          void setMetaValue('activeWorkspaceId', next[0].id);
         }
         return next;
       });
@@ -483,7 +543,9 @@ export function useWorkspaceStore({
     }
     if (count > 0) {
       showToast(
-        `Synced ${count} local ${count === 1 ? 'workspace' : 'workspaces'} to cloud`
+        `Synced ${count} local ${
+          count === 1 ? 'workspace' : 'workspaces'
+        } to cloud`
       );
     }
     return count;
@@ -499,7 +561,7 @@ export function useWorkspaceStore({
     setCloudAuth((prev) =>
       prev ? { ...prev, authenticated: false, user: null } : prev
     );
-    setCloudSyncStatus('local');
+    setRawCloudSyncStatus('local');
     showToast('Signed out of cloud sync (local IndexedDB kept intact)');
   }, [showToast]);
 
@@ -507,6 +569,7 @@ export function useWorkspaceStore({
     workspaces,
     activeWorkspace,
     loading,
+    loadError,
     darkMode,
     setDarkMode,
     cloudAuth,
@@ -520,5 +583,6 @@ export function useWorkspaceStore({
     refreshCloudSync,
     connectCloudAccount,
     logoutCloudAccount,
+    retryBootstrap,
   };
 }

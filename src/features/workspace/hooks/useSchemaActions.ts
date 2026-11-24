@@ -55,17 +55,24 @@ export function useSchemaActions({
     );
   }, [activeWorkspace]);
 
+  const tableInstances = useMemo(
+    () => buildTableInstances(parsedSchema).instances,
+    [parsedSchema]
+  );
+
+  const activeTablePositions = activeWorkspace?.tablePositions;
+  const activeWorkspaceId = activeWorkspace?.id;
+
   // Ensure newly typed tables or multi-domain instances get non-overlapping coordinates
   useEffect(() => {
-    if (!activeWorkspace) return;
-    const { instances } = buildTableInstances(parsedSchema);
-    const missing = instances.filter(
-      (inst) => !activeWorkspace.tablePositions[inst.posKey]
+    if (!activeWorkspaceId || !activeTablePositions) return;
+    const missing = tableInstances.filter(
+      (inst) => !activeTablePositions[inst.posKey]
     );
     if (missing.length === 0) return;
 
     const patch: Record<string, TablePosition> = {};
-    const existingCoords = Object.values(activeWorkspace.tablePositions);
+    const existingCoords = Object.values(activeTablePositions);
     let fallbackY = 80;
     let fallbackX = 80;
     for (const p of existingCoords) {
@@ -75,17 +82,17 @@ export function useSchemaActions({
 
     missing.forEach((inst, idx) => {
       if (inst.groupName) {
-        const siblings = instances.filter(
+        const siblings = tableInstances.filter(
           (other) =>
             other.groupName === inst.groupName &&
             other.posKey !== inst.posKey &&
-            activeWorkspace.tablePositions[other.posKey]
+            activeTablePositions[other.posKey]
         );
         if (siblings.length > 0) {
           let maxRight = -Infinity;
           let avgY = 0;
           for (const sib of siblings) {
-            const sp = activeWorkspace.tablePositions[sib.posKey];
+            const sp = activeTablePositions[sib.posKey];
             maxRight = Math.max(maxRight, sp.x + 276);
             avgY += sp.y;
           }
@@ -106,7 +113,12 @@ export function useSchemaActions({
       ...ws,
       tablePositions: { ...ws.tablePositions, ...patch },
     }));
-  }, [parsedSchema, activeWorkspace, updateActiveWorkspace]);
+  }, [
+    tableInstances,
+    activeWorkspaceId,
+    activeTablePositions,
+    updateActiveWorkspace,
+  ]);
 
   const modular = useModularSchemaFiles({
     activeWorkspace,

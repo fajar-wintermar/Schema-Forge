@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
   BookOpen,
@@ -14,6 +14,7 @@ import {
   Lock,
   Pencil,
   Plus,
+  RefreshCw,
   Share2,
   Trash2,
   X,
@@ -23,6 +24,7 @@ import {
   ShareLinkRecord,
   WorkspaceProject,
 } from '../../../types/schema';
+import { isAbortError } from '../../../utils/apiClient';
 import {
   buildShareUrl,
   createWorkspaceShare,
@@ -170,25 +172,44 @@ export const ShareModal: React.FC<ShareModalProps> = ({
     cloudAuth?.cloudEnabled && cloudAuth?.authenticated && isCloudSynced
   );
 
-  const loadShares = useCallback(async () => {
-    if (!canLoadShares) return;
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await listWorkspaceShares(workspace.id);
-      setShares(res.shares.filter((s) => !s.revokedAt));
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : 'Failed to load share links.'
-      );
-    } finally {
-      setLoading(false);
-    }
-  }, [canLoadShares, workspace.id]);
+  const [loadNonce, setLoadNonce] = useState(0);
+  const copyTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
-    void loadShares();
-  }, [loadShares]);
+    return () => {
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!canLoadShares) return;
+    const controller = new AbortController();
+    setLoading(true);
+    setError(null);
+
+    (async () => {
+      try {
+        const res = await listWorkspaceShares(workspace.id, controller.signal);
+        if (controller.signal.aborted) return;
+        setShares(res.shares.filter((s) => !s.revokedAt));
+      } catch (err) {
+        if (isAbortError(err) || controller.signal.aborted) return;
+        setError(
+          err instanceof Error ? err.message : 'Failed to load share links.'
+        );
+      } finally {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      controller.abort();
+    };
+  }, [canLoadShares, workspace.id, loadNonce]);
 
   const handleConnect = async () => {
     setConnecting(true);
@@ -253,7 +274,13 @@ export const ShareModal: React.FC<ShareModalProps> = ({
       const url = buildShareUrl(share.token, share.pinnedVersionTag);
       await navigator.clipboard?.writeText(url).catch(() => {});
       setCopiedId(share.id);
-      setTimeout(() => setCopiedId(null), 2000);
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+      copyTimerRef.current = window.setTimeout(() => {
+        copyTimerRef.current = null;
+        setCopiedId(null);
+      }, 2000);
       onShowToast('Shareable read-only link created and copied');
     } catch (err) {
       setError(
@@ -371,7 +398,13 @@ export const ShareModal: React.FC<ShareModalProps> = ({
     try {
       await navigator.clipboard.writeText(url);
       setCopiedId(share.id);
-      setTimeout(() => setCopiedId(null), 1800);
+      if (copyTimerRef.current !== null) {
+        window.clearTimeout(copyTimerRef.current);
+      }
+      copyTimerRef.current = window.setTimeout(() => {
+        copyTimerRef.current = null;
+        setCopiedId(null);
+      }, 1800);
       onShowToast('Share link copied to clipboard');
     } catch {
       onShowToast('Copy failed — select URL manually');
@@ -433,9 +466,24 @@ export const ShareModal: React.FC<ShareModalProps> = ({
 
         <div className="flex-1 overflow-y-auto p-5 space-y-5">
           {error && (
-            <div className="p-3 rounded-lg border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/40 text-xs text-rose-700 dark:text-rose-300 flex items-start gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-              <span>{error}</span>
+            <div
+              role="alert"
+              className="p-3 rounded-lg border border-rose-200 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/40 text-xs text-rose-700 dark:text-rose-300 flex items-center justify-between gap-2"
+            >
+              <div className="flex items-start gap-2 min-w-0">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>{error}</span>
+              </div>
+              {canLoadShares && (
+                <button
+                  type="button"
+                  onClick={() => setLoadNonce((n) => n + 1)}
+                  className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md border border-rose-300 dark:border-rose-700 bg-white/80 dark:bg-slate-900 text-[11px] font-semibold hover:bg-white dark:hover:bg-slate-800 shrink-0"
+                >
+                  <RefreshCw className="w-3 h-3" />
+                  <span>Retry</span>
+                </button>
+              )}
             </div>
           )}
 

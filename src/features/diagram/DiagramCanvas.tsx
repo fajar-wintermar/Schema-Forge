@@ -677,56 +677,94 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     fitBounds(boxes);
   }, [visibleInstances, positions, detailLevel, fkColsByTable, fitBounds]);
 
+  const focusDepsRef = useRef({
+    fitVisibleTables,
+    visibleInstances,
+    instances,
+    positions,
+    detailLevel,
+    fkColsByTable,
+    viewportZoom: viewport.zoom,
+    groupBoxes,
+    fitBounds,
+    setViewport,
+  });
+  focusDepsRef.current = {
+    fitVisibleTables,
+    visibleInstances,
+    instances,
+    positions,
+    detailLevel,
+    fkColsByTable,
+    viewportZoom: viewport.zoom,
+    groupBoxes,
+    fitBounds,
+    setViewport,
+  };
+
   useEffect(() => {
     if (!focusRequest) return;
+    const {
+      fitVisibleTables: fitVisible,
+      visibleInstances: visInsts,
+      instances: allInsts,
+      positions: posMap,
+      detailLevel: detail,
+      fkColsByTable: fkMap,
+      viewportZoom: zoomNow,
+      groupBoxes: gBoxes,
+      fitBounds: fitBoxes,
+      setViewport: applyViewport,
+    } = focusDepsRef.current;
+
     if (focusRequest.type === 'fit') {
-      fitVisibleTables();
+      fitVisible();
     } else if (focusRequest.type === 'table' && focusRequest.id) {
       const inst =
-        visibleInstances.find((i) => i.table.id === focusRequest.id) ||
-        instances.find((i) => i.table.id === focusRequest.id);
+        visInsts.find((i) => i.table.id === focusRequest.id) ||
+        allInsts.find((i) => i.table.id === focusRequest.id);
       const el = containerRef.current;
       if (!inst || !el) return;
-      const p = positions[inst.posKey] || positions[inst.table.id] || { x: 0, y: 0 };
+      const p = posMap[inst.posKey] || posMap[inst.table.id] || { x: 0, y: 0 };
       const h = getTableHeight(
         inst.table,
-        detailLevel,
-        fkColsByTable.get(inst.table.id),
+        detail,
+        fkMap.get(inst.table.id),
         inst.sharedGroups.length > 1
       );
       const rect = el.getBoundingClientRect();
-      const zoom = Math.max(viewport.zoom, 0.9);
-      setViewport({
+      const zoom = Math.max(zoomNow, 0.9);
+      applyViewport({
         zoom,
         x: rect.width / 2 - (p.x + TABLE_WIDTH / 2) * zoom,
         y: rect.height / 2 - (p.y + h / 2) * zoom,
       });
     } else if (focusRequest.type === 'group' && focusRequest.id) {
       if (focusRequest.id === UNGROUPED_DOMAIN_ID) {
-        const ungroupedBoxes = instances
+        const ungroupedBoxes = allInsts
           .filter((i) => i.groupName === null)
           .map((inst) => {
             const p =
-              positions[inst.posKey] || positions[inst.table.id] || { x: 0, y: 0 };
+              posMap[inst.posKey] || posMap[inst.table.id] || { x: 0, y: 0 };
             return {
               x: p.x,
               y: p.y,
               width: TABLE_WIDTH,
               height: getTableHeight(
                 inst.table,
-                detailLevel,
-                fkColsByTable.get(inst.table.id),
+                detail,
+                fkMap.get(inst.table.id),
                 false
               ),
             };
           });
-        if (ungroupedBoxes.length > 0) fitBounds(ungroupedBoxes);
+        if (ungroupedBoxes.length > 0) fitBoxes(ungroupedBoxes);
       } else {
-        const gb = groupBoxes.find((b) => b.name === focusRequest.id);
-        if (gb) fitBounds([gb]);
+        const gb = gBoxes.find((b) => b.name === focusRequest.id);
+        if (gb) fitBoxes([gb]);
       }
     }
-  }, [focusRequest]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [focusRequest]);
 
   const clientToWorld = useCallback(
     (clientX: number, clientY: number) => {

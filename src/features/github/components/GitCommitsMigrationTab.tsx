@@ -14,6 +14,7 @@ import {
   SqlDialect,
   WorkspaceProject,
 } from '../../../types/schema';
+import { isAbortError } from '../../../utils/apiClient';
 import {
   getGithubCommits,
   getGithubFile,
@@ -107,6 +108,13 @@ export const GitCommitsMigrationTab: React.FC<GitCommitsMigrationTabProps> = ({
   const [loadingSql, setLoadingSql] = useState(false);
 
   const snapshotCacheRef = useRef<Map<string, string>>(new Map());
+  const commitsAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      commitsAbortRef.current?.abort();
+    };
+  }, []);
 
   const activePathFilter =
     targetKind === 'folder'
@@ -148,6 +156,10 @@ export const GitCommitsMigrationTab: React.FC<GitCommitsMigrationTabProps> = ({
 
   const fetchCommits = useCallback(async () => {
     if (!effectiveOwner || !effectiveRepo) return;
+    commitsAbortRef.current?.abort();
+    const controller = new AbortController();
+    commitsAbortRef.current = controller;
+
     setLoadingCommits(true);
     onError(null);
     try {
@@ -157,7 +169,9 @@ export const GitCommitsMigrationTab: React.FC<GitCommitsMigrationTabProps> = ({
         branch: effectiveBranch,
         path: activePathFilter || undefined,
         perPage: 25,
+        signal: controller.signal,
       });
+      if (controller.signal.aborted) return;
       setCommits(res.commits);
 
       if (res.commits.length >= 2 && !hasLocalChanges) {
@@ -174,11 +188,14 @@ export const GitCommitsMigrationTab: React.FC<GitCommitsMigrationTabProps> = ({
         setTargetRef('working');
       }
     } catch (err) {
+      if (isAbortError(err) || controller.signal.aborted) return;
       onError(
         err instanceof Error ? err.message : 'Failed to load Git commit history.'
       );
     } finally {
-      setLoadingCommits(false);
+      if (!controller.signal.aborted) {
+        setLoadingCommits(false);
+      }
     }
   }, [
     effectiveOwner,
@@ -191,12 +208,15 @@ export const GitCommitsMigrationTab: React.FC<GitCommitsMigrationTabProps> = ({
 
   useEffect(() => {
     if (effectiveOwner && effectiveRepo && !selectedRepo?.isEmpty) {
-      fetchCommits();
+      void fetchCommits();
     }
+    return () => {
+      commitsAbortRef.current?.abort();
+    };
   }, [effectiveOwner, effectiveRepo, effectiveBranch, activePathFilter, selectedRepo?.isEmpty, fetchCommits]);
 
   const resolveSnapshotDbml = useCallback(
-    async (refKey: string): Promise<string> => {
+    async (refKey: string, signal?: AbortSignal): Promise<string> => {
       if (!refKey) return '';
       if (refKey === 'working') return localWorkingDbml;
       if (refKey === 'last-synced') return localLastSyncedDbml || '';
@@ -210,7 +230,8 @@ export const GitCommitsMigrationTab: React.FC<GitCommitsMigrationTabProps> = ({
           effectiveOwner,
           effectiveRepo,
           refKey,
-          cleanFolderPrefix(targetFolder)
+          cleanFolderPrefix(targetFolder),
+          signal
         );
         const modFiles: SchemaModuleFile[] = res.files.map((f, i) => ({
           id: `cmp_${i}`,
@@ -232,7 +253,8 @@ export const GitCommitsMigrationTab: React.FC<GitCommitsMigrationTabProps> = ({
         effectiveOwner,
         effectiveRepo,
         targetFilePath.trim(),
-        refKey
+        refKey,
+        signal
       );
       snapshotCacheRef.current.set(cacheKey, file.content);
       return file.content;
@@ -250,27 +272,28 @@ export const GitCommitsMigrationTab: React.FC<GitCommitsMigrationTabProps> = ({
   );
 
   useEffect(() => {
-    let cancelled = false;
     if (!baseRef || !targetRef) {
       setBaseDbml('');
       setTargetDbml('');
       return;
     }
 
+    const controller = new AbortController();
+
     const loadSnapshots = async () => {
       setLoadingSql(true);
       onError(null);
       try {
         const [a, b] = await Promise.all([
-          resolveSnapshotDbml(baseRef),
-          resolveSnapshotDbml(targetRef),
+          resolveSnapshotDbml(baseRef, controller.signal),
+          resolveSnapshotDbml(targetRef, controller.signal),
         ]);
-        if (!cancelled) {
+        if (!controller.signal.aborted) {
           setBaseDbml(a);
           setTargetDbml(b);
         }
       } catch (err) {
-        if (!cancelled) {
+        if (!isAbortError(err) && !controller.signal.aborted) {
           onError(
             err instanceof Error
               ? err.message
@@ -278,13 +301,13 @@ export const GitCommitsMigrationTab: React.FC<GitCommitsMigrationTabProps> = ({
           );
         }
       } finally {
-        if (!cancelled) setLoadingSql(false);
+        if (!controller.signal.aborted) setLoadingSql(false);
       }
     };
 
-    loadSnapshots();
+    void loadSnapshots();
     return () => {
-      cancelled = true;
+      controller.abort();
     };
   }, [baseRef, targetRef, resolveSnapshotDbml, onError]);
 
@@ -369,7 +392,9 @@ export const GitCommitsMigrationTab: React.FC<GitCommitsMigrationTabProps> = ({
             </label>
             <select
               value={targetKind}
-              onChange={(e) => setTargetKind(e.target.value as 'folder' | 'file')}
+              onChange={(e) =>
+                setTargetKind(e.target.value === 'folder' ? 'folder' : 'file')
+              }
               className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
             >
               <option value="file">Single .dbml File</option>
@@ -476,6 +501,14 @@ export const GitCommitsMigrationTab: React.FC<GitCommitsMigrationTabProps> = ({
           </div>
         </div>
       </div>
+
+      {!loadingCommits && commits.length === 0 && (
+        <div className="px-3 py-2 rounded-lg border border-dashed border-slate-200 dark:border-slate-800 text-[11px] text-slate-500 dark:text-slate-400">
+          No commit history found for{' '}
+          <code className="font-mono">{activePathFilter || 'this repository'}</code> on{' '}
+          <code className="font-mono">{effectiveBranch}</code>.
+        </div>
+      )}
 
       {/* Generated Migration Script */}
       {loadingCommits || loadingSql ? (

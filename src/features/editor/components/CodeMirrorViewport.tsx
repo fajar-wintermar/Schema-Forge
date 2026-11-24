@@ -1,4 +1,5 @@
 import React, {
+  useCallback,
   useEffect,
   useImperativeHandle,
   useRef,
@@ -199,6 +200,11 @@ export const CodeMirrorViewport = React.forwardRef<
     const wordWrapRef = useRef(wordWrap);
     wordWrapRef.current = wordWrap;
 
+    const enumNamesRef = useRef(enumNames);
+    enumNamesRef.current = enumNames;
+
+    const initialValueRef = useRef(value);
+
     const autocompleteRefs = useRef<DbmlAutocompleteContextRefs>({
       tables,
       enumNames,
@@ -212,7 +218,7 @@ export const CodeMirrorViewport = React.forwardRef<
       isMergedPreview,
     };
 
-    const buildExtensions = (): Extension[] => {
+    const buildExtensions = useCallback((): Extension[] => {
       const isDark = document.documentElement.classList.contains('dark');
       return [
         lineNumbers(),
@@ -240,7 +246,9 @@ export const CodeMirrorViewport = React.forwardRef<
         lintGutter(),
         lineHighlightsField,
         themeCompartmentRef.current.of(createDbmlTheme(isDark)),
-        langCompartmentRef.current.of(createDbmlStreamLanguage(enumNames)),
+        langCompartmentRef.current.of(
+          createDbmlStreamLanguage(enumNamesRef.current)
+        ),
         readOnlyCompartmentRef.current.of(
           EditorState.readOnly.of(isMergedPreviewRef.current)
         ),
@@ -306,7 +314,7 @@ export const CodeMirrorViewport = React.forwardRef<
           },
         }),
       ];
-    };
+    }, []);
 
     const flashLineHighlight = (view: EditorView, lineNumber: number) => {
       if (gotoTimerRef.current) {
@@ -438,7 +446,7 @@ export const CodeMirrorViewport = React.forwardRef<
 
       const view = new EditorView({
         state: EditorState.create({
-          doc: value,
+          doc: initialValueRef.current,
           extensions: buildExtensions(),
         }),
         parent: hostRef.current,
@@ -468,8 +476,7 @@ export const CodeMirrorViewport = React.forwardRef<
         view.destroy();
         viewRef.current = null;
       };
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [buildExtensions]);
 
     // Handle active file switches (fresh undo history) and external value updates
     useEffect(() => {
@@ -499,8 +506,7 @@ export const CodeMirrorViewport = React.forwardRef<
         });
         isSyncingExternalRef.current = false;
       }
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [value, activeFilePath]);
+    }, [value, activeFilePath, buildExtensions]);
 
     // Update DBML syntax highlighter when enumNames change
     const enumKey = enumNames.join('\0');
@@ -509,10 +515,9 @@ export const CodeMirrorViewport = React.forwardRef<
       if (!view) return;
       view.dispatch({
         effects: langCompartmentRef.current.reconfigure(
-          createDbmlStreamLanguage(enumNames)
+          createDbmlStreamLanguage(enumNamesRef.current)
         ),
       });
-      // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [enumKey]);
 
     // Update readOnly mode when switching to/from merged preview
@@ -544,7 +549,7 @@ export const CodeMirrorViewport = React.forwardRef<
       const uniqueLines = Array.from(new Set(errors.map((e) => e.line)));
       view.dispatch({ effects: setErrorLinesEffect.of(uniqueLines) });
       syncErrorsToDiagnostics(view, errors);
-    }, [errors, value, activeFilePath]);
+    }, [errors, activeFilePath]);
 
     // Scroll into view when diagram/inspector requests jumping to a specific line
     useEffect(() => {
