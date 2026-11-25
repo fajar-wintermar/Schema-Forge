@@ -11,56 +11,67 @@ import {
   FOCUS_MODE_STORAGE_KEY,
 } from '../types';
 
+export interface DiagramPreferencesSnapshot {
+  cursorMode: CursorMode;
+  autoLod: boolean;
+  focusMode: boolean;
+  routingMode: EdgeRoutingMode;
+  crossDomainMode: CrossDomainEdgeMode;
+  showCardinality: boolean;
+}
+
+export function readDiagramPreferences(): DiagramPreferencesSnapshot {
+  const defaults: DiagramPreferencesSnapshot = {
+    cursorMode: 'select',
+    autoLod: true,
+    focusMode: false,
+    routingMode: 'bezier',
+    crossDomainMode: 'show',
+    showCardinality: true,
+  };
+  try {
+    const cursorSaved = localStorage.getItem(CURSOR_MODE_STORAGE_KEY);
+    if (cursorSaved === 'pan' || cursorSaved === 'marquee') {
+      defaults.cursorMode = cursorSaved;
+    }
+    defaults.autoLod = localStorage.getItem(AUTO_LOD_STORAGE_KEY) !== 'false';
+    defaults.focusMode = localStorage.getItem(FOCUS_MODE_STORAGE_KEY) === 'true';
+    if (localStorage.getItem(EDGE_ROUTING_STORAGE_KEY) === 'orthogonal') {
+      defaults.routingMode = 'orthogonal';
+    }
+    const crossSaved = localStorage.getItem(CROSS_DOMAIN_EDGE_STORAGE_KEY);
+    if (crossSaved === 'bundle' || crossSaved === 'hide') {
+      defaults.crossDomainMode = crossSaved;
+    }
+    defaults.showCardinality =
+      localStorage.getItem(FK_CARDINALITY_STORAGE_KEY) !== 'false';
+  } catch {
+    // ignore storage errors (e.g. SSR or restricted iframes)
+  }
+  return defaults;
+}
+
 export function useDiagramPreferences() {
   const [snapGrid, setSnapGrid] = useState(true);
   const [showMinimap, setShowMinimap] = useState(true);
-  const [cursorMode, setCursorMode] = useState<CursorMode>(() => {
-    try {
-      const saved = localStorage.getItem(CURSOR_MODE_STORAGE_KEY);
-      return saved === 'pan' || saved === 'marquee' ? saved : 'select';
-    } catch {
-      return 'select';
-    }
-  });
-  const [autoLod, setAutoLod] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(AUTO_LOD_STORAGE_KEY) !== 'false';
-    } catch {
-      return true;
-    }
-  });
-  const [focusMode, setFocusMode] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(FOCUS_MODE_STORAGE_KEY) === 'true';
-    } catch {
-      return false;
-    }
-  });
-  const [routingMode, setRoutingMode] = useState<EdgeRoutingMode>(() => {
-    try {
-      const saved = localStorage.getItem(EDGE_ROUTING_STORAGE_KEY);
-      return saved === 'orthogonal' ? 'orthogonal' : 'bezier';
-    } catch {
-      return 'bezier';
-    }
-  });
-  const [crossDomainMode, setCrossDomainMode] = useState<CrossDomainEdgeMode>(
-    () => {
-      try {
-        const saved = localStorage.getItem(CROSS_DOMAIN_EDGE_STORAGE_KEY);
-        return saved === 'bundle' || saved === 'hide' ? saved : 'show';
-      } catch {
-        return 'show';
-      }
-    }
+  const [cursorMode, setCursorMode] = useState<CursorMode>(
+    () => readDiagramPreferences().cursorMode
   );
-  const [showCardinality, setShowCardinality] = useState<boolean>(() => {
-    try {
-      return localStorage.getItem(FK_CARDINALITY_STORAGE_KEY) !== 'false';
-    } catch {
-      return true;
-    }
-  });
+  const [autoLod, setAutoLod] = useState<boolean>(
+    () => readDiagramPreferences().autoLod
+  );
+  const [focusMode, setFocusMode] = useState<boolean>(
+    () => readDiagramPreferences().focusMode
+  );
+  const [routingMode, setRoutingMode] = useState<EdgeRoutingMode>(
+    () => readDiagramPreferences().routingMode
+  );
+  const [crossDomainMode, setCrossDomainMode] = useState<CrossDomainEdgeMode>(
+    () => readDiagramPreferences().crossDomainMode
+  );
+  const [showCardinality, setShowCardinality] = useState<boolean>(
+    () => readDiagramPreferences().showCardinality
+  );
 
   const toggleAutoLod = useCallback(() => {
     setAutoLod((prev) => {

@@ -48,6 +48,9 @@ export interface DiagramCanvasProps {
     toTableId: string,
     toCol: string
   ) => void;
+  collapsedGroups?: string[];
+  onToggleGroupCollapse?: (groupName: string) => void;
+  onSetAllGroupsCollapsed?: (collapsed: boolean) => void;
 }
 
 export type CursorMode = 'select' | 'marquee' | 'pan';

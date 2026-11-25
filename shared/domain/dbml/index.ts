@@ -6,7 +6,10 @@ export {
   moveTableToGroupInDbml,
   removeTableFromGroupInDbml,
   reorderTableGroupsInDbml,
+  setColumnNoteInDbml,
+  setTableGroupNoteInDbml,
   setTableGroupsForTableInDbml,
   setTableHeaderColorInDbml,
+  setTableNoteInDbml,
   upsertTableGroupInDbml,
 } from './mutations';

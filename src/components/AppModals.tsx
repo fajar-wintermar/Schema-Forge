@@ -70,6 +70,7 @@ interface AppModalsProps {
   parsedSchema: ParsedSchema;
   allTableIds: string[];
   effectiveSelectedDomains: string[];
+  collapsedGroups?: string[];
   activeSchemaFolder?: string;
   suggestedVersionTag: string;
   cloudAuth: CloudAuthStatusResponse | null;
@@ -140,6 +141,7 @@ export const AppModals: React.FC<AppModalsProps> = ({
   parsedSchema,
   allTableIds,
   effectiveSelectedDomains,
+  collapsedGroups = [],
   activeSchemaFolder,
   suggestedVersionTag,
   cloudAuth,
@@ -240,6 +242,7 @@ export const AppModals: React.FC<AppModalsProps> = ({
           detailLevel={activeWorkspace.detailLevel}
           stickyNotes={activeWorkspace.stickyNotes}
           selectedDomains={effectiveSelectedDomains}
+          collapsedGroups={collapsedGroups}
           darkMode={darkMode}
           onImportDbml={(nextDbml) => onImportDbml(nextDbml, false)}
           onImportUrlResult={(res) => onLoadUrlResult(res, false)}

@@ -3,11 +3,9 @@ import { UNGROUPED_DOMAIN_ID } from '@shared/domain/schemaTypes';
 import {
   buildTableInstances,
   computeGroupBoundingBoxes,
-  getTableHeight,
   resolveSchemaEdges,
-  TABLE_WIDTH,
 } from '../../utils/autoLayout';
-import type { AnchorBox } from '../../utils/io/edgeGeometry';
+import { computeEdgeRoutingAndBundles } from '../../utils/io/edgeGeometry';
 import { buildTableRects } from './canvasGeometry';
 import {
   type CanvasLodTier,
@@ -32,7 +30,7 @@ import { TableCard } from './components/TableCard';
 import { useDiagramInteractions } from './hooks/useDiagramInteractions';
 import { useDiagramPreferences } from './hooks/useDiagramPreferences';
 import { useDiagramViewport } from './hooks/useDiagramViewport';
-import type { CrossDomainBundle, DiagramCanvasProps } from './types';
+import type { DiagramCanvasProps } from './types';
 
 export type { DiagramCanvasProps } from './types';
 
@@ -62,6 +60,9 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
   onResetLayout,
   hasCustomLayout = false,
   onCreateRef,
+  collapsedGroups = [],
+  onToggleGroupCollapse,
+  onSetAllGroupsCollapsed,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const filterMenuRef = useRef<HTMLDivElement>(null);
@@ -104,15 +105,21 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     [schema, instances, positions]
   );
 
+  const collapsedGroupSet = useMemo(
+    () => new Set(collapsedGroups),
+    [collapsedGroups]
+  );
+
   const groupBoxes = useMemo(
     () =>
       computeGroupBoundingBoxes(
         schema,
         positions,
         detailLevel,
-        fkColsByTable
+        fkColsByTable,
+        collapsedGroupSet
       ),
-    [schema, positions, detailLevel, fkColsByTable]
+    [schema, positions, detailLevel, fkColsByTable, collapsedGroupSet]
   );
 
   const isFilteringDomains = selectedDomains.length > 0;
@@ -144,10 +151,12 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
 
   const visibleInstances = useMemo(
     () =>
-      isFilteringDomains
-        ? instances.filter((inst) => isInstanceInSelectedDomains(inst))
-        : instances,
-    [instances, isFilteringDomains, isInstanceInSelectedDomains]
+      instances.filter(
+        (inst) =>
+          (!isFilteringDomains || isInstanceInSelectedDomains(inst)) &&
+          !(inst.groupName !== null && collapsedGroupSet.has(inst.groupName))
+      ),
+    [instances, isFilteringDomains, isInstanceInSelectedDomains, collapsedGroupSet]
   );
 
   const visibleTableIdSet = useMemo(
@@ -185,14 +194,12 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
 
   const visibleStickyNotes = useMemo(
     () =>
-      isFilteringDomains
-        ? stickyNotes.filter((note) => {
-            if (!note.linkedTarget?.startsWith('table:')) return true;
-            const tableId = note.linkedTarget.slice('table:'.length);
-            return visibleTableIdSet.has(tableId);
-          })
-        : stickyNotes,
-    [stickyNotes, isFilteringDomains, visibleTableIdSet]
+      stickyNotes.filter((note) => {
+        if (!note.linkedTarget?.startsWith('table:')) return true;
+        const tableId = note.linkedTarget.slice('table:'.length);
+        return visibleTableIdSet.has(tableId);
+      }),
+    [stickyNotes, visibleTableIdSet]
   );
 
   const focusedTableId =
@@ -206,110 +213,52 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     [visibleEdges]
   );
 
-  const { renderedEdges, crossDomainBundles, anchorBoxByDomain } = useMemo(() => {
-    const boxMap = new Map<string, AnchorBox>();
-    for (const gb of visibleGroupBoxes) {
-      boxMap.set(gb.name, {
-        x: gb.x,
-        y: gb.y,
-        width: gb.width,
-        height: gb.height,
-      });
-    }
-    for (const inst of visibleInstances) {
-      if (inst.groupName === null) {
-        const p =
-          positions[inst.posKey] || positions[inst.table.id] || { x: 0, y: 0 };
-        boxMap.set(`ungrouped:${inst.table.id}`, {
-          x: p.x,
-          y: p.y,
-          width: TABLE_WIDTH,
-          height: getTableHeight(
-            inst.table,
-            detailLevel,
-            fkColsByTable.get(inst.table.id),
-            false
-          ),
-        });
+  const crossDomainLinkCountByGroup = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const edge of crossDomainEdgesInView) {
+      if (edge.fromInst.groupName) {
+        counts.set(
+          edge.fromInst.groupName,
+          (counts.get(edge.fromInst.groupName) || 0) + 1
+        );
+      }
+      if (edge.toInst.groupName) {
+        counts.set(
+          edge.toInst.groupName,
+          (counts.get(edge.toInst.groupName) || 0) + 1
+        );
       }
     }
+    return counts;
+  }, [crossDomainEdgesInView]);
 
-    if (crossDomainMode === 'show') {
-      const emptyBundles: CrossDomainBundle[] = [];
-      return {
-        renderedEdges: visibleEdges,
-        crossDomainBundles: emptyBundles,
-        anchorBoxByDomain: boxMap,
-      };
-    }
-
-    if (crossDomainMode === 'hide') {
-      const emptyBundles: CrossDomainBundle[] = [];
-      return {
-        renderedEdges: visibleEdges.filter(
-          (e) => e.fromInst.groupName === e.toInst.groupName
-        ),
-        crossDomainBundles: emptyBundles,
-        anchorBoxByDomain: boxMap,
-      };
-    }
-
-    const directEdges: typeof visibleEdges = [];
-    const bundleMap = new Map<string, CrossDomainBundle>();
-
-    for (const edge of visibleEdges) {
-      const isCross = edge.fromInst.groupName !== edge.toInst.groupName;
-      const touchesFocus =
-        focusedTableId !== null &&
-        (edge.ref.fromTable === focusedTableId ||
-          edge.ref.toTable === focusedTableId);
-
-      if (!isCross || touchesFocus) {
-        directEdges.push(edge);
-        continue;
-      }
-
-      const keyA =
-        edge.fromInst.groupName || `ungrouped:${edge.fromInst.table.id}`;
-      const keyB =
-        edge.toInst.groupName || `ungrouped:${edge.toInst.table.id}`;
-      const [domainA, domainB] = keyA < keyB ? [keyA, keyB] : [keyB, keyA];
-      const pairKey = `${domainA}::${domainB}`;
-
-      let bundle = bundleMap.get(pairKey);
-      if (!bundle) {
-        const groupColor =
-          schema.tableGroups.find((g) => g.name === domainA)?.color ||
-          schema.tableGroups.find((g) => g.name === domainB)?.color ||
-          '#64748b';
-        bundle = {
-          id: `bundle:${pairKey}`,
-          domainA,
-          domainB,
-          color: groupColor,
-          edges: [],
-        };
-        bundleMap.set(pairKey, bundle);
-      }
-      bundle.edges.push(edge);
-    }
-
-    return {
-      renderedEdges: directEdges,
-      crossDomainBundles: Array.from(bundleMap.values()),
-      anchorBoxByDomain: boxMap,
-    };
-  }, [
-    visibleEdges,
-    visibleGroupBoxes,
-    visibleInstances,
-    positions,
-    detailLevel,
-    fkColsByTable,
-    crossDomainMode,
-    focusedTableId,
-    schema.tableGroups,
-  ]);
+  const { renderedEdges, crossDomainBundles, anchorBoxByDomain } = useMemo(
+    () =>
+      computeEdgeRoutingAndBundles({
+        edges: visibleEdges,
+        visibleGroupBoxes,
+        visibleInstances,
+        positions,
+        detailLevel,
+        fkColsByTable,
+        crossDomainMode,
+        collapsedGroups: collapsedGroupSet,
+        focusedTableId,
+        tableGroups: schema.tableGroups,
+      }),
+    [
+      visibleEdges,
+      visibleGroupBoxes,
+      visibleInstances,
+      positions,
+      detailLevel,
+      fkColsByTable,
+      crossDomainMode,
+      collapsedGroupSet,
+      focusedTableId,
+      schema.tableGroups,
+    ]
+  );
 
   const focusNeighborhood = useMemo(() => {
     if (!focusedTableId) {
@@ -368,6 +317,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     instances,
     visibleInstances,
     groupBoxes,
+    visibleGroupBoxes,
     positions,
     detailLevel,
     fkColsByTable,
@@ -421,6 +371,13 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
       maxX = Math.max(maxX, rect.x + rect.width);
       maxY = Math.max(maxY, rect.y + rect.height);
     }
+    for (const gb of visibleGroupBoxes) {
+      if (!gb.collapsed) continue;
+      minX = Math.min(minX, gb.x);
+      minY = Math.min(minY, gb.y);
+      maxX = Math.max(maxX, gb.x + gb.width);
+      maxY = Math.max(maxY, gb.y + gb.height);
+    }
     if (!isFinite(minX)) return { minX: 0, minY: 0, width: 1000, height: 800 };
     return {
       minX: minX - 80,
@@ -428,7 +385,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
       width: Math.max(400, maxX - minX + 160),
       height: Math.max(300, maxY - minY + 160),
     };
-  }, [visibleTableRects]);
+  }, [visibleTableRects, visibleGroupBoxes]);
 
   const rawCullBounds = computeWorldCullBounds(viewport, containerSize, 220, 140);
   const worldCullBounds = useMemo(
@@ -596,11 +553,13 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
               isDropTarget={interactions.dropTargetGroupName === gb.name}
               isDimmed={isGroupDimmed}
               altPressedDuringDrag={interactions.altPressedDuringDrag}
+              crossDomainLinkCount={crossDomainLinkCountByGroup.get(gb.name) || 0}
               readOnly={readOnly}
               onStartDrag={interactions.handleGroupStartDrag}
               onToggleOnlyDomain={interactions.handleToggleOnlyDomain}
               onAutoLayoutGroup={onAutoLayoutGroup}
               onEditGroup={onEditGroup}
+              onToggleCollapse={onToggleGroupCollapse}
             />
           );
         })}
@@ -738,6 +697,9 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         neighborCount={focusNeighborhood.neighborIds.size}
         onClearFocusSelection={() => onSelectTable(null)}
         onExitFocusMode={() => updateFocusMode(false)}
+        collapsedGroupCount={visibleGroupBoxes.filter((gb) => gb.collapsed).length}
+        totalGroupCount={visibleGroupBoxes.length}
+        onSetAllGroupsCollapsed={onSetAllGroupsCollapsed}
       />
 
       {(culledInstances.length < visibleInstances.length ||

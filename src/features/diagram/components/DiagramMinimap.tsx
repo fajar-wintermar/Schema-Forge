@@ -21,7 +21,7 @@ const DiagramMinimapComponent: React.FC<DiagramMinimapProps> = ({
   bounds,
   viewportRect,
 }) => {
-  if (visibleInstances.length === 0) return null;
+  if (visibleInstances.length === 0 && visibleGroupBoxes.length === 0) return null;
 
   return (
     <div className="absolute bottom-4 left-4 w-44 h-28 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/90 dark:bg-slate-900/90 backdrop-blur-xs p-1.5 shadow-sm pointer-events-none hidden sm:block">

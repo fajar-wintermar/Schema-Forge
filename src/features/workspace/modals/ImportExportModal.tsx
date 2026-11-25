@@ -5,8 +5,10 @@ import {
   Download,
   FileCode2,
   FileSpreadsheet,
+  FileText,
   Filter,
   Image as ImageIcon,
+  Printer,
   Upload,
   X,
 } from 'lucide-react';
@@ -20,16 +22,24 @@ import {
 } from '@shared/domain/schemaTypes';
 import { useFetchRemoteDbml } from '../../../hooks/useFetchRemoteDbml';
 import type { RemoteFetchResult } from '../../../services/api/remoteService';
+import { readDiagramPreferences } from '../../diagram/hooks/useDiagramPreferences';
+import type {
+  EdgeRoutingMode,
+  EdgeVisibilityMode,
+} from '../../../utils/io/edgeGeometry';
 import {
   buildDiagramSvg,
   downloadTextFile,
   exportDiagramAsPng,
   exportSchemaToCsv,
   exportSchemaToDbml,
+  exportSchemaToHtml,
+  exportSchemaToMarkdown,
   exportSchemaToSql,
   filterSchemaByDomains,
   importCsvToDbml,
   importSqlToDbml,
+  printSchemaDocs,
 } from '../../../utils/importExport';
 
 interface ImportExportModalProps {
@@ -40,6 +50,7 @@ interface ImportExportModalProps {
   detailLevel: DetailLevel;
   stickyNotes: StickyNote[];
   selectedDomains?: string[];
+  collapsedGroups?: string[];
   darkMode: boolean;
   onImportDbml: (nextDbml: string) => void;
   onImportUrlResult?: (result: RemoteFetchResult) => void;
@@ -61,8 +72,9 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
   schema,
   positions,
   detailLevel,
-  stickyNotes,
+  stickyNotes: _stickyNotes,
   selectedDomains = [],
+  collapsedGroups = [],
   darkMode,
   onImportDbml,
   onImportUrlResult,
@@ -77,6 +89,18 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
   );
   const [pngScale, setPngScale] = useState<number>(2);
   const [exportingPng, setExportingPng] = useState(false);
+  const [exportRouting, setExportRouting] = useState<EdgeRoutingMode>(
+    () => readDiagramPreferences().routingMode
+  );
+  const [exportCrossDomainMode, setExportCrossDomainMode] =
+    useState<EdgeVisibilityMode>(() => readDiagramPreferences().crossDomainMode);
+  const [exportShowCardinality, setExportShowCardinality] = useState<boolean>(
+    () => readDiagramPreferences().showCardinality
+  );
+  const [respectCollapsedGroups, setRespectCollapsedGroups] = useState<boolean>(
+    () => collapsedGroups.length > 0
+  );
+  const [embedSvgInDocs, setEmbedSvgInDocs] = useState<boolean>(true);
   const [importFormat, setImportFormat] = useState<'sql' | 'csv' | 'dbml' | 'url'>('sql');
   const [importText, setImportText] = useState('');
   const [importUrl, setImportUrl] = useState('');
@@ -111,6 +135,8 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
         : schema,
     [isScopedExport, exportSelectedDomains, schema]
   );
+
+  const activeCollapsedGroups = respectCollapsedGroups ? collapsedGroups : [];
 
   const baseSlug = slugifyPart(projectName);
   const scopeSlugSuffix = useMemo(() => {
@@ -176,11 +202,15 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
         schema,
         positions,
         detailLevel,
-        stickyNotes,
+        stickyNotes: [],
         darkMode,
         title: exportDiagramTitle,
         scale: pngScale,
         selectedDomains: activeExportDomains,
+        edgeRouting: exportRouting,
+        crossDomainMode: exportCrossDomainMode,
+        showCardinality: exportShowCardinality,
+        collapsedGroups: activeCollapsedGroups,
       });
       setFeedback(`Exported ${pngScale}x high-resolution PNG`);
     } catch (err) {
@@ -198,13 +228,76 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
       schema,
       positions,
       detailLevel,
-      stickyNotes,
+      stickyNotes: [],
       darkMode,
       title: exportDiagramTitle,
       selectedDomains: activeExportDomains,
+      edgeRouting: exportRouting,
+      crossDomainMode: exportCrossDomainMode,
+      showCardinality: exportShowCardinality,
+      collapsedGroups: activeCollapsedGroups,
     });
     downloadTextFile(`${safeFileBase}.svg`, svg, 'image/svg+xml;charset=utf-8');
     setFeedback('Exported standalone vector SVG');
+  };
+
+  const handleExportDocsMarkdown = () => {
+    if (!hasValidSelection) return;
+    const md = exportSchemaToMarkdown(scopedSchema, {
+      title: exportDiagramTitle,
+    });
+    downloadTextFile(`${safeFileBase}.docs.md`, md, 'text/markdown;charset=utf-8');
+    setFeedback('Exported Markdown documentation');
+  };
+
+  const handleExportDocsHtml = () => {
+    if (!hasValidSelection) return;
+    const svgDiagram = embedSvgInDocs
+      ? buildDiagramSvg({
+          schema,
+          positions,
+          detailLevel,
+          stickyNotes: [],
+          darkMode,
+          title: exportDiagramTitle,
+          selectedDomains: activeExportDomains,
+          edgeRouting: exportRouting,
+          crossDomainMode: exportCrossDomainMode,
+          showCardinality: exportShowCardinality,
+          collapsedGroups: activeCollapsedGroups,
+        }).svg
+      : undefined;
+    const html = exportSchemaToHtml(scopedSchema, {
+      title: exportDiagramTitle,
+      svgDiagram,
+      darkMode,
+    });
+    downloadTextFile(`${safeFileBase}.docs.html`, html, 'text/html;charset=utf-8');
+    setFeedback('Exported standalone HTML documentation');
+  };
+
+  const handlePrintDocsPdf = () => {
+    if (!hasValidSelection) return;
+    const svgDiagram = embedSvgInDocs
+      ? buildDiagramSvg({
+          schema,
+          positions,
+          detailLevel,
+          stickyNotes: [],
+          darkMode: false,
+          title: exportDiagramTitle,
+          selectedDomains: activeExportDomains,
+          edgeRouting: exportRouting,
+          crossDomainMode: exportCrossDomainMode,
+          showCardinality: exportShowCardinality,
+          collapsedGroups: activeCollapsedGroups,
+        }).svg
+      : undefined;
+    printSchemaDocs(scopedSchema, {
+      title: exportDiagramTitle,
+      svgDiagram,
+    });
+    setFeedback('Opened print dialog for PDF export');
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -461,9 +554,67 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
             )}
 
             <div className="space-y-2.5">
-              <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Diagram Image &amp; Vector Exports
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Diagram Image &amp; Vector Exports
+                </div>
               </div>
+
+              <div className="flex flex-wrap items-center gap-3 px-3 py-2 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-800/30 text-[11px] text-slate-600 dark:text-slate-300">
+                <label className="inline-flex items-center gap-1.5">
+                  <span className="text-slate-500 dark:text-slate-400">Routing:</span>
+                  <select
+                    value={exportRouting}
+                    onChange={(e) =>
+                      setExportRouting(e.target.value as EdgeRoutingMode)
+                    }
+                    className="px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-[11px]"
+                  >
+                    <option value="bezier">Curved Bezier</option>
+                    <option value="orthogonal">Orthogonal</option>
+                  </select>
+                </label>
+
+                <label className="inline-flex items-center gap-1.5">
+                  <span className="text-slate-500 dark:text-slate-400">
+                    Cross-domain:
+                  </span>
+                  <select
+                    value={exportCrossDomainMode}
+                    onChange={(e) =>
+                      setExportCrossDomainMode(e.target.value as EdgeVisibilityMode)
+                    }
+                    className="px-1.5 py-0.5 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-[11px]"
+                  >
+                    <option value="show">Show All</option>
+                    <option value="bundle">Bundle</option>
+                    <option value="hide">Hide</option>
+                  </select>
+                </label>
+
+                <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={exportShowCardinality}
+                    onChange={(e) => setExportShowCardinality(e.target.checked)}
+                    className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span>Cardinality labels</span>
+                </label>
+
+                {collapsedGroups.length > 0 && (
+                  <label className="inline-flex items-center gap-1.5 cursor-pointer select-none">
+                    <input
+                      type="checkbox"
+                      checked={respectCollapsedGroups}
+                      onChange={(e) => setRespectCollapsedGroups(e.target.checked)}
+                      className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span>Collapsed groups ({collapsedGroups.length})</span>
+                  </label>
+                )}
+              </div>
+
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 space-y-3">
                   <div className="flex items-center justify-between">
@@ -484,7 +635,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
                   <p className="text-xs text-slate-500 dark:text-slate-400">
                     {isScopedExport
                       ? 'Includes only the selected domains, ungrouped tables, and relationships.'
-                      : 'Includes all TableGroups, header colors, relationships, and sticky notes.'}
+                      : 'Includes all TableGroups, header colors, and relationships.'}
                   </p>
                   <button
                     type="button"
@@ -515,6 +666,65 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
                     <span>Download SVG</span>
                   </button>
                 </div>
+              </div>
+            </div>
+
+            <div className="space-y-2.5">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Documentation Exports
+                </div>
+                <label className="inline-flex items-center gap-1.5 text-[11px] text-slate-600 dark:text-slate-300 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={embedSvgInDocs}
+                    onChange={(e) => setEmbedSvgInDocs(e.target.checked)}
+                    className="rounded border-slate-300 dark:border-slate-600 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span>Embed ER diagram SVG in HTML / Print</span>
+                </label>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                <button
+                  type="button"
+                  disabled={!hasValidSelection}
+                  onClick={handleExportDocsMarkdown}
+                  className="p-3 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 text-left space-y-1"
+                >
+                  <FileText className="w-4 h-4 text-blue-600" />
+                  <div className="text-xs font-semibold text-slate-900 dark:text-slate-100">
+                    Markdown (.md)
+                  </div>
+                  <div className="text-[11px] text-slate-400">GitHub / Wiki docs</div>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={!hasValidSelection}
+                  onClick={handleExportDocsHtml}
+                  className="p-3 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 text-left space-y-1"
+                >
+                  <FileCode2 className="w-4 h-4 text-emerald-600" />
+                  <div className="text-xs font-semibold text-slate-900 dark:text-slate-100">
+                    Static HTML (.html)
+                  </div>
+                  <div className="text-[11px] text-slate-400">
+                    Self-contained + search
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={!hasValidSelection}
+                  onClick={handlePrintDocsPdf}
+                  className="p-3 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 text-left space-y-1"
+                >
+                  <Printer className="w-4 h-4 text-violet-600" />
+                  <div className="text-xs font-semibold text-slate-900 dark:text-slate-100">
+                    Print / Save as PDF
+                  </div>
+                  <div className="text-[11px] text-slate-400">Clean print layout</div>
+                </button>
               </div>
             </div>
 

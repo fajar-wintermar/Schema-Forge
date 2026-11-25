@@ -206,6 +206,14 @@ export default function App() {
     return selectedDomains.filter((d) => existing.has(d));
   }, [selectedDomains, parsedSchema.tableGroups, parsedSchema.tables]);
 
+  const collapsedGroups = useMemo(() => {
+    const meta = activeWorkspace?.groupMeta;
+    if (!meta) return [];
+    return Object.entries(meta)
+      .filter(([, entry]) => Boolean(entry?.collapsed))
+      .map(([name]) => name);
+  }, [activeWorkspace?.groupMeta]);
+
   const selectedTable = useMemo(
     () => parsedSchema.tables.find((t) => t.id === selectedTableId) || null,
     [parsedSchema.tables, selectedTableId]
@@ -217,6 +225,7 @@ export default function App() {
         schemaActions.jumpToMergedLine(issue.line);
       }
       if (issue.tableId) {
+        schemaActions.expandGroupsForTable(issue.tableId);
         setSelectedTableId(issue.tableId);
         if (issue.columnName) {
           setHighlightedColumn({
@@ -276,6 +285,7 @@ export default function App() {
     onSelectSchemaFile: schemaActions.handleSelectSchemaFile,
     onJumpToMergedLine: schemaActions.jumpToMergedLine,
     onChangeDetailLevel: schemaActions.handleDetailLevelChange,
+    onExpandGroupsForTable: schemaActions.expandGroupsForTable,
     showToast,
   });
 
@@ -482,6 +492,7 @@ export default function App() {
               onChangeSelectedDomains={handleChangeSelectedDomains}
               selectedTableId={selectedTableId}
               onSelectTable={(id) => {
+                schemaActions.expandGroupsForTable(id);
                 setSelectedTableId(id);
                 const t = parsedSchema.tables.find((tb) => tb.id === id);
                 if (t?.line) schemaActions.jumpToMergedLine(t.line);
@@ -524,6 +535,7 @@ export default function App() {
           onToggleDocsNav={() => setDocsNavOpen((o) => !o)}
           docsSectionRequest={docsSectionRequest}
           onSelectTableFromDocs={(id) => {
+            schemaActions.expandGroupsForTable(id);
             setSelectedTableId(id);
             setViewMode('split');
             setFocusRequest({ type: 'table', id, nonce: Date.now() });
@@ -547,6 +559,13 @@ export default function App() {
           onUpdateStickyNote={schemaActions.handleUpdateStickyNote}
           onDeleteStickyNote={schemaActions.handleDeleteStickyNote}
           onCreateRef={schemaActions.handleCreateRef}
+          collapsedGroups={collapsedGroups}
+          onToggleGroupCollapse={schemaActions.handleToggleGroupCollapse}
+          onSetAllGroupsCollapsed={schemaActions.handleSetAllGroupsCollapsed}
+          onUpdateGroupNote={schemaActions.handleUpdateGroupNote}
+          onUpdateTableNote={schemaActions.handleUpdateTableNote}
+          onUpdateColumnNote={schemaActions.handleUpdateColumnNote}
+          onClearDomainFilter={() => handleChangeSelectedDomains([])}
         />
 
         {selectedTable &&
@@ -563,6 +582,7 @@ export default function App() {
                 schema={parsedSchema}
                 onClose={() => setSelectedTableId(null)}
                 onSelectTable={(id) => {
+                  schemaActions.expandGroupsForTable(id);
                   setSelectedTableId(id);
                   setFocusRequest({ type: 'table', id, nonce: Date.now() });
                 }}
@@ -606,6 +626,7 @@ export default function App() {
         parsedSchema={parsedSchema}
         allTableIds={allTableIds}
         effectiveSelectedDomains={effectiveSelectedDomains}
+        collapsedGroups={collapsedGroups}
         activeSchemaFolder={schemaActions.activeSchemaFolder}
         suggestedVersionTag={schemaActions.suggestedVersionTag}
         cloudAuth={cloudAuth}

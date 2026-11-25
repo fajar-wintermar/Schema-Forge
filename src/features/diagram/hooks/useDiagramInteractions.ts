@@ -265,7 +265,7 @@ export function useDiagramInteractions({
           const centerY = ny + 40;
           let hoveredG: string | null = null;
           for (const gb of groupBoxes) {
-            if (gb.name === drag.origGroup) continue;
+            if (gb.collapsed || gb.name === drag.origGroup) continue;
             if (
               centerX >= gb.x &&
               centerX <= gb.x + gb.width &&

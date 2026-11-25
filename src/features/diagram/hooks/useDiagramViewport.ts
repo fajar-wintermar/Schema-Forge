@@ -22,6 +22,7 @@ interface UseDiagramViewportOptions {
   instances: TableInstance[];
   visibleInstances: TableInstance[];
   groupBoxes: GroupBoundingBox[];
+  visibleGroupBoxes: GroupBoundingBox[];
   positions: Record<string, TablePosition>;
   detailLevel: DetailLevel;
   fkColsByTable: Map<string, Set<string>>;
@@ -33,6 +34,7 @@ export function useDiagramViewport({
   instances,
   visibleInstances,
   groupBoxes,
+  visibleGroupBoxes,
   positions,
   detailLevel,
   fkColsByTable,
@@ -138,7 +140,7 @@ export function useDiagramViewport({
   );
 
   const fitVisibleTables = useCallback(() => {
-    const boxes = visibleInstances.map((inst) => {
+    const tableBoxes = visibleInstances.map((inst) => {
       const p =
         positions[inst.posKey] || positions[inst.table.id] || { x: 0, y: 0 };
       return {
@@ -153,8 +155,23 @@ export function useDiagramViewport({
         ),
       };
     });
-    fitBounds(boxes);
-  }, [visibleInstances, positions, detailLevel, fkColsByTable, fitBounds]);
+    const collapsedBoxes = visibleGroupBoxes
+      .filter((gb) => gb.collapsed)
+      .map((gb) => ({
+        x: gb.x,
+        y: gb.y,
+        width: gb.width,
+        height: gb.height,
+      }));
+    fitBounds([...tableBoxes, ...collapsedBoxes]);
+  }, [
+    visibleInstances,
+    visibleGroupBoxes,
+    positions,
+    detailLevel,
+    fkColsByTable,
+    fitBounds,
+  ]);
 
   const focusDepsRef = useRef({
     fitVisibleTables,
@@ -199,11 +216,20 @@ export function useDiagramViewport({
     if (focusRequest.type === 'fit') {
       fitVisible();
     } else if (focusRequest.type === 'table' && focusRequest.id) {
+      const visMatch = visInsts.find((i) => i.table.id === focusRequest.id);
       const inst =
-        visInsts.find((i) => i.table.id === focusRequest.id) ||
-        allInsts.find((i) => i.table.id === focusRequest.id);
+        visMatch || allInsts.find((i) => i.table.id === focusRequest.id);
       const el = containerRef.current;
       if (!inst || !el) return;
+      if (!visMatch && inst.groupName) {
+        const collapsedGb = gBoxes.find(
+          (b) => b.name === inst.groupName && b.collapsed
+        );
+        if (collapsedGb) {
+          fitBoxes([collapsedGb]);
+          return;
+        }
+      }
       const p =
         posMap[inst.posKey] || posMap[inst.table.id] || { x: 0, y: 0 };
       const h = getTableHeight(

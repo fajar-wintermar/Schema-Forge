@@ -7,6 +7,8 @@ import {
 } from '@shared/domain/schemaTypes';
 
 export const TABLE_WIDTH = 276;
+export const COLLAPSED_GROUP_WIDTH = 296;
+export const COLLAPSED_GROUP_HEIGHT = 92;
 
 export function getTableHeight(
   table: TableDef,
@@ -215,14 +217,23 @@ export interface GroupBoundingBox {
   y: number;
   width: number;
   height: number;
+  collapsed?: boolean;
 }
 
 export function computeGroupBoundingBoxes(
   schema: ParsedSchema,
   positions: Record<string, TablePosition>,
   detailLevel: DetailLevel,
-  fkColsByTable: Map<string, Set<string>>
+  fkColsByTable: Map<string, Set<string>>,
+  collapsedGroupNames?: Set<string> | string[]
 ): GroupBoundingBox[] {
+  const collapsedSet =
+    collapsedGroupNames instanceof Set
+      ? collapsedGroupNames
+      : collapsedGroupNames
+      ? new Set(collapsedGroupNames)
+      : null;
+
   const { instances } = buildTableInstances(schema);
   const byGroup = new Map<string, TableInstance[]>();
   for (const inst of instances) {
@@ -259,6 +270,8 @@ export function computeGroupBoundingBoxes(
       maxY = Math.max(maxY, pos.y + h);
     }
 
+    const isCollapsed = Boolean(collapsedSet?.has(group.name));
+
     boxes.push({
       id: group.id,
       name: group.name,
@@ -268,8 +281,9 @@ export function computeGroupBoundingBoxes(
       posKeys: groupInstances.map((i) => i.posKey),
       x: minX - padX,
       y: minY - padTop,
-      width: maxX - minX + padX * 2,
-      height: maxY - minY + padTop + padBottom,
+      width: isCollapsed ? COLLAPSED_GROUP_WIDTH : maxX - minX + padX * 2,
+      height: isCollapsed ? COLLAPSED_GROUP_HEIGHT : maxY - minY + padTop + padBottom,
+      collapsed: isCollapsed,
     });
   }
 

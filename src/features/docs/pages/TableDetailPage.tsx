@@ -1,15 +1,18 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
+  Edit3,
   ExternalLink,
   KeyRound,
   Link2,
+  Plus,
 } from 'lucide-react';
 import { ParsedSchema, StickyNote, TableDef } from '@shared/domain/schemaTypes';
 import { isRichMarkdownNote } from '../../markdown/markdownUtils';
 import { CardinalityBadge } from '../components/CardinalityBadge';
 import { DocsBreadcrumb } from '../components/DocsBreadcrumb';
+import { InlineNoteEditor } from '../components/InlineNoteEditor';
 import { ReadmeNoteCard } from '../components/ReadmeNoteCard';
 import { TrimmableNote } from '../components/TrimmableNote';
 import type { DocsSection } from '../types';
@@ -29,6 +32,12 @@ export interface TableDetailPageProps {
   onNavigateSection: (sec: DocsSection) => void;
   onOpenTableDetail: (tableId: string) => void;
   onSelectTableInDiagram: (tableId: string) => void;
+  onUpdateTableNote?: (tableId: string, note: string) => void;
+  onUpdateColumnNote?: (
+    tableId: string,
+    columnName: string,
+    note: string
+  ) => void;
 }
 
 export const TableDetailPage: React.FC<TableDetailPageProps> = ({
@@ -46,7 +55,15 @@ export const TableDetailPage: React.FC<TableDetailPageProps> = ({
   onNavigateSection,
   onOpenTableDetail,
   onSelectTableInDiagram,
+  onUpdateTableNote,
+  onUpdateColumnNote,
 }) => {
+  const [editingTableId, setEditingTableId] = useState<string | null>(null);
+  const [editingColumnKey, setEditingColumnKey] = useState<string | null>(null);
+
+  const isEditingTableNote =
+    Boolean(onUpdateTableNote) && editingTableId === activeTable.id;
+
   const parentGroups = (domainsByTable.get(activeTable.id) || [])
     .map((dom) => schema.tableGroups.find((g) => g.name === dom))
     .filter((g): g is NonNullable<typeof g> => Boolean(g));
@@ -131,7 +148,7 @@ export const TableDetailPage: React.FC<TableDetailPageProps> = ({
         </div>
       )}
 
-      {activeTable.note && isRichMarkdownNote(activeTable.note) && (
+      {!isEditingTableNote && activeTable.note && isRichMarkdownNote(activeTable.note) && (
         <ReadmeNoteCard
           key={`tbl-readme-${activeTable.id}`}
           title="Table Documentation"
@@ -144,7 +161,7 @@ export const TableDetailPage: React.FC<TableDetailPageProps> = ({
       )}
 
       <section className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
-        <div className="px-5 py-3.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-4">
+        <div className="px-5 py-3.5 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3 min-w-0">
             <span
               className="w-3 h-3 rounded-xs shrink-0"
@@ -159,13 +176,34 @@ export const TableDetailPage: React.FC<TableDetailPageProps> = ({
               </span>
             )}
           </div>
-          <span className="text-xs text-slate-500 dark:text-slate-400 tabular-nums shrink-0">
-            {activeTable.columns.length} columns · {activeTable.indexes.length}{' '}
-            indexes
-            {activeTable.checks.length > 0
-              ? ` · ${activeTable.checks.length} checks`
-              : ''}
-          </span>
+          <div className="flex items-center gap-3 shrink-0">
+            <span className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">
+              {activeTable.columns.length} columns · {activeTable.indexes.length}{' '}
+              indexes
+              {activeTable.checks.length > 0
+                ? ` · ${activeTable.checks.length} checks`
+                : ''}
+            </span>
+            {onUpdateTableNote && !isEditingTableNote && (
+              <button
+                type="button"
+                onClick={() => setEditingTableId(activeTable.id)}
+                className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] font-medium border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 hover:border-blue-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+              >
+                {activeTable.note ? (
+                  <>
+                    <Edit3 className="w-3 h-3" />
+                    <span>Edit Note</span>
+                  </>
+                ) : (
+                  <>
+                    <Plus className="w-3 h-3" />
+                    <span>Add Note</span>
+                  </>
+                )}
+              </button>
+            )}
+          </div>
         </div>
 
         {activeTable.appliedPartials && activeTable.appliedPartials.length > 0 && (
@@ -186,16 +224,33 @@ export const TableDetailPage: React.FC<TableDetailPageProps> = ({
           </div>
         )}
 
-        {activeTable.note && !isRichMarkdownNote(activeTable.note) && (
-          <div className="px-5 py-2.5 bg-slate-50/70 dark:bg-slate-800/40 border-b border-slate-200/70 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-300">
-            <TrimmableNote
-              key={`tbl-short-note-${activeTable.id}`}
-              content={activeTable.note}
-              compact
-              maxChars={160}
-              defaultExpanded={false}
+        {isEditingTableNote && onUpdateTableNote ? (
+          <div className="p-4 bg-slate-50/70 dark:bg-slate-800/40 border-b border-slate-200/70 dark:border-slate-800">
+            <InlineNoteEditor
+              key={`edit-table-${activeTable.id}`}
+              initialValue={activeTable.note || ''}
+              label={`Editing Table "${activeTable.id}" Note`}
+              placeholder="Document table purpose, grain, ownership, or retention rules..."
+              onSave={(nextNote) => {
+                onUpdateTableNote(activeTable.id, nextNote);
+                setEditingTableId(null);
+              }}
+              onCancel={() => setEditingTableId(null)}
             />
           </div>
+        ) : (
+          activeTable.note &&
+          !isRichMarkdownNote(activeTable.note) && (
+            <div className="px-5 py-2.5 bg-slate-50/70 dark:bg-slate-800/40 border-b border-slate-200/70 dark:border-slate-800 text-xs text-slate-600 dark:text-slate-300">
+              <TrimmableNote
+                key={`tbl-short-note-${activeTable.id}`}
+                content={activeTable.note}
+                compact
+                maxChars={160}
+                defaultExpanded={false}
+              />
+            </div>
+          )
         )}
 
         <div className="overflow-x-auto">
@@ -220,10 +275,16 @@ export const TableDetailPage: React.FC<TableDetailPageProps> = ({
                 if (col.increment) constraints.push('INCREMENT');
                 if (col.check) constraints.push('CHECK');
 
+                const colEditKey = `${activeTable.id}::${col.name}`;
+                const isEditingColNote =
+                  Boolean(onUpdateColumnNote) &&
+                  !col.fromPartial &&
+                  editingColumnKey === colEditKey;
+
                 return (
                   <tr
                     key={col.name}
-                    className="hover:bg-slate-50/70 dark:hover:bg-slate-800/30 transition-colors"
+                    className="group hover:bg-slate-50/70 dark:hover:bg-slate-800/30 transition-colors"
                   >
                     <td className="py-2.5 px-5 font-mono font-medium text-slate-900 dark:text-slate-100 whitespace-nowrap">
                       <span className="inline-flex items-center gap-1.5">
@@ -253,36 +314,94 @@ export const TableDetailPage: React.FC<TableDetailPageProps> = ({
                       {col.defaultValue || '—'}
                     </td>
                     <td className="py-2.5 px-5 text-slate-600 dark:text-slate-300">
-                      <div className="space-y-1">
-                        {fk && (
-                          <button
-                            type="button"
-                            onClick={() => onOpenTableDetail(fk.targetTable)}
-                            className="inline-flex items-center gap-1 font-mono text-[11px] text-blue-600 dark:text-blue-400 hover:underline mr-2"
-                          >
-                            <Link2 className="w-3 h-3" />
-                            <span>{fk.label}</span>
-                          </button>
-                        )}
-                        {col.check && (
-                          <div className="font-mono text-[11px] text-cyan-700 dark:text-cyan-300">
-                            CHECK ({col.check})
+                      {isEditingColNote && onUpdateColumnNote ? (
+                        <InlineNoteEditor
+                          key={`edit-col-${colEditKey}`}
+                          initialValue={col.note || ''}
+                          compact
+                          placeholder={`Document ${col.name}...`}
+                          onSave={(nextNote) => {
+                            onUpdateColumnNote(
+                              activeTable.id,
+                              col.name,
+                              nextNote
+                            );
+                            setEditingColumnKey(null);
+                          }}
+                          onCancel={() => setEditingColumnKey(null)}
+                        />
+                      ) : (
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="space-y-1 min-w-0 flex-1">
+                            {fk && (
+                              <button
+                                type="button"
+                                onClick={() => onOpenTableDetail(fk.targetTable)}
+                                className="inline-flex items-center gap-1 font-mono text-[11px] text-blue-600 dark:text-blue-400 hover:underline mr-2"
+                              >
+                                <Link2 className="w-3 h-3" />
+                                <span>{fk.label}</span>
+                              </button>
+                            )}
+                            {col.check && (
+                              <div className="font-mono text-[11px] text-cyan-700 dark:text-cyan-300">
+                                CHECK ({col.check})
+                              </div>
+                            )}
+                            {col.note && (
+                              <TrimmableNote
+                                key={`col-note-${activeTable.id}-${col.name}`}
+                                content={col.note}
+                                compact
+                                inlineShort
+                                maxChars={120}
+                                defaultExpanded={false}
+                              />
+                            )}
+                            {!fk && !col.note && !col.check && (
+                              <span className="text-slate-400">—</span>
+                            )}
                           </div>
-                        )}
-                        {col.note && (
-                          <TrimmableNote
-                            key={`col-note-${activeTable.id}-${col.name}`}
-                            content={col.note}
-                            compact
-                            inlineShort
-                            maxChars={120}
-                            defaultExpanded={false}
-                          />
-                        )}
-                        {!fk && !col.note && !col.check && (
-                          <span className="text-slate-400">—</span>
-                        )}
-                      </div>
+
+                          {onUpdateColumnNote && (
+                            col.fromPartial ? (
+                              <span
+                                title={`Defined on TablePartial ~${col.fromPartial}`}
+                                className="text-[10px] text-slate-400 italic shrink-0"
+                              >
+                                partial
+                              </span>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setEditingColumnKey(colEditKey)}
+                                title={
+                                  col.note
+                                    ? `Edit note for ${col.name}`
+                                    : `Add note for ${col.name}`
+                                }
+                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] font-medium text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 opacity-70 group-hover:opacity-100 transition-opacity shrink-0"
+                              >
+                                {col.note ? (
+                                  <>
+                                    <Edit3 className="w-3 h-3" />
+                                    <span className="sr-only sm:not-sr-only">
+                                      Edit
+                                    </span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Plus className="w-3 h-3" />
+                                    <span className="sr-only sm:not-sr-only">
+                                      Note
+                                    </span>
+                                  </>
+                                )}
+                              </button>
+                            )
+                          )}
+                        </div>
+                      )}
                     </td>
                   </tr>
                 );

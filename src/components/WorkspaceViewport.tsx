@@ -73,6 +73,13 @@ interface WorkspaceViewportProps {
     toTable: string,
     toCol: string
   ) => void;
+  collapsedGroups: string[];
+  onToggleGroupCollapse: (groupName: string) => void;
+  onSetAllGroupsCollapsed: (collapsed: boolean) => void;
+  onUpdateGroupNote: (groupName: string, note: string) => void;
+  onUpdateTableNote: (tableId: string, note: string) => void;
+  onUpdateColumnNote: (tableId: string, columnName: string, note: string) => void;
+  onClearDomainFilter?: () => void;
 }
 
 export const WorkspaceViewport: React.FC<WorkspaceViewportProps> = ({
@@ -109,6 +116,13 @@ export const WorkspaceViewport: React.FC<WorkspaceViewportProps> = ({
   onUpdateStickyNote,
   onDeleteStickyNote,
   onCreateRef,
+  collapsedGroups,
+  onToggleGroupCollapse,
+  onSetAllGroupsCollapsed,
+  onUpdateGroupNote,
+  onUpdateTableNote,
+  onUpdateColumnNote,
+  onClearDomainFilter,
 }) => {
   if (viewMode === 'docs') {
     return (
@@ -129,11 +143,20 @@ export const WorkspaceViewport: React.FC<WorkspaceViewportProps> = ({
             <DocsView
               schema={parsedSchema}
               stickyNotes={workspace.stickyNotes}
+              projectName={workspace.name}
+              darkMode={darkMode}
+              positions={workspace.tablePositions}
+              collapsedGroups={collapsedGroups}
               navOpen={docsNavOpen}
               onToggleNav={onToggleDocsNav}
               modKey={modKey}
+              selectedDomains={effectiveSelectedDomains}
+              onClearDomainFilter={onClearDomainFilter}
               sectionRequest={docsSectionRequest}
               onSelectTable={onSelectTableFromDocs}
+              onUpdateGroupNote={onUpdateGroupNote}
+              onUpdateTableNote={onUpdateTableNote}
+              onUpdateColumnNote={onUpdateColumnNote}
             />
           </Suspense>
         </ErrorBoundary>
@@ -232,6 +255,9 @@ export const WorkspaceViewport: React.FC<WorkspaceViewportProps> = ({
           onUpdateStickyNote={onUpdateStickyNote}
           onDeleteStickyNote={onDeleteStickyNote}
           onCreateRef={onCreateRef}
+          collapsedGroups={collapsedGroups}
+          onToggleGroupCollapse={onToggleGroupCollapse}
+          onSetAllGroupsCollapsed={onSetAllGroupsCollapsed}
           focusRequest={focusRequest}
           darkMode={darkMode}
         />

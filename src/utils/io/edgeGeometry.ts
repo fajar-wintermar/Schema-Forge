@@ -1,7 +1,22 @@
-import { TablePosition } from '@shared/domain/schemaTypes';
-import { TABLE_WIDTH } from '../autoLayout';
+import { DetailLevel, TableGroupDef, TablePosition } from '@shared/domain/schemaTypes';
+import {
+  getTableHeight,
+  GroupBoundingBox,
+  ResolvedEdge,
+  TABLE_WIDTH,
+  TableInstance,
+} from '../autoLayout';
 
 export type EdgeRoutingMode = 'bezier' | 'orthogonal';
+export type EdgeVisibilityMode = 'show' | 'bundle' | 'hide';
+
+export interface EdgeBundleItem {
+  id: string;
+  domainA: string;
+  domainB: string;
+  color: string;
+  edges: ResolvedEdge[];
+}
 
 export interface AnchorBox {
   x: number;
@@ -280,5 +295,145 @@ export function buildEdgePath(params: {
     pathD: buildRoundedOrthoPath(pts),
     midX: (outX1 + outX2) / 2,
     midY,
+  };
+}
+
+export function computeEdgeRoutingAndBundles(params: {
+  edges: ResolvedEdge[];
+  visibleGroupBoxes: GroupBoundingBox[];
+  visibleInstances: TableInstance[];
+  positions: Record<string, TablePosition>;
+  detailLevel: DetailLevel;
+  fkColsByTable: Map<string, Set<string>>;
+  crossDomainMode: EdgeVisibilityMode;
+  collapsedGroups?: Set<string>;
+  focusedTableId?: string | null;
+  tableGroups: TableGroupDef[];
+}): {
+  renderedEdges: ResolvedEdge[];
+  crossDomainBundles: EdgeBundleItem[];
+  anchorBoxByDomain: Map<string, AnchorBox>;
+} {
+  const {
+    edges,
+    visibleGroupBoxes,
+    visibleInstances,
+    positions,
+    detailLevel,
+    fkColsByTable,
+    crossDomainMode,
+    collapsedGroups,
+    focusedTableId = null,
+    tableGroups,
+  } = params;
+
+  const boxMap = new Map<string, AnchorBox>();
+  for (const gb of visibleGroupBoxes) {
+    boxMap.set(gb.name, {
+      x: gb.x,
+      y: gb.y,
+      width: gb.width,
+      height: gb.height,
+    });
+  }
+  for (const inst of visibleInstances) {
+    const p = positions[inst.posKey] || positions[inst.table.id] || { x: 0, y: 0 };
+    const rect: AnchorBox = {
+      x: p.x,
+      y: p.y,
+      width: TABLE_WIDTH,
+      height: getTableHeight(
+        inst.table,
+        detailLevel,
+        fkColsByTable.get(inst.table.id),
+        inst.sharedGroups.length > 1
+      ),
+    };
+    boxMap.set(`table:${inst.posKey}`, rect);
+    if (inst.groupName === null) {
+      boxMap.set(`ungrouped:${inst.table.id}`, rect);
+    }
+  }
+
+  const directEdges: ResolvedEdge[] = [];
+  const bundleMap = new Map<string, EdgeBundleItem>();
+
+  const getEndpointKey = (inst: TableInstance): string => {
+    if (inst.groupName && collapsedGroups?.has(inst.groupName)) {
+      return inst.groupName;
+    }
+    if (crossDomainMode === 'bundle') {
+      return inst.groupName || `ungrouped:${inst.table.id}`;
+    }
+    return `table:${inst.posKey}`;
+  };
+
+  for (const edge of edges) {
+    const fromCollapsed = Boolean(
+      edge.fromInst.groupName && collapsedGroups?.has(edge.fromInst.groupName)
+    );
+    const toCollapsed = Boolean(
+      edge.toInst.groupName && collapsedGroups?.has(edge.toInst.groupName)
+    );
+
+    // Hide internal edges completely inside a collapsed group
+    if (
+      fromCollapsed &&
+      toCollapsed &&
+      edge.fromInst.groupName === edge.toInst.groupName
+    ) {
+      continue;
+    }
+
+    const isCross = edge.fromInst.groupName !== edge.toInst.groupName;
+    if (crossDomainMode === 'hide' && isCross) {
+      continue;
+    }
+
+    const touchesCollapsed = fromCollapsed || toCollapsed;
+    const touchesFocus =
+      focusedTableId !== null &&
+      (edge.ref.fromTable === focusedTableId ||
+        edge.ref.toTable === focusedTableId);
+
+    // Render direct table-to-table edge when neither endpoint is collapsed
+    // and either we're showing all cross-domain edges, it's intra-group, or focused
+    if (
+      !touchesCollapsed &&
+      (crossDomainMode === 'show' || !isCross || touchesFocus)
+    ) {
+      directEdges.push(edge);
+      continue;
+    }
+
+    const keyA = getEndpointKey(edge.fromInst);
+    const keyB = getEndpointKey(edge.toInst);
+    if (keyA === keyB) continue;
+
+    const [domainA, domainB] = keyA < keyB ? [keyA, keyB] : [keyB, keyA];
+    const pairKey = `${domainA}::${domainB}`;
+
+    let bundle = bundleMap.get(pairKey);
+    if (!bundle) {
+      const groupColor =
+        tableGroups.find((g) => g.name === domainA)?.color ||
+        tableGroups.find((g) => g.name === domainB)?.color ||
+        '#64748b';
+      bundle = {
+        id: `bundle:${pairKey}`,
+        domainA,
+        domainB,
+        color: groupColor,
+        edges: [],
+      };
+      bundleMap.set(pairKey, bundle);
+    }
+    bundle.edges.push(edge);
+  }
+
+  return {
+    renderedEdges: directEdges,
+    crossDomainBundles: Array.from(bundleMap.values()),
+    anchorBoxByDomain: boxMap,
   };
 }

@@ -1,8 +1,18 @@
-import { ParsedSchema, RefRelation, StickyNote } from '@shared/domain/schemaTypes';
+import {
+  ParsedSchema,
+  RefRelation,
+  StickyNote,
+  TablePosition,
+} from '@shared/domain/schemaTypes';
 
 export interface DocsViewProps {
   schema: ParsedSchema;
   stickyNotes?: StickyNote[];
+  projectName?: string;
+  darkMode?: boolean;
+  allowExport?: boolean;
+  positions?: Record<string, TablePosition>;
+  collapsedGroups?: string[];
   navOpen: boolean;
   onToggleNav: () => void;
   modKey?: string;
@@ -10,6 +20,13 @@ export interface DocsViewProps {
   onClearDomainFilter?: () => void;
   sectionRequest?: { section: DocsSection; nonce: number } | null;
   onSelectTable: (tableId: string) => void;
+  onUpdateGroupNote?: (groupName: string, note: string) => void;
+  onUpdateTableNote?: (tableId: string, note: string) => void;
+  onUpdateColumnNote?: (
+    tableId: string,
+    columnName: string,
+    note: string
+  ) => void;
 }
 
 export type TreeFilterMode = 'all' | 'domain';

@@ -31,6 +31,7 @@ import {
   CommandTargetView,
 } from '../command/commandSearch';
 import { DiagramCanvas } from '../diagram/DiagramCanvas';
+import { readDiagramPreferences } from '../diagram/hooks/useDiagramPreferences';
 import type { DocsSection } from '../docs/types';
 import {
   type DetailLevel,
@@ -111,6 +112,7 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
   const [viewPositions, setViewPositions] = useState<Record<string, TablePosition>>({});
   const [viewStickyNotes, setViewStickyNotes] = useState<StickyNote[]>([]);
   const [viewDetailLevel, setViewDetailLevel] = useState<DetailLevel>('full');
+  const [viewCollapsedGroups, setViewCollapsedGroups] = useState<string[]>([]);
   const [hasCustomLayout, setHasCustomLayout] = useState(false);
 
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
@@ -149,6 +151,10 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
     setViewPositions(basePositions);
     setViewStickyNotes(nextPayload.content.stickyNotes || []);
     setViewDetailLevel(detail);
+    const initialCollapsed = Object.entries(nextPayload.content.groupMeta || {})
+      .filter(([, meta]) => Boolean(meta?.collapsed))
+      .map(([name]) => name);
+    setViewCollapsedGroups(initialCollapsed);
     setHasCustomLayout(false);
   }, []);
 
@@ -252,6 +258,38 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
     setFocusRequest({ type: 'fit', nonce: Date.now() });
   }, [payload, resetEphemeralLayout]);
 
+  const handleToggleGroupCollapse = useCallback((groupName: string) => {
+    setViewCollapsedGroups((prev) =>
+      prev.includes(groupName)
+        ? prev.filter((g) => g !== groupName)
+        : [...prev, groupName]
+    );
+  }, []);
+
+  const handleSetAllGroupsCollapsed = useCallback(
+    (collapsed: boolean) => {
+      setViewCollapsedGroups(
+        collapsed ? parsedSchema.tableGroups.map((g) => g.name) : []
+      );
+    },
+    [parsedSchema.tableGroups]
+  );
+
+  const expandViewGroupsForTable = useCallback(
+    (tableId: string) => {
+      const parentNames = new Set(
+        parsedSchema.tableGroups
+          .filter((g) => g.tables.includes(tableId))
+          .map((g) => g.name)
+      );
+      if (parentNames.size === 0) return;
+      setViewCollapsedGroups((prev) =>
+        prev.filter((name) => !parentNames.has(name))
+      );
+    },
+    [parsedSchema.tableGroups]
+  );
+
   const safeExportBaseName = useMemo(() => {
     const rawName = payload?.share.workspaceName || 'schema-diagram';
     const versionSuffix = payload?.share.activeVersionTag
@@ -281,16 +319,21 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
       setExportingPng(true);
       setExportMenuOpen(false);
       try {
+        const prefs = readDiagramPreferences();
         await exportDiagramAsPng({
           filename: `${safeExportBaseName}-${scale}x.png`,
           schema: parsedSchema,
           positions: viewPositions,
           detailLevel: viewDetailLevel,
-          stickyNotes: viewStickyNotes,
+          stickyNotes: [],
           darkMode,
           title: payload.share.workspaceName,
           scale,
           selectedDomains,
+          edgeRouting: prefs.routingMode,
+          crossDomainMode: prefs.crossDomainMode,
+          showCardinality: prefs.showCardinality,
+          collapsedGroups: viewCollapsedGroups,
         });
         showExportFeedback(`Exported ${scale}x PNG`);
       } catch (err) {
@@ -308,9 +351,9 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
       parsedSchema,
       viewPositions,
       viewDetailLevel,
-      viewStickyNotes,
       darkMode,
       selectedDomains,
+      viewCollapsedGroups,
       showExportFeedback,
     ]
   );
@@ -318,14 +361,19 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
   const handleExportSharedSvg = useCallback(() => {
     if (!payload?.share.allowDiagramExport) return;
     setExportMenuOpen(false);
+    const prefs = readDiagramPreferences();
     const { svg } = buildDiagramSvg({
       schema: parsedSchema,
       positions: viewPositions,
       detailLevel: viewDetailLevel,
-      stickyNotes: viewStickyNotes,
+      stickyNotes: [],
       darkMode,
       title: payload.share.workspaceName,
       selectedDomains,
+      edgeRouting: prefs.routingMode,
+      crossDomainMode: prefs.crossDomainMode,
+      showCardinality: prefs.showCardinality,
+      collapsedGroups: viewCollapsedGroups,
     });
     downloadTextFile(
       `${safeExportBaseName}.svg`,
@@ -338,10 +386,10 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
     parsedSchema,
     viewPositions,
     viewDetailLevel,
-    viewStickyNotes,
     darkMode,
     safeExportBaseName,
     selectedDomains,
+    viewCollapsedGroups,
     showExportFeedback,
   ]);
 
@@ -375,6 +423,7 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
     }
 
     if (item.tableId) {
+      expandViewGroupsForTable(item.tableId);
       setViewMode('diagram');
       setSelectedTableId(item.tableId);
       if (item.kind === 'column' && item.columnName) {
@@ -672,11 +721,19 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
               <DocsView
                 schema={parsedSchema}
                 stickyNotes={viewStickyNotes}
+                projectName={payload.share.workspaceName}
+                darkMode={darkMode}
+                allowExport={payload.share.allowDiagramExport}
+                positions={viewPositions}
+                collapsedGroups={viewCollapsedGroups}
                 navOpen={docsNavOpen}
                 onToggleNav={() => setDocsNavOpen((o) => !o)}
                 modKey={modKey}
+                selectedDomains={selectedDomains}
+                onClearDomainFilter={() => setSelectedDomains([])}
                 sectionRequest={docsSectionRequest}
                 onSelectTable={(id) => {
+                  expandViewGroupsForTable(id);
                   setSelectedTableId(id);
                   setViewMode('diagram');
                   setFocusRequest({ type: 'table', id, nonce: Date.now() });
@@ -715,6 +772,9 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
                 onAddStickyNote={() => {}}
                 onUpdateStickyNote={handleMoveViewStickyNote}
                 onDeleteStickyNote={() => {}}
+                collapsedGroups={viewCollapsedGroups}
+                onToggleGroupCollapse={handleToggleGroupCollapse}
+                onSetAllGroupsCollapsed={handleSetAllGroupsCollapsed}
                 focusRequest={focusRequest}
                 darkMode={darkMode}
                 readOnly={true}
@@ -734,6 +794,7 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
                   schema={parsedSchema}
                   onClose={() => setSelectedTableId(null)}
                   onSelectTable={(id) => {
+                    expandViewGroupsForTable(id);
                     setSelectedTableId(id);
                     setFocusRequest({ type: 'table', id, nonce: Date.now() });
                   }}

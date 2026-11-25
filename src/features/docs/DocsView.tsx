@@ -25,6 +25,11 @@ export type { DocsViewProps } from './types';
 export const DocsView: React.FC<DocsViewProps> = ({
   schema,
   stickyNotes = [],
+  projectName,
+  darkMode = false,
+  allowExport = true,
+  positions,
+  collapsedGroups,
   navOpen,
   onToggleNav,
   modKey = '⌘',
@@ -32,6 +37,9 @@ export const DocsView: React.FC<DocsViewProps> = ({
   onClearDomainFilter,
   sectionRequest,
   onSelectTable,
+  onUpdateGroupNote,
+  onUpdateTableNote,
+  onUpdateColumnNote,
 }) => {
   const [search, setSearch] = useState('');
   const [navSearch, setNavSearch] = useState('');
@@ -512,6 +520,8 @@ export const DocsView: React.FC<DocsViewProps> = ({
             onNavigateSection={navigateSection}
             onOpenTableDetail={openTableDetail}
             onSelectTableInDiagram={onSelectTable}
+            onUpdateTableNote={onUpdateTableNote}
+            onUpdateColumnNote={onUpdateColumnNote}
           />
         )}
 
@@ -551,6 +561,7 @@ export const DocsView: React.FC<DocsViewProps> = ({
             onToggleNav={onToggleNav}
             onNavigateSection={navigateSection}
             onOpenTableDetail={openTableDetail}
+            onUpdateGroupNote={onUpdateGroupNote}
           />
         )}
 
@@ -649,6 +660,12 @@ export const DocsView: React.FC<DocsViewProps> = ({
         {resolvedSection.kind === 'overview' && (
           <OverviewPage
             schema={schema}
+            stickyNotes={stickyNotes}
+            projectName={projectName}
+            darkMode={darkMode}
+            allowExport={allowExport}
+            positions={positions}
+            collapsedGroups={collapsedGroups}
             navOpen={navOpen}
             modKey={modKey}
             search={search}

@@ -1,5 +1,13 @@
 import React from 'react';
-import { Check, ChevronDown, Crosshair, Filter, X } from 'lucide-react';
+import {
+  Check,
+  ChevronDown,
+  Crosshair,
+  Filter,
+  Maximize2,
+  Minimize2,
+  X,
+} from 'lucide-react';
 import {
   formatDomainLabel,
   TableGroupDef,
@@ -26,6 +34,9 @@ export interface DomainFilterBarProps {
   neighborCount: number;
   onClearFocusSelection: () => void;
   onExitFocusMode: () => void;
+  collapsedGroupCount?: number;
+  totalGroupCount?: number;
+  onSetAllGroupsCollapsed?: (collapsed: boolean) => void;
 }
 
 export const DomainFilterBar: React.FC<DomainFilterBarProps> = ({
@@ -47,10 +58,15 @@ export const DomainFilterBar: React.FC<DomainFilterBarProps> = ({
   neighborCount,
   onClearFocusSelection,
   onExitFocusMode,
+  collapsedGroupCount = 0,
+  totalGroupCount = 0,
+  onSetAllGroupsCollapsed,
 }) => {
   const showDomainFilter = tableGroups.length > 0 || isFilteringDomains;
   const showUngroupedOption =
     ungroupedCount > 0 || selectedDomainSet.has(UNGROUPED_DOMAIN_ID);
+  const allGroupsCollapsed =
+    totalGroupCount > 0 && collapsedGroupCount >= totalGroupCount;
 
   const showBar =
     showDomainFilter ||
@@ -273,6 +289,33 @@ export const DomainFilterBar: React.FC<DomainFilterBarProps> = ({
                 </div>
               )}
             </div>
+          </div>
+        )}
+
+        {totalGroupCount > 0 && onSetAllGroupsCollapsed && (
+          <div className="flex items-center p-1 rounded-xl border border-slate-200 dark:border-slate-700 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xs shadow-sm">
+            <button
+              type="button"
+              onClick={() => onSetAllGroupsCollapsed(!allGroupsCollapsed)}
+              title={
+                allGroupsCollapsed
+                  ? 'Expand all TableGroups'
+                  : 'Collapse all TableGroups'
+              }
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors whitespace-nowrap"
+            >
+              {allGroupsCollapsed ? (
+                <>
+                  <Maximize2 className="w-3 h-3 text-blue-600 dark:text-blue-400 shrink-0" />
+                  <span>Expand All</span>
+                </>
+              ) : (
+                <>
+                  <Minimize2 className="w-3 h-3 shrink-0" />
+                  <span>Collapse All</span>
+                </>
+              )}
+            </button>
           </div>
         )}
 

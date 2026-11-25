@@ -15,9 +15,26 @@ import {
 } from '../autoLayout';
 import {
   buildEdgePath,
+  computeEdgeRoutingAndBundles,
   EdgeRoutingMode,
+  EdgeVisibilityMode,
+  getBoxToBoxAnchors,
   getEdgeAnchorPoints,
 } from './edgeGeometry';
+
+export interface DiagramExportParams {
+  schema: ParsedSchema;
+  positions: Record<string, TablePosition>;
+  detailLevel: DetailLevel;
+  stickyNotes?: StickyNote[];
+  darkMode: boolean;
+  title?: string;
+  edgeRouting?: EdgeRoutingMode;
+  selectedDomains?: string[];
+  showCardinality?: boolean;
+  crossDomainMode?: EdgeVisibilityMode;
+  collapsedGroups?: string[];
+}
 
 function escapeXml(str: string): string {
   return str
@@ -56,38 +73,38 @@ export function getContrastTextColor(hex?: string): string {
   return lum > 0.62 ? '#0f172a' : '#ffffff';
 }
 
-export function buildDiagramSvg(params: {
-  schema: ParsedSchema;
-  positions: Record<string, TablePosition>;
-  detailLevel: DetailLevel;
-  stickyNotes: StickyNote[];
-  darkMode: boolean;
-  title?: string;
-  edgeRouting?: EdgeRoutingMode;
-  selectedDomains?: string[];
-}): { svg: string; width: number; height: number } {
+export function buildDiagramSvg(
+  params: DiagramExportParams
+): { svg: string; width: number; height: number } {
   const {
     schema,
     positions,
     detailLevel,
-    stickyNotes,
     darkMode,
     title,
     edgeRouting = 'bezier',
     selectedDomains = [],
+    showCardinality = true,
+    crossDomainMode = 'show',
+    collapsedGroups = [],
   } = params;
+
+  const collapsedGroupSet = new Set(collapsedGroups);
 
   const fkColsByTable = new Map<string, Set<string>>();
   for (const r of schema.refs) {
     if (!fkColsByTable.has(r.fromTable)) fkColsByTable.set(r.fromTable, new Set());
     for (const c of r.fromColumns) fkColsByTable.get(r.fromTable)!.add(c);
+    if (!fkColsByTable.has(r.toTable)) fkColsByTable.set(r.toTable, new Set());
+    for (const c of r.toColumns) fkColsByTable.get(r.toTable)!.add(c);
   }
 
   const allGroupBoxes = computeGroupBoundingBoxes(
     schema,
     positions,
     detailLevel,
-    fkColsByTable
+    fkColsByTable,
+    collapsedGroupSet
   );
 
   const { instances: allInstances } = buildTableInstances(schema);
@@ -95,7 +112,7 @@ export function buildDiagramSvg(params: {
 
   const isFilteringDomains = selectedDomains.length > 0;
   const selectedDomainSet = new Set(selectedDomains);
-  const isInstVisible = (inst: (typeof allInstances)[number]) =>
+  const isInstInDomain = (inst: (typeof allInstances)[number]) =>
     !isFilteringDomains ||
     (inst.groupName === null
       ? selectedDomainSet.has(UNGROUPED_DOMAIN_ID)
@@ -104,29 +121,42 @@ export function buildDiagramSvg(params: {
   const groupBoxes = isFilteringDomains
     ? allGroupBoxes.filter((gb) => selectedDomainSet.has(gb.name))
     : allGroupBoxes;
-  const instances = isFilteringDomains
-    ? allInstances.filter(isInstVisible)
+
+  const domainInstances = isFilteringDomains
+    ? allInstances.filter(isInstInDomain)
     : allInstances;
-  const visibleTableIds = new Set(instances.map((i) => i.table.id));
-  const resolvedEdges = isFilteringDomains
+
+  // Hide individual table cards for collapsed groups (still available via domainInstances for edge resolution)
+  const visibleInstances = domainInstances.filter(
+    (inst) => !(inst.groupName !== null && collapsedGroupSet.has(inst.groupName))
+  );
+  const domainTableIds = new Set(domainInstances.map((i) => i.table.id));
+
+  const domainEdges = isFilteringDomains
     ? allResolvedEdges.filter(
-        (e) => isInstVisible(e.fromInst) && isInstVisible(e.toInst)
+        (e) => isInstInDomain(e.fromInst) && isInstInDomain(e.toInst)
       )
     : allResolvedEdges;
-  const visibleStickyNotes = isFilteringDomains
-    ? stickyNotes.filter((note) => {
-        if (!note.linkedTarget?.startsWith('table:')) return true;
-        const tableId = note.linkedTarget.slice('table:'.length);
-        return visibleTableIds.has(tableId);
-      })
-    : stickyNotes;
+
+  const { renderedEdges, crossDomainBundles, anchorBoxByDomain } =
+    computeEdgeRoutingAndBundles({
+      edges: domainEdges,
+      visibleGroupBoxes: groupBoxes,
+      visibleInstances,
+      positions,
+      detailLevel,
+      fkColsByTable,
+      crossDomainMode,
+      collapsedGroups: collapsedGroupSet,
+      tableGroups: schema.tableGroups,
+    });
 
   let minX = Infinity;
   let minY = Infinity;
   let maxX = -Infinity;
   let maxY = -Infinity;
 
-  for (const inst of instances) {
+  for (const inst of visibleInstances) {
     const pos = positions[inst.posKey] || positions[inst.table.id] || { x: 0, y: 0 };
     const h = getTableHeight(
       inst.table,
@@ -145,13 +175,6 @@ export function buildDiagramSvg(params: {
     minY = Math.min(minY, gb.y);
     maxX = Math.max(maxX, gb.x + gb.width);
     maxY = Math.max(maxY, gb.y + gb.height);
-  }
-
-  for (const note of visibleStickyNotes) {
-    minX = Math.min(minX, note.x);
-    minY = Math.min(minY, note.y);
-    maxX = Math.max(maxX, note.x + note.width);
-    maxY = Math.max(maxY, note.y + (note.collapsed ? 44 : 150));
   }
 
   if (!isFinite(minX)) {
@@ -202,16 +225,55 @@ export function buildDiagramSvg(params: {
     const domainCountLabel = isFilteringDomains
       ? groupBoxes.length
       : schema.tableGroups.length;
+    const totalVisibleEdges =
+      renderedEdges.length +
+      crossDomainBundles.reduce((acc, b) => acc + b.edges.length, 0);
     parts.push(
-      `<text x="${width - margin}" y="${42}" text-anchor="end" class="sans" font-size="12" fill="${textSecondary}">${visibleTableIds.size} tables · ${domainCountLabel} domains · ${resolvedEdges.length} relationships</text>`
+      `<text x="${width - margin}" y="${42}" text-anchor="end" class="sans" font-size="12" fill="${textSecondary}">${domainTableIds.size} tables · ${domainCountLabel} domains · ${totalVisibleEdges} relationships</text>`
     );
   }
 
   parts.push(`<g transform="translate(${offsetX}, ${offsetY})">`);
 
-  // 1. TableGroup containers
+  // 1. TableGroup containers (expanded dashed boxes or collapsed summary cards)
   for (const gb of groupBoxes) {
     const gColor = sanitizeSvgColor(gb.color, '#2563eb');
+    if (gb.collapsed) {
+      parts.push(
+        `<rect x="${gb.x}" y="${gb.y}" width="${gb.width}" height="${gb.height}" rx="12" fill="${cardBg}" stroke="${gColor}" stroke-width="2" />`
+      );
+      parts.push(
+        `<rect x="${gb.x}" y="${gb.y}" width="${gb.width}" height="${gb.height}" rx="12" fill="${gColor}" fill-opacity="${
+          darkMode ? '0.14' : '0.08'
+        }" />`
+      );
+      parts.push(
+        `<rect x="${gb.x + 14}" y="${gb.y + 16}" width="11" height="11" rx="3" fill="${gColor}" />`
+      );
+      parts.push(
+        `<text x="${gb.x + 33}" y="${gb.y + 26}" class="sans" font-size="13" font-weight="700" fill="${textPrimary}">${escapeXml(
+          gb.name
+        )}</text>`
+      );
+      parts.push(
+        `<text x="${gb.x + gb.width - 14}" y="${gb.y + 26}" text-anchor="end" class="mono" font-size="11" font-weight="600" fill="${textSecondary}">${
+          gb.tables.length
+        } tables</text>`
+      );
+      const summary = gb.note
+        ? gb.note.replace(/\s+/g, ' ').trim().slice(0, 44)
+        : `Collapsed domain (${gb.tables.length} tables)`;
+      parts.push(
+        `<text x="${gb.x + 14}" y="${gb.y + 54}" class="sans" font-size="11" fill="${textSecondary}">${escapeXml(
+          summary
+        )}</text>`
+      );
+      parts.push(
+        `<text x="${gb.x + 14}" y="${gb.y + 74}" class="mono" font-size="10" fill="${gColor}">Collapsed TableGroup</text>`
+      );
+      continue;
+    }
+
     parts.push(
       `<rect x="${gb.x}" y="${gb.y}" width="${gb.width}" height="${gb.height}" rx="12" fill="${gColor}" fill-opacity="${
         darkMode ? '0.09' : '0.06'
@@ -234,7 +296,51 @@ export function buildDiagramSvg(params: {
     }
   }
 
-  // 2. Relationship edges
+  // 2a. Cross-domain & collapsed-group relationship bundles
+  crossDomainBundles.forEach((bundle, bIdx) => {
+    const boxA = anchorBoxByDomain.get(bundle.domainA);
+    const boxB = anchorBoxByDomain.get(bundle.domainB);
+    if (!boxA || !boxB) return;
+
+    const anchors = getBoxToBoxAnchors(boxA, boxB);
+    const { pathD, midX, midY } = buildEdgePath({
+      ...anchors,
+      isSelfRef: false,
+      routing: edgeRouting,
+      laneOffset: ((bIdx % 5) - 2) * 14,
+    });
+
+    const strokeColor = sanitizeSvgColor(
+      bundle.color,
+      darkMode ? '#64748b' : '#475569'
+    );
+    const pillLabel = `${bundle.edges.length} ref${
+      bundle.edges.length > 1 ? 's' : ''
+    }`;
+    const pillWidth = Math.max(46, pillLabel.length * 6.5 + 16);
+
+    parts.push(
+      `<path d="${pathD}" fill="none" stroke="${strokeColor}" stroke-width="2" stroke-dasharray="6 4" />`
+    );
+    parts.push(
+      `<circle cx="${anchors.x1}" cy="${anchors.y1}" r="4" fill="${strokeColor}" />`
+    );
+    parts.push(
+      `<circle cx="${anchors.x2}" cy="${anchors.y2}" r="4" fill="${strokeColor}" />`
+    );
+    parts.push(
+      `<rect x="${midX - pillWidth / 2}" y="${midY - 11}" width="${pillWidth}" height="22" rx="11" fill="${
+        darkMode ? '#0f172a' : '#ffffff'
+      }" stroke="${strokeColor}" stroke-width="1.4" />`
+    );
+    parts.push(
+      `<text x="${midX}" y="${midY + 3.5}" text-anchor="middle" class="mono" font-size="10" font-weight="600" fill="${
+        darkMode ? '#e2e8f0' : '#334155'
+      }">${escapeXml(pillLabel)}</text>`
+    );
+  });
+
+  // 2b. Direct relationship edges
   const getAnchorY = (table: TableDef, posKey: string, colName: string) => {
     const pos = positions[posKey] || positions[table.id] || { x: 0, y: 0 };
     if (detailLevel === 'names') return pos.y + 20;
@@ -251,7 +357,7 @@ export function buildDiagramSvg(params: {
     return pos.y + 40 + idx * rowH + rowH / 2;
   };
 
-  resolvedEdges.forEach((edge, idx) => {
+  renderedEdges.forEach((edge, idx) => {
     const { ref: r, fromInst, toInst } = edge;
     const pA = positions[fromInst.posKey] || positions[fromInst.table.id] || { x: 0, y: 0 };
     const pB = positions[toInst.posKey] || positions[toInst.table.id] || { x: 0, y: 0 };
@@ -274,10 +380,26 @@ export function buildDiagramSvg(params: {
     );
     parts.push(`<circle cx="${anchors.x1}" cy="${anchors.y1}" r="3.5" fill="${edgeColor}" />`);
     parts.push(`<circle cx="${anchors.x2}" cy="${anchors.y2}" r="3.5" fill="${safeRefColor || '#2563eb'}" />`);
+
+    if (showCardinality) {
+      const fromCard = r.relation === '>' || r.relation === '<>' ? 'N' : '1';
+      const toCard = r.relation === '<' || r.relation === '<>' ? 'N' : '1';
+      const labelFill = darkMode ? '#cbd5e1' : '#475569';
+      parts.push(
+        `<text x="${anchors.x1 + anchors.dir1 * 14}" y="${
+          anchors.y1 - 6
+        }" text-anchor="middle" class="mono" font-size="10" font-weight="700" fill="${labelFill}" stroke="${bg}" stroke-width="3" paint-order="stroke">${fromCard}</text>`
+      );
+      parts.push(
+        `<text x="${anchors.x2 + anchors.dir2 * 14}" y="${
+          anchors.y2 - 6
+        }" text-anchor="middle" class="mono" font-size="10" font-weight="700" fill="${labelFill}" stroke="${bg}" stroke-width="3" paint-order="stroke">${toCard}</text>`
+      );
+    }
   });
 
   // 3. Table cards
-  for (const inst of instances) {
+  for (const inst of visibleInstances) {
     const table = inst.table;
     const pos = positions[inst.posKey] || positions[table.id] || { x: 0, y: 0 };
     const isShared = inst.sharedGroups.length > 1;
@@ -350,38 +472,6 @@ export function buildDiagramSvg(params: {
     }
   }
 
-  // 4. Sticky Notes
-  const notePalette: Record<string, { bg: string; border: string; text: string }> = {
-    amber: { bg: '#fef3c7', border: '#f59e0b', text: '#78350f' },
-    sky: { bg: '#e0f2fe', border: '#0284c7', text: '#0c4a6e' },
-    emerald: { bg: '#d1fae5', border: '#059669', text: '#064e3b' },
-    rose: { bg: '#ffe4e6', border: '#e11d48', text: '#881337' },
-    slate: { bg: '#f1f5f9', border: '#64748b', text: '#0f172a' },
-  };
-
-  for (const note of visibleStickyNotes) {
-    const pal = notePalette[note.color] || notePalette.amber;
-    const nh = note.collapsed ? 42 : 140;
-    parts.push(
-      `<rect x="${note.x}" y="${note.y}" width="${note.width}" height="${nh}" rx="8" fill="${pal.bg}" stroke="${pal.border}" stroke-width="1.2" />`
-    );
-    parts.push(
-      `<text x="${note.x + 12}" y="${note.y + 24}" class="sans" font-size="12" font-weight="700" fill="${pal.text}">${escapeXml(
-        note.title || 'Note'
-      )}</text>`
-    );
-    if (!note.collapsed && note.content) {
-      const wrapped = note.content.slice(0, 180).split('\n').slice(0, 4);
-      wrapped.forEach((line, idx) => {
-        parts.push(
-          `<text x="${note.x + 12}" y="${note.y + 46 + idx * 17}" class="sans" font-size="11" fill="${pal.text}">${escapeXml(
-            line.slice(0, 38)
-          )}</text>`
-        );
-      });
-    }
-  }
-
   parts.push('</g></svg>');
   return { svg: parts.join('\n'), width, height };
 }
@@ -402,17 +492,12 @@ export function downloadTextFile(
   URL.revokeObjectURL(url);
 }
 
-export async function exportDiagramAsPng(params: {
-  filename: string;
-  schema: ParsedSchema;
-  positions: Record<string, TablePosition>;
-  detailLevel: DetailLevel;
-  stickyNotes: StickyNote[];
-  darkMode: boolean;
-  title?: string;
-  scale?: number;
-  selectedDomains?: string[];
-}): Promise<void> {
+export async function exportDiagramAsPng(
+  params: DiagramExportParams & {
+    filename: string;
+    scale?: number;
+  }
+): Promise<void> {
   const scale = params.scale || 2;
   const { svg, width, height } = buildDiagramSvg(params);
   const svgBlob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' });

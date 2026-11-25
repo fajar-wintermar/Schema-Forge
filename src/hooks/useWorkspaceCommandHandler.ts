@@ -50,6 +50,7 @@ interface UseWorkspaceCommandHandlerOptions {
   onSelectSchemaFile: (filePath: string) => void;
   onJumpToMergedLine: (line: number) => void;
   onChangeDetailLevel: (level: DetailLevel) => void;
+  onExpandGroupsForTable?: (tableId: string) => void;
   showToast: (msg: string) => void;
 }
 
@@ -75,6 +76,7 @@ export function useWorkspaceCommandHandler({
   onSelectSchemaFile,
   onJumpToMergedLine,
   onChangeDetailLevel,
+  onExpandGroupsForTable,
   showToast,
 }: UseWorkspaceCommandHandlerOptions) {
   return useCallback(
@@ -188,6 +190,7 @@ export function useWorkspaceCommandHandler({
       }
 
       if (item.tableId) {
+        onExpandGroupsForTable?.(item.tableId);
         if (viewMode === 'docs') setViewMode('split');
         if (editorState === 'maximized') setEditorState('normal');
         if (
@@ -245,6 +248,7 @@ export function useWorkspaceCommandHandler({
       onSelectSchemaFile,
       onJumpToMergedLine,
       onChangeDetailLevel,
+      onExpandGroupsForTable,
       showToast,
     ]
   );

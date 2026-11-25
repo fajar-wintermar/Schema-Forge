@@ -129,8 +129,13 @@ const EdgeLayerComponent: React.FC<EdgeLayerProps> = ({
         const strokeColor = isBundleHovered
           ? '#2563EB'
           : bundle.color || (darkMode ? '#64748b' : '#475569');
-        const labelA = bundle.domainA.replace(/^ungrouped:/, '');
-        const labelB = bundle.domainB.replace(/^ungrouped:/, '');
+        const formatEndpoint = (key: string) => {
+          const stripped = key.replace(/^(?:ungrouped|table):/, '');
+          const sepIdx = stripped.indexOf('::');
+          return sepIdx !== -1 ? stripped.slice(sepIdx + 2) : stripped;
+        };
+        const labelA = formatEndpoint(bundle.domainA);
+        const labelB = formatEndpoint(bundle.domainB);
         const pillLabel = isBundleHovered
           ? `${labelA} ↔ ${labelB} (${bundle.edges.length})`
           : `${bundle.edges.length} ref${bundle.edges.length > 1 ? 's' : ''}`;

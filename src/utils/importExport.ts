@@ -7,3 +7,8 @@ export {
   exportDiagramAsPng,
   getContrastTextColor,
 } from './io/diagramExport';
+export {
+  exportSchemaToHtml,
+  exportSchemaToMarkdown,
+  printSchemaDocs,
+} from './io/docsExport';

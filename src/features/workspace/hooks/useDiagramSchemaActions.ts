@@ -18,8 +18,11 @@ import {
   moveTableToGroupInDbml,
   removeTableFromGroupInDbml,
   reorderTableGroupsInDbml,
+  setColumnNoteInDbml,
+  setTableGroupNoteInDbml,
   setTableGroupsForTableInDbml,
   setTableHeaderColorInDbml,
+  setTableNoteInDbml,
   upsertTableGroupInDbml,
 } from '@shared/domain/dbml';
 import {
@@ -620,6 +623,146 @@ export function useDiagramSchemaActions({
     }
   };
 
+  const handleToggleGroupCollapse = (groupName: string) => {
+    if (!activeWorkspace) return;
+    updateActiveWorkspace((ws) => {
+      const prevMeta = ws.groupMeta || {};
+      const curr = prevMeta[groupName] || {};
+      return {
+        ...ws,
+        groupMeta: {
+          ...prevMeta,
+          [groupName]: { ...curr, collapsed: !curr.collapsed },
+        },
+      };
+    });
+  };
+
+  const handleSetAllGroupsCollapsed = (collapsed: boolean) => {
+    if (!activeWorkspace) return;
+    updateActiveWorkspace((ws) => {
+      const nextMeta = { ...(ws.groupMeta || {}) };
+      for (const g of parsedSchema.tableGroups) {
+        nextMeta[g.name] = { ...(nextMeta[g.name] || {}), collapsed };
+      }
+      return { ...ws, groupMeta: nextMeta };
+    });
+  };
+
+  const expandGroupsForTable = (tableId: string) => {
+    if (!activeWorkspace) return;
+    const collapsedParents = parsedSchema.tableGroups.filter(
+      (g) =>
+        g.tables.includes(tableId) &&
+        Boolean(activeWorkspace.groupMeta?.[g.name]?.collapsed)
+    );
+    if (collapsedParents.length === 0) return;
+    updateActiveWorkspace((ws) => {
+      const nextMeta = { ...(ws.groupMeta || {}) };
+      for (const g of collapsedParents) {
+        nextMeta[g.name] = { ...(nextMeta[g.name] || {}), collapsed: false };
+      }
+      return { ...ws, groupMeta: nextMeta };
+    });
+  };
+
+  const handleUpdateGroupNote = (groupName: string, note: string) => {
+    if (!activeWorkspace) return;
+    const trimmed = note.trim();
+    if (isModular) {
+      updateModularFiles((files) => {
+        const mod = findModuleDefiningTableGroup(files, groupName);
+        if (!mod) return { files };
+        return {
+          files: files.map((f) =>
+            f.path === mod.path
+              ? { ...f, content: setTableGroupNoteInDbml(f.content, groupName, note) }
+              : f
+          ),
+        };
+      });
+    } else {
+      const nextDbml = setTableGroupNoteInDbml(
+        activeWorkspace.dbml,
+        groupName,
+        note
+      );
+      updateActiveWorkspace((ws) => ({ ...ws, dbml: nextDbml }));
+    }
+    showToast(
+      trimmed
+        ? `Updated note for domain "${groupName}"`
+        : `Cleared note for domain "${groupName}"`
+    );
+  };
+
+  const handleUpdateTableNote = (tableId: string, note: string) => {
+    if (!activeWorkspace) return;
+    const trimmed = note.trim();
+    if (isModular) {
+      updateModularFiles((files) => {
+        const mod = findModuleDefiningTable(files, tableId);
+        if (!mod) return { files };
+        return {
+          files: files.map((f) =>
+            f.path === mod.path
+              ? { ...f, content: setTableNoteInDbml(f.content, tableId, note) }
+              : f
+          ),
+        };
+      });
+    } else {
+      const nextDbml = setTableNoteInDbml(activeWorkspace.dbml, tableId, note);
+      updateActiveWorkspace((ws) => ({ ...ws, dbml: nextDbml }));
+    }
+    showToast(
+      trimmed ? `Updated note for ${tableId}` : `Cleared note for ${tableId}`
+    );
+  };
+
+  const handleUpdateColumnNote = (
+    tableId: string,
+    columnName: string,
+    note: string
+  ) => {
+    if (!activeWorkspace) return;
+    const trimmed = note.trim();
+    if (isModular) {
+      updateModularFiles((files) => {
+        const mod = findModuleDefiningTable(files, tableId);
+        if (!mod) return { files };
+        return {
+          files: files.map((f) =>
+            f.path === mod.path
+              ? {
+                  ...f,
+                  content: setColumnNoteInDbml(
+                    f.content,
+                    tableId,
+                    columnName,
+                    note
+                  ),
+                }
+              : f
+          ),
+        };
+      });
+    } else {
+      const nextDbml = setColumnNoteInDbml(
+        activeWorkspace.dbml,
+        tableId,
+        columnName,
+        note
+      );
+      updateActiveWorkspace((ws) => ({ ...ws, dbml: nextDbml }));
+    }
+    showToast(
+      trimmed
+        ? `Updated note for ${tableId}.${columnName}`
+        : `Cleared note for ${tableId}.${columnName}`
+    );
+  };
+
   return {
     handleDetailLevelChange,
     handleAutoLayout,
@@ -632,6 +775,12 @@ export function useDiagramSchemaActions({
     handleReorderTableInGroup,
     handleSaveGroupModal,
     handleDeleteGroup,
+    handleToggleGroupCollapse,
+    handleSetAllGroupsCollapsed,
+    expandGroupsForTable,
+    handleUpdateGroupNote,
+    handleUpdateTableNote,
+    handleUpdateColumnNote,
     handleAddStickyNote,
     handleUpdateStickyNote,
     handleDeleteStickyNote,
