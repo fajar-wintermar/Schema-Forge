@@ -26,7 +26,7 @@ interface WorkspaceViewportProps {
   viewMode: ViewMode;
   editorState: 'normal' | 'maximized' | 'minimized';
   editorWidth: number;
-  startSplitResize: (e: React.MouseEvent) => void;
+  startSplitResize: (e: React.PointerEvent) => void;
   onChangeEditorState: (state: 'normal' | 'maximized' | 'minimized') => void;
   editorBaseProps: Omit<
     DbmlEditorProps,
@@ -144,7 +144,7 @@ export const WorkspaceViewport: React.FC<WorkspaceViewportProps> = ({
   if (viewMode === 'split' && editorState === 'maximized') {
     return (
       <main className="flex-1 flex min-w-0 min-h-0 overflow-hidden relative">
-        <div className="flex-1 h-full min-w-0 flex">
+        <div className="flex-1 w-full h-full min-w-0 flex overflow-hidden">
           <ErrorBoundary
             title="DBML Editor encountered an error"
             resetKeys={[workspace.id, activeSchemaFilePath, editorState]}
@@ -178,7 +178,7 @@ export const WorkspaceViewport: React.FC<WorkspaceViewportProps> = ({
         <>
           <div
             style={{ width: editorWidth }}
-            className="shrink-0 h-full hidden md:flex"
+            className="shrink-0 min-w-0 h-full hidden md:flex overflow-hidden"
           >
             <ErrorBoundary
               compact
@@ -194,10 +194,15 @@ export const WorkspaceViewport: React.FC<WorkspaceViewportProps> = ({
             </ErrorBoundary>
           </div>
           <div
-            onMouseDown={startSplitResize}
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize code editor"
+            onPointerDown={startSplitResize}
             title="Drag to resize editor"
-            className="w-1.5 shrink-0 hidden md:block cursor-col-resize bg-transparent hover:bg-blue-500/40 transition-colors"
-          />
+            className="relative z-20 w-2 -mx-1 shrink-0 hidden md:flex items-center justify-center cursor-col-resize select-none touch-none group"
+          >
+            <div className="w-0.5 h-full bg-transparent group-hover:bg-blue-500/60 group-active:bg-blue-500 transition-colors" />
+          </div>
         </>
       )}
 

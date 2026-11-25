@@ -560,7 +560,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
       ref={containerRef}
       onWheel={handleWheel}
       onPointerDown={interactions.handleCanvasPointerDown}
-      className={`relative flex-1 h-full overflow-hidden ${
+      className={`relative flex-1 min-w-0 h-full overflow-hidden ${
         cursorMode === 'marquee'
           ? 'cursor-crosshair'
           : 'cursor-grab active:cursor-grabbing'

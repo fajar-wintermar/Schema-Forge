@@ -46,8 +46,8 @@ export const EditorToolbar: React.FC<EditorToolbarProps> = ({
 }) => {
   const altKeyLabel = modKey === '⌘' ? '⌥' : 'Alt+';
   return (
-    <div className="h-10 shrink-0 px-2.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2 bg-slate-50/70 dark:bg-slate-900/70">
-      <div className="flex items-center gap-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 min-w-0">
+    <div className="h-10 w-full min-w-0 shrink-0 px-2.5 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2 bg-slate-50/70 dark:bg-slate-900/70">
+      <div className="flex flex-1 overflow-hidden items-center gap-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 min-w-0">
         {isModular ? (
           <button
             type="button"

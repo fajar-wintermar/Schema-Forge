@@ -1,7 +1,7 @@
 # SchemaForge — DBML Viewer, ER Diagrammer & Database Docs Studio
 <div>
 <img align="left" src="public/pwa-192x192.png" width="100">
-<b>SchemaForge</b> is an interactive DBML (Database Markup Language) editor, ER diagrammer, and engineering documentation studio built for teams working on complex, multi-domain schemas. It pairs a modular CodeMirror 6 DBML workspace with business-domain clustering, visual decluttering tools, dbdocs-style documentation, local-first IndexedDB persistence, optional Cloudflare D1 cloud sync, shareable read-only schema links, and two-way GitHub repository synchronization.
+<b>SchemaForge</b> is an interactive DBML (Database Markup Language) editor, ER diagrammer, and engineering documentation studio built for teams working on complex, multi-domain schemas. It pairs a modular CodeMirror 6 DBML workspace with business-domain clustering, visual decluttering tools, dbdocs-style documentation, local-first encrypted IndexedDB persistence, optional Cloudflare D1 / SQLite cloud sync, shareable read-only schema links, and two-way GitHub repository synchronization—structured on a Clean Architecture core shared across Node.js, Cloudflare Workers, and Cloudflare Pages.
 <br clear="left"/>
 <br clear="left"/>
 </div>
@@ -9,7 +9,7 @@
 ## Key Features
 
 ### DBML Editor, Quality Linter & Modular Schemas
-- **CodeMirror 6 IDE Experience**: Custom DBML syntax highlighting, multi-cursor editing, collapsible code folding (`Table`, `TableGroup`, `TablePartial`, `Note`), bracket matching, **Word Wrap toggle (`Alt+Z` / `⌥Z`)**, context-aware autocomplete (`Ctrl+Space`), real-time syntax & semantic diagnostics, **Find** (`⌘F` / `Ctrl+F`), **Find & Replace** (`⌘H` / `Ctrl+H`), and **Go to Line** (`⌘G` / `Ctrl+G`).
+- **CodeMirror 6 IDE Experience**: Custom DBML syntax highlighting, multi-cursor editing, collapsible code folding (`Table`, `TableGroup`, `TablePartial`, `Note`), bracket matching, **Word Wrap toggle (`Alt+Z` / `⌥Z`)**, context-aware autocomplete (`Ctrl+Space`), real-time syntax & semantic diagnostics, **Find** (`⌘F` / `Ctrl+F`), **Find & Replace** (`⌘H` / `Ctrl+H`), **Go to Line** (`⌘G` / `Ctrl+G`), resizable split pane, maximize/restore (`⌘⇧E`), and minimize rail (`⌘\`).
 - **Schema Quality Linter & Best-Practice Analyzer**: Non-blocking diagnostics drawer in the editor footer flagging unindexed foreign-key columns, tables missing primary keys, inconsistent `snake_case`/`camelCase` naming, nullable unique keys, and multi-table circular FK cycles—with severity filters (`All` / `Warn` / `Info`) and click-to-jump to the exact line and canvas column.
 - **Full DBML Spec Support**:
   - `Table`, `Enum`, `Ref` (inline and block relationships with `delete`, `update`, and `color` metadata)
@@ -40,7 +40,7 @@
 ### Local-First Persistence, Offline PWA, Cloud Sync & Shareable Links
 - **Installable Offline PWA**: Includes Web App Manifest, Service Worker app-shell precaching (`vite-plugin-pwa`), desktop/mobile **Install App** prompt (plus iOS Safari Add to Home Screen guide), and live offline connectivity indicator—so you can install SchemaForge to your computer and keep editing, diagramming, and exporting even without internet.
 - **Local-First Encrypted IndexedDB Storage**: Works offline out of the box—persists workspaces, diagram coordinates, sticky notes, GitHub link metadata, and version snapshots in browser **IndexedDB** (`SchemaForgeLocalDB`), encrypted at rest with non-extractable **AES-256-GCM** Web Crypto keys.
-- **Optional Cloud Workspaces (Cloudflare D1)**: Sign in with GitHub to sync workspaces, layout positions, sticky notes, and saved versions across devices via **Cloudflare D1** (or local SQLite in Node.js development).
+- **Optional Cloud Workspaces (Cloudflare D1 / Node.js SQLite)**: Sign in with GitHub to sync workspaces, layout positions, sticky notes, and saved versions across devices via **Cloudflare D1** (or local `node:sqlite` in Node.js self-hosted/dev mode).
 - **Shareable View-Only Links (`/share/:token` & `/share/:token/:versionTag`)**: Generate and edit clean view-only Docs and ER Diagram URLs pointing either to the live workspace or pinned to a published version (e.g., `v1.2.0`), with preset or custom date/time expiration, one-click revocation, and a per-link toggle to enable or disable **PNG / SVG** diagram exports. Viewers can inspect docs, browse and temporarily rearrange the diagram layout, and export PNG/SVG snapshots (when enabled) without copying or accessing the underlying DBML source.
 - **Version History, Changelog & Incremental SQL Migrations (`ALTER`)**: Save draft or published snapshots (`⌘S` / `Ctrl+S`), revert with automatic pre-revert checkpoints, inspect semantic or raw line-by-line diffs between any two snapshots, and generate syntax-highlighted **Incremental SQL Migrations** (`ALTER TABLE ... ADD/DROP/ALTER COLUMN`, `CREATE/DROP INDEX`, enum updates, and `ALTER TABLE ... FOREIGN KEY` statements) for **PostgreSQL** and **MySQL** with one-click copy and `.sql` download.
 
@@ -51,6 +51,11 @@
   - **Import**: DBML, PostgreSQL/MySQL/SQL DDL (`CREATE TABLE`, `ALTER TABLE ... FOREIGN KEY`), CSV column definitions, and remote `.dbml` URLs.
   - **Export**: DBML, PostgreSQL/MySQL DDL, CSV data dictionary, **SVG**, and **high-resolution PNG** — export the **All Domains & Tables** workspace or scope any export strictly to **Selected Domains** (including **Ungrouped** tables).
 
+### Architecture, Security & Production Hardening
+- **Clean Architecture & Shared Domain Kernel**: Framework-free `@shared/domain/*` kernel (DBML lexer/parser/mutators, GitHub target parser, share expiration rules, core schema types) consumed across both backend (`server/domain/`, `server/application/`, `server/infrastructure/`, `server/presentation/`) and frontend (`src/services/`, `src/hooks/`, `src/features/`, `src/components/`).
+- **Resilient Frontend State**: Root and feature-level React `ErrorBoundary` isolation, standardized async `loading`/`error`/`empty` states, and `AbortController` cancellation inside dedicated hooks (`src/hooks/` and `src/features/*/hooks/`) with zero direct network calls inside UI components.
+- **Hardened HTTP & Runtime Guarantees**: Startup Zod environment validation (`server/infrastructure/config/serverEnv.ts`), `@hono/zod-validator` request/header validation, `secureHeaders()`, explicit origin `cors()`, `hono-rate-limiter` + `bodyLimit()` (256 KB on auth/URL/AI routes; 10 MB on workspace routes), sanitized `app.onError`, SSRF-safe remote URL fetching, parameterized SQL queries, `/healthz` DB connectivity check, and graceful `SIGTERM`/`SIGINT` HTTP + DB shutdown.
+
 ### Product Tiering & Roadmap
 - See [`ROADMAP.md`](./ROADMAP.md) for current product pros & cons, **Essential** (local-first solo studio) vs. **Premium** (team, CI/CD & cloud platform) feature separation, and upcoming engineering milestones.
 
@@ -60,16 +65,16 @@
 
 | Layer | Technology | Purpose |
 | --- | --- | --- |
-| **UI Framework** | [React 19](https://react.dev/) + [TypeScript](https://www.typescriptlang.org/) | Modular feature architecture and strict static typing |
+| **UI Framework** | [React 19](https://react.dev/) + [TypeScript](https://www.typescriptlang.org/) | Decomposed feature modules, Error Boundaries, and strict static typing |
 | **Build Tool & PWA** | [Vite 8](https://vite.dev/) (`@vitejs/plugin-react`, `vite-plugin-pwa`) | Fast bundling, dev middleware integration, Web App Manifest, and offline Service Worker precaching |
 | **Styling & Motion** | [Tailwind CSS v4](https://tailwindcss.com/) (`@tailwindcss/vite`) + [Motion](https://motion.dev/) | Utility-first styling, dark/light themes, and smooth UI transitions |
 | **Code Editor** | [CodeMirror 6](https://codemirror.net/) (`@codemirror/*`, `@lezer/highlight`) | Multi-cursor DBML editor, custom syntax highlighting, folding, linting, and search |
 | **Icons** | [Lucide React](https://lucide.dev/) | Vector icons across editor, canvas, docs, and modals |
-| **API & Edge Backend** | [Hono 4](https://hono.dev/) (`hono`, `@hono/node-server`) | Unified `/api/*` router running on Cloudflare Workers, Cloudflare Pages Functions, and Node.js |
-| **Cloud & Local Persistence** | [Cloudflare D1](https://developers.cloudflare.com/d1/) + `node:sqlite` + Browser IndexedDB | Local-first offline storage (`SchemaForgeLocalDB`) with optional cross-device D1 sync & sharing |
-| **Auth & Security** | GitHub OAuth + Web Crypto API (`crypto.subtle` AES-GCM) | Stateless encrypted `HttpOnly; Secure; SameSite=None; Partitioned` session cookies, origin checks, and parameterized SQL |
-| **DBML & Diagram Engine** | Custom TypeScript modules (`src/utils/`, `src/features/diagram/`) | DBML parser/validator, quality linter, fuzzy search, semantic diffing, auto-layout, spatial virtualization/LOD, SQL/CSV converters, and SVG/PNG exporter |
-| **Automated Testing** | [Vitest 5](https://vitest.dev/) + [Playwright](https://playwright.dev/) | Unit tests (DBML parsing, modular round-trips, diffs, SQL migrations, linter, canvas geometry/virtualization) + full browser E2E smoke suite |
+| **API & Edge Backend** | [Hono 4](https://hono.dev/) (`hono`, `@hono/node-server`, `@hono/zod-validator`, `hono-rate-limiter`, `zod`) | Clean-Architecture `/api/*` + `/healthz` router running on Cloudflare Workers, Pages Functions, and Node.js |
+| **Cloud & Local Persistence** | [Cloudflare D1](https://developers.cloudflare.com/d1/) + `node:sqlite` + Browser IndexedDB | Local-first offline storage (`SchemaForgeLocalDB`) with optional cross-device D1/SQLite sync & sharing |
+| **Auth & Security** | GitHub OAuth + Web Crypto API (`crypto.subtle` AES-GCM) | Stateless encrypted `HttpOnly; Secure; SameSite=None; Partitioned` session cookies, strict CORS/origin checks, SSRF protection, and parameterized SQL |
+| **Shared Domain & Engine** | `@shared/domain/*` + `src/utils/` + `src/features/diagram/` | Shared DBML lexer/parser/mutators, quality linter, fuzzy search, semantic diffing, auto-layout, spatial virtualization/LOD, SQL/CSV converters, and SVG/PNG exporter |
+| **Automated Testing** | [Vitest 5](https://vitest.dev/) + [Playwright](https://playwright.dev/) | Unit tests (DBML parser, modular round-trips, diffs, SQL migrations, linter, canvas geometry/virtualization) + full browser E2E smoke suite |
 
 ---
 
@@ -83,11 +88,11 @@
 ├── ROADMAP.md                        # Product evaluation, Essential vs. Premium feature matrix & phased roadmap
 ├── vitest.config.ts                  # Vitest unit test runner configuration
 ├── playwright.config.ts              # Playwright E2E smoke test configuration
-├── vite.config.ts                    # Vite configuration (React, Tailwind v4, HMR toggle)
-├── tsconfig.json                     # TypeScript compiler configuration
+├── vite.config.ts                    # Vite configuration (React, Tailwind v4, PWA, @shared alias)
+├── tsconfig.json                     # TypeScript compiler configuration (@shared/* & @/* paths)
 ├── wrangler.jsonc                    # Cloudflare Workers + Static Assets + D1 binding config
-├── worker.ts                         # Cloudflare Worker entry point (/api/* + ASSETS)
-├── server.ts                         # Node.js entry point (@hono/node-server + local SQLite D1 shim)
+├── worker.ts                         # Cloudflare Worker entry point (/api/*, /healthz & ASSETS)
+├── server.ts                         # Node.js launcher calling server/bootstrap/nodeServer.ts
 ├── .env.example                      # Environment variable template
 ├── migrations/
 │   ├── 0001_init.sql                 # Initial D1 schema (users, workspaces, versions, share_links)
@@ -103,62 +108,78 @@
 ├── functions/
 │   └── api/
 │       └── [[route]].ts              # Cloudflare Pages Functions catch-all adapter for Hono
+├── shared/
+│   └── domain/
+│       ├── dbml/                     # Framework-free DBML lexer, parser, mutators & public index
+│       ├── github/                   # GitHub repo/blob/URL target parser
+│       ├── share/                    # Share link expiration calculation & validation helpers
+│       ├── errors.ts                 # Shared domain/application error types
+│       └── schemaTypes.ts            # Core TypeScript domain models (Workspace, ParsedSchema, ShareLink, SchemaDiffResult)
 ├── server/
-│   ├── api.ts                        # Shared Hono API app + automatic D1 migration middleware
-│   ├── types.ts                      # Edge-compatible Bindings, Env, and D1 interface types
+│   ├── types.ts                      # Runtime edge bindings & server environment types
 │   ├── migrations/
 │   │   └── registry.ts               # Auto-generated from migrations/*.sql by sync-migrations.mjs
-│   ├── lib/
-│   │   ├── crypto.ts                 # AES-GCM token encryption & mutating request origin verification
-│   │   ├── dbHelpers.ts              # Parameterized user upsert & workspace/share row serializers
-│   │   ├── githubClient.ts           # GitHub REST API wrapper with timeout & error handling
-│   │   ├── localSqliteD1.ts          # Node.js 22+ built-in node:sqlite adapter implementing D1DatabaseLike
-│   │   └── migrator.ts               # EF Core-style auto-migrator with _schema_migrations history tracking
-│   └── routes/
-│       ├── auth.ts                   # GitHub OAuth login, callback, logout & /api/auth/me
-│       ├── fetchUrl.ts               # Safe remote DBML URL / GitHub blob / Gist proxy
-│       ├── github/                   # GitHub repos, branches, commit history, single-file & folder sync handlers
-│       ├── share.ts                  # Owner share-link management & public read-only /api/share/:token
-│       └── workspaces.ts             # Authenticated /api/workspaces CRUD synced to D1
-└── src/
-    ├── main.tsx                      # Application bootstrap
-    ├── App.tsx                       # Root workspace orchestration & /share/:token routing
-    ├── index.css                     # Global Tailwind v4 styles and scrollbar/editor rules
-    ├── types/
-    │   └── schema.ts                 # Core TypeScript models (Workspace, ParsedSchema, ShareLink, SchemaDiffResult)
-    ├── db/
-    │   ├── localCrypto.ts            # AES-256-GCM sealing/unsealing for local storage
-    │   └── localDb.ts                # Encrypted IndexedDB wrapper for offline workspaces & preferences
-    ├── components/
-    │   ├── BrandLogo.tsx             # Brand mark component
-    │   ├── InspectorDrawer.tsx       # Table, domain, header-color, and sticky-note inspector
-    │   ├── OpenUrlModal.tsx          # Load DBML from raw URL / GitHub / Gist & build ?url= links
-    │   ├── SqlMigrationViewer.tsx    # Incremental ALTER SQL migration viewer (PostgreSQL/MySQL), copy & .sql export
-    │   └── TopBar.tsx                # Responsive grouped navigation: workspace switcher, Cmd+K palette, Sync & I/O menu, Share & Save CTA
-    ├── features/
-    │   ├── app/                      # Global shortcut hook & root app helpers
-    │   ├── command/                  # Global Command Palette modal & fuzzy search engine
-    │   ├── diagram/                  # ER canvas, virtualization/LOD engine, multi-select alignment, FK connector handles, minimap
-    │   ├── docs/                     # dbdocs-style Schema, Domain, Table, Partials, Enums, Refs & Notes views
-    │   ├── editor/                   # CodeMirror 6 DBML editor, QualityLinterPanel, syntax highlighter, folder explorer
-    │   ├── github/                   # GitHub OAuth modal, repo/branch/folder browser, commit SQL migrations, diff preview & push
-    │   ├── markdown/                 # GFM Markdown parser, callouts, read-time & syntax highlighter
-    │   ├── pwa/                      # PWA install prompt hook/button & offline connectivity banner
-    │   ├── share/                    # Read-only SharedViewerPage (/share/:token & /share/:token/:versionTag)
-    │   ├── sidebar/                  # Left sidebar for Domains, Modules, Version History & Schema Changelog (Semantic, SQL ALTER, Raw)
-    │   └── workspace/                # IndexedDB + Cloud D1 workspace store & modals (Workspaces, Share, Scoped Export, Shortcuts)
-    └── utils/
-        ├── dbml/                     # DBML tokenizer, parser, mutators, AST helpers & sample schemas
-        ├── highlight/                # Syntax highlighting utilities for SQL, DBML & code blocks
-        ├── io/                       # Auto-layout, edge geometry, SQL/CSV/DBML converters, SQL ALTER migration generator, SVG/PNG export
-        ├── cloudService.ts           # Client API calls for D1 workspaces & share links
-        ├── remoteService.ts          # Client API calls for auth state, URL proxy & GitHub sync/commits
-        ├── schemaDiff.ts             # Semantic, index, FK, line-level diff & incremental SQL migration generator
-        ├── schemaLinter.ts           # Schema Quality Linter (unindexed FKs, missing PKs, naming drift, nullable uniques, FK cycles)
-        └── schemaModules.ts          # Multi-file .dbml module splitting & merging helpers
-├── tests/
-│   ├── unit/                         # Vitest unit suites (parser, modules, diffs, SQL migrations, linter, canvas geometry & virtualization)
-│   └── e2e/                          # Playwright browser smoke tests (Editor, Diagram, Docs, Share, Linter/Canvas, 160-table Virtualization)
+│   ├── bootstrap/
+│   │   └── nodeServer.ts             # Node.js HTTP + Vite dev/static server, startup env validation & SIGTERM/SIGINT shutdown
+│   ├── domain/
+│   │   ├── entities/                 # Server domain entity & config contracts
+│   │   ├── gateways/                 # Interfaces for AI, GitHub, OAuth, remote fetcher & token cipher
+│   │   ├── policies/                 # Pure domain policies (URL/SSRF safety, user identity, type guards)
+│   │   └── repositories/             # Persistence interfaces (IUserRepository, IWorkspaceRepository, IShareRepository)
+│   ├── application/
+│   │   └── usecases/                 # Pure use-cases for auth, workspaces, shares, github & remote URL fetching
+│   ├── infrastructure/
+│   │   ├── ai/                       # Server-side Gemini AI gateway (@google/genai)
+│   │   ├── config/                   # Zod-validated serverEnv.ts startup configuration
+│   │   ├── github/                   # Fetch-based GitHub REST API & OAuth gateways
+│   │   ├── persistence/
+│   │   │   ├── d1/                   # Cloudflare D1 repositories, row mappers & _schema_migrations auto-migrator
+│   │   │   └── sqlite/               # Node.js built-in node:sqlite adapter implementing D1DatabaseLike
+│   │   ├── remote/                   # Safe HTTP remote DBML fetcher with SSRF guards
+│   │   └── security/                 # AES-GCM token cipher implementation
+│   └── presentation/
+│       └── http/
+│           ├── app.ts                # Hono app: secureHeaders, CORS, /healthz, rate limits, body limits & route mounting
+│           ├── container.ts          # Dependency injection container wiring gateways/repos into use-cases
+│           ├── middleware/           # Zod validation, hono-rate-limiter & sanitized errorMapper
+│           ├── routes/               # Thin HTTP adapters (auth, fetchUrl, github, share, workspaces)
+│           ├── security/             # Explicit CORS origin & cookie/origin helpers
+│           └── views/                # OAuth popup callback HTML template
+├── src/
+│   ├── main.tsx                      # Application bootstrap with root ErrorBoundary
+│   ├── App.tsx                       # Root workspace orchestration & /share/:token routing
+│   ├── index.css                     # Global Tailwind v4 styles and scrollbar/editor rules
+│   ├── services/
+│   │   ├── api/                      # Typed Hono hc<AppType> apiClient, cloudService & remoteService
+│   │   └── storage/                  # AES-256-GCM localCrypto & IndexedDB localDb persistence
+│   ├── hooks/                        # Shared async & UI hooks (useFetchRemoteDbml, useSplitResize, useShareRoute, etc.)
+│   ├── components/                   # Shared UI components (TopBar, WorkspaceViewport, AppModals, InspectorDrawer, OpenUrlModal, SqlMigrationViewer, ErrorBoundary, AsyncStateView)
+│   ├── features/
+│   │   ├── app/                      # Global shortcut hook & root app helpers
+│   │   ├── command/                  # Global Command Palette modal & fuzzy search engine
+│   │   ├── diagram/                  # ER canvas, interaction/viewport/preference hooks, virtualization/LOD engine, alignment bar, minimap
+│   │   ├── docs/                     # dbdocs-style Schema, Domain, Table, Partials, Enums, Refs & Notes views
+│   │   ├── editor/                   # CodeMirror 6 DBML editor, QualityLinterPanel, syntax highlighter, folder explorer
+│   │   ├── github/                   # GitHub OAuth modal, repo/branch/folder browser, commit diff/SQL migrations hook & tabs
+│   │   ├── markdown/                 # GFM Markdown parser, callouts, read-time & syntax highlighter
+│   │   ├── pwa/                      # PWA install prompt hook/button & offline connectivity banner
+│   │   ├── share/                    # Read-only SharedViewerPage & usePublicShareLoader hook
+│   │   ├── sidebar/                  # Left sidebar for Domains, Version History & Schema Changelog (Semantic, SQL ALTER, Raw)
+│   │   └── workspace/                # IndexedDB/Cloud store, useWorkspaceShares hook & modals (ShareModal subcomponents, Workspaces, Import/Export, TableGroup, SaveVersion)
+│   └── utils/
+│       ├── highlight/                # Syntax highlighting utilities for SQL, DBML & code blocks
+│       ├── io/                       # Auto-layout, edge geometry, SQL/CSV/DBML converters, SQL ALTER migration generator, SVG/PNG export
+│       ├── autoLayout.ts             # Domain-aware & group-level auto-layout engine
+│       ├── codeHighlight.ts          # Unified syntax highlight entrypoint
+│       ├── importExport.ts           # Export orchestration helpers (PNG/SVG/SQL/CSV/DBML)
+│       ├── sampleSchemas.ts          # Built-in starter & modular SaaS telemetry schemas
+│       ├── schemaDiff.ts             # Semantic, index, FK, line-level diff & incremental SQL migration generator
+│       ├── schemaLinter.ts           # Schema Quality Linter (unindexed FKs, missing PKs, naming drift, nullable uniques, FK cycles)
+│       ├── schemaModules.ts          # Multi-file .dbml module splitting & merging helpers
+│       └── urlSafety.ts              # Client URL & OAuth origin validation helpers
+└── tests/
+    ├── unit/                         # Vitest unit suites (parser, modules, diffs, SQL migrations, linter, canvas geometry & virtualization)
+    └── e2e/                          # Playwright browser smoke tests (Editor, Diagram, Docs, Share, Linter/Canvas, 160-table Virtualization)
 ```
 
 ---
@@ -178,7 +199,7 @@ npm install
 
 ### 2. Configure Environment *(Optional for Local Editing / Required for GitHub OAuth & Cloud Sync)*
 
-Core editing, diagramming, docs, local IndexedDB workspaces, and loading public DBML URLs work without any configuration. To enable **GitHub OAuth**, **GitHub repository sync**, and **authenticated Cloud Sync / Share Links**:
+Core editing, diagramming, docs, local IndexedDB workspaces, and loading public DBML URLs work without any configuration. To enable **GitHub OAuth**, **GitHub repository sync**, **Cloud Sync / Share Links**, or explicit **CORS origins**:
 
 1. Copy the environment template:
 
@@ -188,7 +209,12 @@ Core editing, diagramming, docs, local IndexedDB workspaces, and loading public 
 
 2. Create a GitHub OAuth App at <https://github.com/settings/developers> with callback URL:
    - `http://localhost:3000/api/auth/github/callback`
-3. Set `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` (and optionally `SESSION_SECRET`) in `.env`.
+3. Configure `.env` as needed:
+   - `GITHUB_CLIENT_ID` and `GITHUB_CLIENT_SECRET` — GitHub OAuth credentials
+   - `SESSION_SECRET` — High-entropy secret (`>= 16` chars; required in production)
+   - `ALLOWED_ORIGIN` / `APP_URL` — Explicit allowed origin(s) and public app URL
+   - `DATABASE_URL` — Optional SQLite path or DSN (defaults to `.data/schemaforge-dev.sqlite` in dev or `.data/schema-forge.sqlite` in production)
+   - `GEMINI_API_KEY` — Optional server-side Gemini API key (validated at startup if set; never exposed to the frontend)
 
 ### 3. Start the Development Server
 
@@ -196,11 +222,11 @@ Core editing, diagramming, docs, local IndexedDB workspaces, and loading public 
 npm run dev
 ```
 
-This runs `tsx server.ts`, starting the Hono API (auto-applying pending migrations from `server/migrations/registry.ts` into `.data/schemaforge-dev.sqlite` with `_schema_migrations` tracking) and Vite dev middleware at **`http://localhost:3000`**.
+This runs `node scripts/sync-migrations.mjs && tsx server.ts`, starting the Hono API (auto-applying pending migrations from `server/migrations/registry.ts` into local SQLite with `_schema_migrations` tracking) and Vite dev middleware at **`http://localhost:3000`**.
 
 ### 4. Type-Check & Lint
 
-Run TypeScript type checking across the frontend, Hono API, and Cloudflare Worker entry points:
+Run migration sync and TypeScript type checking across `shared/`, `server/`, `src/`, `worker.ts`, and `functions/`:
 
 ```bash
 npm run lint
@@ -259,7 +285,7 @@ npm run test:all
 
 ## Deploying to Production
 
-SchemaForge compiles to static frontend assets (`dist/`) paired with a Web-Standard Hono backend (`server/api.ts`) for **Cloudflare Workers + D1**, **Cloudflare Pages**, or **Node.js / Docker**.
+SchemaForge compiles to static frontend assets (`dist/`) paired with a Web-Standard Hono backend (`server/presentation/http/app.ts`) for **Cloudflare Workers + D1**, **Cloudflare Pages**, or **Node.js / Docker**, and exposes `GET /healthz` for database connectivity checks.
 
 ### 1. Verify Type Safety and Build
 
@@ -272,18 +298,19 @@ npm run build
 
 ### 2. Deploy to Cloudflare Workers + D1 (Recommended)
 
-`wrangler.jsonc` is preconfigured for **Cloudflare Workers with Static Assets** and **Cloudflare D1** (`run_worker_first: ["/api/*"]`, `not_found_handling: "single-page-application"`, and `migrations_dir: "migrations"`).
+`wrangler.jsonc` is preconfigured for **Cloudflare Workers with Static Assets** and **Cloudflare D1** (`run_worker_first: ["/api/*", "/healthz"]`, `not_found_handling: "single-page-application"`, and `migrations_dir: "migrations"`).
 
 #### A. Provision D1 (if deploying a new fork/account)
 1. Create a D1 database (`npx wrangler d1 create schema-forge-db` or via **Cloudflare Dashboard → Storage & Databases → D1 SQL Database**) and set its `database_id` in `wrangler.jsonc` (or bind `DB` in Worker Settings).
-2. **SQL-Driven Automatic Migrations (`migrations/*.sql` → `_schema_migrations`)**: Simply add numbered `.sql` files in `migrations/` (e.g., `0002_add_feature.sql`). Running `npm run build` (including inside Cloudflare Workers Builds) automatically parses `migrations/*.sql` into `server/migrations/registry.ts`, and on the first request after deploy, pending migrations apply atomically and record themselves in `_schema_migrations`. You can also optionally run `npx wrangler d1 migrations apply schema-forge-db --remote` if using Wrangler CLI.
+2. **SQL-Driven Automatic Migrations (`migrations/*.sql` → `_schema_migrations`)**: Simply add numbered `.sql` files in `migrations/` (e.g., `0003_add_feature.sql`). Running `npm run build` (including inside Cloudflare Workers Builds) automatically parses `migrations/*.sql` into `server/migrations/registry.ts`, and on the first request after deploy, pending migrations apply atomically and record themselves in `_schema_migrations`. You can also optionally run `npx wrangler d1 migrations apply schema-forge-db --remote` if using Wrangler CLI.
 
 #### B. Configure Secrets & GitHub OAuth Callback
 Add the following **Variables and Secrets** in the Cloudflare Dashboard (**Worker → Settings → Variables and Secrets**) or via Wrangler CLI:
 - `GITHUB_CLIENT_ID` — GitHub OAuth App Client ID
 - `GITHUB_CLIENT_SECRET` — GitHub OAuth App Client Secret
-- `SESSION_SECRET` *(recommended)* — Random secret string for encrypting session cookies across Worker isolates
-- `APP_URL` *(optional)* — Only required if serving behind a custom reverse-proxy origin
+- `SESSION_SECRET` — High-entropy secret string for encrypting session cookies across Worker isolates
+- `ALLOWED_ORIGIN` *(recommended)* — Explicit allowed browser origin(s) for CORS & mutating requests
+- `APP_URL` *(optional)* — Public app URL if serving behind a custom reverse-proxy origin
 
 Register your production callback URL in **GitHub Developer Settings → OAuth Apps**:
 - `https://<your-worker-subdomain-or-custom-domain>/api/auth/github/callback`
@@ -309,18 +336,18 @@ Register your production callback URL in **GitHub Developer Settings → OAuth A
    - **Build command**: `npm run build`
    - **Build output directory**: `dist`
 2. Bind your D1 database as `DB` under **Pages → Settings → Bindings** (if using Cloud Sync & Shareable Links) and apply migrations with `npx wrangler d1 migrations apply <db-name> --remote`.
-3. Add `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, and `SESSION_SECRET` under **Pages → Settings → Environment variables**.
+3. Add `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET`, `SESSION_SECRET`, and `ALLOWED_ORIGIN` under **Pages → Settings → Environment variables**.
 4. Register `https://<your-pages-project>.pages.dev/api/auth/github/callback` in your GitHub OAuth App settings.
 
 ---
 
 ### 4. Deploy with Node.js / Docker
 
-To self-host `server.ts` with Node.js `>= 22.x` (SQLite persistence is stored at `LOCAL_SQLITE_PATH` or `.data/schema-forge.sqlite`):
+To self-host `server.ts` with Node.js `>= 22.x` (SQLite persistence is configured via `DATABASE_URL` or defaults to `.data/schema-forge.sqlite`, with `/healthz` health probing and graceful `SIGTERM`/`SIGINT` shutdown):
 
 ```bash
 npm run build
-NODE_ENV=production npm start
+NODE_ENV=production SESSION_SECRET=replace-with-strong-secret npm start
 ```
 
 Example `Dockerfile`:
@@ -340,6 +367,7 @@ COPY --from=builder /app/package*.json ./
 RUN npm ci --omit=dev
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/migrations ./migrations
+COPY --from=builder /app/shared ./shared
 COPY --from=builder /app/server.ts ./server.ts
 COPY --from=builder /app/server ./server
 EXPOSE 3000
@@ -348,8 +376,17 @@ CMD ["node", "server.ts"]
 
 ---
 
-### Clean Build Artifacts
+## Scripts Reference
 
-```bash
-npm run clean
-```
+| Script | Command | Description |
+| --- | --- | --- |
+| `sync:migrations` | `node scripts/sync-migrations.mjs` | Generates `server/migrations/registry.ts` from `migrations/*.sql` |
+| `dev` | `node scripts/sync-migrations.mjs && tsx server.ts` | Starts Hono + Vite dev server on port `3000` |
+| `start` | `node server.ts` | Runs production Node.js server (`dist/` + `/api/*` + `/healthz`) |
+| `build` | `node scripts/sync-migrations.mjs && vite build` | Syncs SQL migrations and builds static + PWA bundle into `dist/` |
+| `lint` | `node scripts/sync-migrations.mjs && tsc --noEmit` | Runs full-project TypeScript type checking |
+| `test` | `vitest run` | Runs unit test suite |
+| `test:watch` | `vitest` | Runs unit tests in watch mode |
+| `test:e2e` | `playwright test` | Runs Playwright browser E2E smoke suite |
+| `test:all` | `vitest run && playwright test` | Runs both Vitest and Playwright suites |
+| `clean` | `rm -rf dist server.js` | Cleans build artifacts |

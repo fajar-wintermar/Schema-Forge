@@ -380,7 +380,9 @@ export const DbmlEditor: React.FC<DbmlEditorProps> = ({
   return (
     <div
       ref={editorWrapperRef}
-      className="relative flex flex-col h-full bg-white dark:bg-slate-950 border-r border-slate-200 dark:border-slate-800"
+      className={`relative flex-1 w-full min-w-0 flex flex-col h-full overflow-hidden bg-white dark:bg-slate-950 ${
+        isMaximized ? '' : 'border-r border-slate-200 dark:border-slate-800'
+      }`}
     >
       <EditorToolbar
         isModular={isModular}

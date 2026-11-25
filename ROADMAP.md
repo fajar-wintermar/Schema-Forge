@@ -1,13 +1,16 @@
 # SchemaForge Product Roadmap & Feature Tiering
 
-> Updated product assessment, **Essential vs. Premium** feature separation, and readjusted phased roadmap for evolving **SchemaForge** from a local-first DBML studio into a tiered team & enterprise schema engineering platform.
+> Updated product assessment, **Essential vs. Premium** feature separation, and phased roadmap reflecting **SchemaForge**'s current Clean Architecture codebase, security/production hardening, and upcoming team & ecosystem milestones.
 
 ---
 
 ## 1. Current State Assessment
 
 ### Strengths (Pros)
-- **Unified Text + Diagram + Docs Studio**: A single DBML source drives the CodeMirror 6 IDE (`Alt+Z` word wrap, code folding, autocomplete, find/replace, go-to-line), interactive ERD canvas, and `dbdocs`-style engineering documentation portal with Global Command Palette (`⌘K` / `Ctrl+K`).
+- **Clean Architecture & Shared Domain Kernel**: Framework-free `@shared/domain/*` kernel (DBML lexer/parser/mutators, GitHub target parser, share expiration rules, core schema types) shared across Node.js (`server.ts`), Cloudflare Workers (`worker.ts`), Pages Functions (`functions/api/[[route]].ts`), and the React SPA—with strict backend layering (`domain/`, `application/`, `infrastructure/`, `presentation/http/`) and frontend separation (`services/`, `hooks/`, decomposed `features/` and `components/`).
+- **Resilient, Decomposed Frontend UX**: Root and feature-scoped React `ErrorBoundary` fallbacks, consistent async `loading`/`error`/`empty` states, `AbortController` race-condition protection isolated in dedicated hooks (`src/hooks/`, `src/features/*/hooks/`), and modularized editor, diagram, docs, and sharing subcomponents.
+- **Production & Security Hardening**: Startup Zod environment validation (`server/infrastructure/config/serverEnv.ts`), `@hono/zod-validator` payload & header validation, `secureHeaders()`, explicit origin `cors()`, `hono-rate-limiter`, tiered `bodyLimit()` protections, sanitized global `onError` responses, SSRF-safe remote URL fetching, parameterized D1/SQLite queries, `/healthz` DB probes, and graceful `SIGTERM`/`SIGINT` shutdown.
+- **Unified Text + Diagram + Docs Studio**: A single DBML source drives the resizable/maximizable CodeMirror 6 IDE (`Alt+Z` word wrap, code folding, autocomplete, find/replace, go-to-line), interactive ERD canvas, and `dbdocs`-style engineering documentation portal with Global Command Palette (`⌘K` / `Ctrl+K`).
 - **Lossless Modular DBML & Real GitHub Sync**: Supports `schema/*.dbml` modules with custom nested subfolders, lossless Flatten/Split round-tripping, toggleable Explorer, cross-file diagnostic jumps, branch creation/switching, batched Git commits, and commit history comparison.
 - **Enterprise-Scale 150+ Table Canvas Virtualization**: Tile-quantized spatial viewport culling, 3-tier automatic Level-of-Detail (`full` / `compact` / `minimal`), `requestAnimationFrame`-coalesced 60fps panning/zooming, live minimap camera viewport frame, marquee/Shift multi-select, real-time snap alignment guides, align/distribute actions, and drag-to-connect FK creation.
 - **Domain-First Visual Organization**: `TableGroup` containers, explicit **Ungrouped** filtering and domain-scoped exports (without altering Docs), multi-domain shared tables, Focus Neighborhood (`F`), Curved/Orthogonal edge routing, Cross-Domain Show/Bundle/Hide, custom header colors, and sticky notes.
@@ -18,14 +21,15 @@
 ### Current Limitations (Cons)
 - **Direct-Push GitHub Flow & Layout Outside Git**: Pushes commits cleanly to branches, but lacks an in-app **Create Branch & Open Pull Request** flow and does not yet persist `tablePositions` / `stickyNotes` inside `.schemaforge/layout.json` in Git.
 - **DBML + PostgreSQL/MySQL Format Boundaries**: Supports DBML, PG/MySQL DDL, SQL migrations, CSV, SVG, and PNG, while modern ORM/API formats (**Prisma**, **Drizzle**, **TypeORM**, **SQLAlchemy**, **OpenAPI**) and standalone **static HTML/Markdown doc bundles** are not yet supported.
+- **AI Gateway Scaffolded Without Live Product Workflows**: Server-side `IAiGateway` / `GeminiAiGateway` infrastructure and rate-limited `/api/ai/*` & `/api/gemini/*` guards are in place, but AI-assisted schema generation, documentation drafting, or SQL migration review features are not yet wired into the application or UI.
 - **No Live DB Introspection or CI/CD Automation**: Static parsing and diagnostics work offline, but there is no CLI (`npx schemaforge`) or GitHub Action yet to introspect live databases, detect schema drift, or post PR diff previews automatically.
-- **Single-Player Collaboration & Missing Entitlement Layer**: Share links are view-only and sticky notes are standalone (no threaded PR review comments, live presence, or workspace RBAC). Additionally, cloud sync, versioned share portals, and commit-level migrations exist in code without a formal **Essential vs. Premium** entitlement boundary or org/seat management.
+- **Single-Player Collaboration & Missing Entitlement Layer**: Share links are view-only and sticky notes are standalone (no threaded PR review comments, live presence, or workspace RBAC). Cloud sync, versioned share portals, and commit-level migrations exist without a formal **Essential vs. Premium** entitlement boundary or org/seat management.
 
 ---
 
 ## 2. Feature Separation: Essential vs. Premium
 
-*Packaging Principle: **Essential** delivers a complete, fast, zero-friction local-first DBML studio so solo developers never hit annoying paywalls on core modeling or canvas performance. **Premium** monetizes team workflows, cloud hosting, ecosystem codegen, CI/CD automation, and governance.*
+*Packaging Principle: **Essential** delivers a complete, fast, zero-friction local-first DBML studio so solo developers never hit paywalls on core modeling or canvas performance. **Premium** monetizes team workflows, cloud hosting, ecosystem codegen, AI/CI/CD automation, and governance.*
 
 | Capability Area | Essential *(Core / Free Local-First)* | Premium *(Team / Cloud / Enterprise)* |
 | --- | --- | --- |
@@ -35,12 +39,12 @@
 | **Quality & Diffs** | Core **5-rule Schema Quality Linter** (unindexed FK, missing PK, naming drift, nullable unique, FK cycles) + visual semantic diff between local drafts *(Delivered)* | **Breaking-Change Risk Analyzer** (lock/data-loss checks), custom team lint severity enforcement, and PR diff reports *(Planned)* |
 | **SQL & Code Import / Export** | Import DBML, PG/MySQL `CREATE TABLE`, CSV, URL; Export DBML, PG/MySQL DDL, CSV, PNG, SVG (including domain-scoped export) *(Delivered)* | **Incremental `ALTER` Migration Studio** across Git commits & snapshots *(Delivered — move to Team/Pro tier)*; **ORM & API Importers/Exporters** (Prisma, Drizzle, TypeORM, SQLAlchemy, OpenAPI, Mermaid) & **Static HTML/MD Docs Bundles** *(Planned)* |
 | **Engineering Docs & Search** | Full `dbdocs`-style local Docs Portal, GFM Markdown notes, Global Command Palette (`⌘K`) *(Delivered)* | **Private Hosted Team Docs Portals**, custom branding/domains, and **Shareable Versioned Links** with expiration, revocation & export controls *(Delivered — tier gate planned)* |
-| **Persistence & Sync** | Local-first **AES-256-GCM IndexedDB**, offline **PWA** install, local version snapshots (`⌘S`) *(Delivered)* | **Cloudflare D1 Cross-Device Cloud Sync**, **Workspace RBAC** (Owner/Editor/Viewer), **SSO/SAML**, and **Audit Logs** *(Sync Delivered; RBAC/SSO Planned)* |
+| **Persistence, Security & Sync** | Local-first **AES-256-GCM IndexedDB**, offline **PWA** install, local version snapshots (`⌘S`) *(Delivered)* | **Cloudflare D1 / SQLite Cloud Sync**, **Workspace RBAC** (Owner/Editor/Viewer), **SSO/SAML**, and **Audit Logs** *(Sync Delivered; RBAC/SSO Planned)* |
 | **Git, CI/CD & Live DB** | Basic **GitHub Single-File Pull/Push** & URL loader (`?url=`) *(Delivered)* | **Multi-File `schema/` Batch Git Sync** *(Delivered)*, **Open PR with Semantic Diff** *(Planned)*, **GitLab/Bitbucket**, **SchemaForge CLI & GitHub Action**, and **Live DB Introspection + Drift Detection** *(Planned)* |
 
 ---
 
-## 3. Readjusted Phased Product Roadmap
+## 3. Phased Product & Engineering Roadmap
 
 ### Phase 1 — Core Studio, Spec Parity & Virtualization (`Essential` — Completed)
 *Goal: Best-in-class offline-capable DBML editor, documenter, and high-scale diagrammer.*
@@ -53,12 +57,14 @@
 
 ---
 
-### Phase 2 — Cloud Foundations, Migrations & Hosted Sharing (`Premium Foundations` — Completed)
-*Goal: Establish cloud persistence, clean read-only sharing, and SQL migration tooling.*
+### Phase 2 — Cloud Foundations, Hardening & Clean Architecture (`Completed`)
+*Goal: Establish cloud persistence, clean sharing, security hardening, and maintainable Clean Architecture.*
 - [x] **Incremental SQL Migration (`ALTER`) Generator** (PostgreSQL & MySQL `ALTER TABLE`, indexes, enums, FKs between snapshots and Git commits)
-- [x] **Optional Cloud Workspaces & GitHub OAuth** (Cloudflare D1 / Node SQLite sync across devices)
+- [x] **Optional Cloud Workspaces & GitHub OAuth** (Cloudflare D1 / Node.js `node:sqlite` sync across devices)
 - [x] **Shareable Read-Only Docs & Diagram Links** (`/share/:token` with version pinning, expiration, revocation, and PNG/SVG export toggles)
 - [x] **Two-Way GitHub Multi-File `schema/` Sync** (Batched folder commits, branch management, and commit SHA comparison)
+- [x] **Security & Production Hardening** (Zod startup `serverEnv`, `@hono/zod-validator`, `secureHeaders()`, strict `cors()`, `hono-rate-limiter`, `bodyLimit()`, sanitized `onError`, `/healthz` DB probe, graceful `SIGTERM` shutdown)
+- [x] **Full Clean Architecture & Frontend Refactor** (`@shared/domain/*` kernel, `server/{domain,application,infrastructure,presentation}`, `src/{services,hooks,features,components}`, Error Boundaries, `AbortController` hooks, and decomposed `DiagramCanvas` / `ShareModal`)
 
 ---
 
@@ -85,10 +91,12 @@
 
 ---
 
-### Phase 5 — Multiplayer Review & Enterprise Governance (`Scale`)
-*Goal: Full team review collaboration and multi-provider enterprise compliance.*
+### Phase 5 — Multiplayer Review, AI Workflows & Enterprise Governance (`Scale`)
+*Goal: Full team review collaboration, AI-assisted schema modeling, and multi-provider enterprise compliance.*
 - [ ] **Anchored Review Comments & Live Presence** `[Premium]`
   - Upgrade sticky notes into threaded, resolvable review comments anchored to specific tables, columns, or PR branches, with optional live cursors.
+- [ ] **Server-Side AI Schema Copilot (on `IAiGateway`)** `[Premium]`
+  - Wire the existing `GeminiAiGateway` infrastructure into explicit opt-in workflows (NL-to-DBML drafting, migration safety explanations, and table/column doc suggestions).
 - [ ] **Multi-VCS Adapters & Enterprise Governance** `[Premium]`
   - Add **GitLab** and **Bitbucket** adapters via a shared repository provider interface, **SSO/SAML**, custom team linter policies, custom-domain share portals, and audit logs.
 
@@ -100,4 +108,4 @@
 2. **Prisma / Drizzle / OpenAPI Importers & ORM/Static Docs Bundle Exporters** — Strongest top-of-funnel growth and clear Premium conversion driver for TypeScript/Python backend teams.
 3. **Tier Entitlement Config + Workspace RBAC** — Establishes clean separation between free local-first features and paid Team/Cloud capabilities before launching hosted plans.
 4. **SchemaForge CLI / GitHub Action & Live DB Introspection Bridge** — Locks SchemaForge into daily CI/CD and production database workflows.
-5. **Anchored Review Comments, Live Presence & Multi-VCS** — Rounds out the multiplayer collaboration and enterprise tier.
+5. **Anchored Review Comments, AI Copilot & Multi-VCS** — Rounds out multiplayer collaboration, AI-assisted workflows, and the enterprise tier.
