@@ -85,9 +85,11 @@ export function getAllowedOrigins(c: ApiContext): Set<string> {
     }
   }
 
+  const singleOrigin = getEnv(c, 'ALLOWED_ORIGIN');
   const extraOrigins = getEnv(c, 'ALLOWED_ORIGINS');
-  if (extraOrigins) {
-    for (const raw of extraOrigins.split(',')) {
+  const combinedOrigins = [singleOrigin, extraOrigins].filter(Boolean).join(',');
+  if (combinedOrigins) {
+    for (const raw of combinedOrigins.split(',')) {
       const trimmed = raw.trim();
       if (!trimmed || trimmed === '*') continue;
       try {

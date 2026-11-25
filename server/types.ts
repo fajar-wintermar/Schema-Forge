@@ -27,7 +27,11 @@ export interface D1DatabaseLike {
 }
 
 export interface AppEnv {
+  NODE_ENV?: string;
+  DATABASE_URL?: string;
+  GEMINI_API_KEY?: string;
   APP_URL?: string;
+  ALLOWED_ORIGIN?: string;
   ALLOWED_ORIGINS?: string;
   GITHUB_CLIENT_ID?: string;
   GITHUB_CLIENT_SECRET?: string;

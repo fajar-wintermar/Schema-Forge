@@ -15,6 +15,40 @@ function toSqlValue(value: unknown): SQLInputValue {
   return String(value);
 }
 
+function resolveSqliteDatabasePath(configuredUrl?: string): string {
+  const raw = (configuredUrl ?? process.env.DATABASE_URL ?? '').trim();
+  if (!raw) {
+    return path.resolve(process.cwd(), '.data', 'schemaforge-dev.sqlite');
+  }
+  if (raw.includes('\0')) {
+    throw new Error('Invalid DATABASE_URL: null byte is not allowed.');
+  }
+  if (raw === ':memory:' || raw === 'sqlite::memory:') {
+    return ':memory:';
+  }
+  if (/^(postgres(ql)?|mysql|mariadb|mssql):\/\//i.test(raw)) {
+    throw new Error(
+      'Unsupported DATABASE_URL scheme for built-in SQLite adapter.'
+    );
+  }
+
+  let fileTarget = raw;
+  if (raw.startsWith('sqlite://')) {
+    fileTarget = raw.slice('sqlite://'.length);
+  } else if (raw.startsWith('file:')) {
+    try {
+      fileTarget = decodeURIComponent(new URL(raw).pathname);
+    } catch {
+      fileTarget = raw.replace(/^file:(\/\/)?/, '');
+    }
+  }
+
+  if (!fileTarget) {
+    throw new Error('Invalid DATABASE_URL: empty SQLite file path.');
+  }
+  return path.resolve(process.cwd(), fileTarget);
+}
+
 class LocalSqlitePreparedStatement implements D1PreparedStatementLike {
   private readonly db: DatabaseSync;
   private readonly query: string;
@@ -69,17 +103,21 @@ class LocalSqlitePreparedStatement implements D1PreparedStatementLike {
 }
 
 let cachedDb: D1DatabaseLike | null = null;
+let cachedSqlite: DatabaseSync | null = null;
 
-export function getLocalD1Database(): D1DatabaseLike {
+export function getLocalD1Database(databaseUrl?: string): D1DatabaseLike {
   if (cachedDb) return cachedDb;
 
-  const dataDir = path.resolve(process.cwd(), '.data');
-  fs.mkdirSync(dataDir, { recursive: true });
-  const dbPath = path.join(dataDir, 'schemaforge-dev.sqlite');
+  const dbPath = resolveSqliteDatabasePath(databaseUrl);
+  if (dbPath !== ':memory:') {
+    fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  }
 
   const sqlite = new DatabaseSync(dbPath);
+  sqlite.exec('PRAGMA busy_timeout = 5000;');
   sqlite.exec('PRAGMA journal_mode = WAL;');
   sqlite.exec('PRAGMA foreign_keys = ON;');
+  cachedSqlite = sqlite;
 
   cachedDb = {
     prepare(query: string): D1PreparedStatementLike {
@@ -105,4 +143,19 @@ export function getLocalD1Database(): D1DatabaseLike {
   };
 
   return cachedDb;
+}
+
+export function closeLocalD1Database(): void {
+  if (!cachedSqlite) return;
+  try {
+    cachedSqlite.exec('PRAGMA wal_checkpoint(TRUNCATE);');
+  } catch {
+    // Ignore WAL checkpoint errors during shutdown
+  }
+  try {
+    cachedSqlite.close();
+  } finally {
+    cachedSqlite = null;
+    cachedDb = null;
+  }
 }

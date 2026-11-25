@@ -4,8 +4,13 @@ import http from 'node:http';
 import path from 'node:path';
 import { getRequestListener } from '@hono/node-server';
 import { api } from './server/api';
-import { getLocalD1Database } from './server/lib/localSqliteD1';
+import { validateServerEnv } from './server/env';
+import {
+  closeLocalD1Database,
+  getLocalD1Database,
+} from './server/lib/localSqliteD1';
 import { ensureMigrations } from './server/lib/migrator';
+import { shutdownRateLimiters } from './server/lib/rateLimit';
 
 function readCliFlag(flag: string): string | undefined {
   const args = process.argv.slice(2);
@@ -16,14 +21,6 @@ function readCliFlag(flag: string): string | undefined {
   }
   return undefined;
 }
-
-const cliPort = readCliFlag('--port');
-const PORT = Number(
-  cliPort ||
-    (process.env.NODE_ENV === 'production' ? process.env.PORT : undefined) ||
-    3000
-);
-const HOST = readCliFlag('--host') || process.env.HOST || '0.0.0.0';
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -41,14 +38,101 @@ const MIME_TYPES: Record<string, string> = {
   '.ico': 'image/x-icon',
 };
 
+function isHonoPath(rawUrl: string): boolean {
+  const urlPath = rawUrl.split('?')[0];
+  return urlPath === '/healthz' || urlPath.startsWith('/api/');
+}
+
+function setupGracefulShutdown(options: {
+  server: http.Server;
+  closeVite?: () => Promise<void>;
+}) {
+  let shuttingDown = false;
+
+  const handleSignal = async (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`[server] Received ${signal}. Starting graceful shutdown...`);
+
+    const forceTimer = setTimeout(() => {
+      console.error('[server] Graceful shutdown timed out; forcing exit.');
+      closeLocalD1Database();
+      process.exit(1);
+    }, 10_000);
+    forceTimer.unref();
+
+    let exitCode = 0;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        options.server.close((err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+        options.server.closeIdleConnections?.();
+      });
+    } catch (err) {
+      console.error('[server] Error closing HTTP server:', err);
+      exitCode = 1;
+    }
+
+    if (options.closeVite) {
+      try {
+        await options.closeVite();
+      } catch (err) {
+        console.error('[server] Error closing Vite dev server:', err);
+        exitCode = 1;
+      }
+    }
+
+    try {
+      shutdownRateLimiters();
+      closeLocalD1Database();
+    } catch (err) {
+      console.error('[server] Error closing database connection:', err);
+      exitCode = 1;
+    }
+
+    clearTimeout(forceTimer);
+    console.log('[server] Shutdown complete.');
+    process.exit(exitCode);
+  };
+
+  process.once('SIGTERM', () => {
+    void handleSignal('SIGTERM');
+  });
+  process.once('SIGINT', () => {
+    void handleSignal('SIGINT');
+  });
+}
+
 async function startServer() {
-  const localDb = getLocalD1Database();
+  const validatedEnv = validateServerEnv(process.env);
+  const cliPort = readCliFlag('--port');
+  const PORT = Number(
+    cliPort ||
+      (validatedEnv.NODE_ENV === 'production' ? validatedEnv.PORT : undefined) ||
+      3000
+  );
+  const HOST = readCliFlag('--host') || process.env.HOST || validatedEnv.HOST;
+
+  const localDb = getLocalD1Database(validatedEnv.DATABASE_URL);
   await ensureMigrations(localDb);
   const honoListener = getRequestListener((request) =>
-    api.fetch(request, { DB: localDb })
+    api.fetch(request, {
+      NODE_ENV: validatedEnv.NODE_ENV,
+      DATABASE_URL: validatedEnv.DATABASE_URL,
+      GEMINI_API_KEY: validatedEnv.GEMINI_API_KEY,
+      APP_URL: validatedEnv.APP_URL,
+      ALLOWED_ORIGIN: validatedEnv.ALLOWED_ORIGIN,
+      ALLOWED_ORIGINS: validatedEnv.ALLOWED_ORIGINS,
+      GITHUB_CLIENT_ID: validatedEnv.GITHUB_CLIENT_ID,
+      GITHUB_CLIENT_SECRET: validatedEnv.GITHUB_CLIENT_SECRET,
+      SESSION_SECRET: validatedEnv.SESSION_SECRET,
+      DB: localDb,
+    })
   );
 
-  if (process.env.NODE_ENV !== 'production') {
+  if (validatedEnv.NODE_ENV !== 'production') {
     process.env.DISABLE_HMR ??= 'true';
     const hmrDisabled = process.env.DISABLE_HMR === 'true';
     const { createServer: createViteServer } = await import('vite');
@@ -62,7 +146,7 @@ async function startServer() {
 
     const server = http.createServer(async (req, res) => {
       const urlPath = req.url || '/';
-      if (urlPath.startsWith('/api/')) {
+      if (isHonoPath(urlPath)) {
         void honoListener(req, res);
         return;
       }
@@ -96,6 +180,11 @@ async function startServer() {
       vite.middlewares(req, res);
     });
 
+    setupGracefulShutdown({
+      server,
+      closeVite: () => vite.close(),
+    });
+
     server.listen(PORT, HOST, () => {
       console.log(`SchemaForge Hono+Vite dev server running on http://${HOST}:${PORT}`);
     });
@@ -109,7 +198,7 @@ async function startServer() {
     const rawUrl = req.url || '/';
     const urlPath = rawUrl.split('?')[0];
 
-    if (urlPath.startsWith('/api/')) {
+    if (isHonoPath(urlPath)) {
       void honoListener(req, res);
       return;
     }
@@ -143,6 +232,8 @@ async function startServer() {
     fs.createReadStream(filePath).pipe(res);
   });
 
+  setupGracefulShutdown({ server });
+
   server.listen(PORT, HOST, () => {
     console.log(`SchemaForge Hono production server running on http://${HOST}:${PORT}`);
   });
@@ -150,5 +241,6 @@ async function startServer() {
 
 startServer().catch((err) => {
   console.error('Failed to start server:', err);
+  closeLocalD1Database();
   process.exit(1);
 });
