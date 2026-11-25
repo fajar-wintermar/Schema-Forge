@@ -23,19 +23,21 @@
 ### Interactive ER Diagram, Visual Authoring & 150+ Table Virtualization
 - **150+ Table Canvas Virtualization**: Engineered for massive enterprise schemas with tile-quantized spatial viewport culling, 3-tier automatic Level-of-Detail (**Full / Compact / Minimal** LOD with an **Auto LOD** toggle), `requestAnimationFrame`-coalesced 60fps panning/zooming, `8%–200%` zoom range, and a minimap with a live camera viewport frame.
 - **Interactive Multi-Select, Alignment & Drag-to-Connect FKs**: Use **Box (`M`)** marquee selection or `Shift+Click` / `Shift+Drag` to select multiple tables, drag groups together with real-time **Snap Alignment Guides**, align/distribute via the floating **Multi-Select Alignment Bar**, and drag from any column row port handle to another column to insert a DBML `Ref:` automatically.
-- **Business-Domain Table Groups (`TableGroup`) & Ungrouped Filtering**: Cluster tables into functional domains, assign shared core tables (e.g., `users`, `organizations`, `audit_logs`) to multiple domains simultaneously, reorder columns/tables, and filter visibility on the diagram canvas (`All Domains` vs. `Only Selected`, including dedicated filtering and visibility toggles for **Ungrouped** tables without affecting Docs).
+- **Business-Domain Table Groups (`TableGroup`), Collapsible Containers & Ungrouped Filtering**: Cluster tables into functional domains, collapse any `TableGroup` into a compact summary card (persisted in workspace `groupMeta`, or toggled ephemerally in read-only share links) to hide internal clutter and bundle cross-group references, assign shared core tables (e.g., `users`, `organizations`, `audit_logs`) to multiple domains simultaneously, reorder columns/tables, and filter visibility on the diagram canvas (`All Domains` vs. `Only Selected`, including dedicated filtering and visibility toggles for **Ungrouped** tables without affecting Docs).
 - **Focus Neighborhood Mode (`F`)**: Click any table to isolate its 1-hop upstream and downstream relationships while dimming unrelated tables, edges, groups, and sticky notes.
 - **Orthogonal & Curved Edge Routing**: Switch between curved Bézier connectors (`Curved`) and right-angle orthogonal routing (`Ortho`) on the canvas toolbar.
-- **Cross-Domain Edge Toggles**: Choose **Show**, **Bundle** (collapses edges between domain pairs into labeled summary trunks), or **Hide** on crowded multi-domain canvases.
+- **Cross-Domain Edge Toggles & Cardinality Visibility**: Choose **Show**, **Bundle** (collapses edges between domain pairs into labeled summary trunks), or **Hide** on crowded multi-domain canvases, and use the **Foreign Key Cardinality** checkbox in Table Detail Visibility to show or hide `1` / `N` relationship labels.
 - **Canvas Controls**: Switch between **Select** (`V`), **Box** (`M`), and **Pan** (`H`) modes, toggle **Grid Snap** and **Minimap**, switch table detail visibility (**All Fields**, **Keys Only**, **Names Only**), customize table header colors, attach color-coded **Sticky Notes**, and run **Auto Layout** (globally or per domain/ungrouped group).
 
 ### Global Command Palette (`⌘K` / `Ctrl+K`)
 - Instant fuzzy search across tables, columns, business domains (`TableGroup`), `TablePartial` mixins, Markdown & sticky notes, `.dbml` modules, and quick actions.
 - Jump straight to the selected item in **Diagram** (`Enter`), **Editor** (`⇧Enter`), or **Docs** (`Alt+Enter`).
 
-### Engineering Docs & Markdown Portal
+### Engineering Docs, Inline Editing & Export Portal
 - **dbdocs-Style Documentation**: Collapsible left navigation tree (`⌘J` / `Ctrl+J` for `All Tables` or `By Domain`), paginated **Schema Overview**, **Table** and **Domain** detail pages, **Partials** explorer, **Enumerated Types** usage matrix, **Foreign Key Relationships** matrix, and **All Notes** hub.
-- **GitHub-Flavored Markdown**: Supports tables, syntax-highlighted fenced code blocks, callout alerts, read-time estimates, and sticky section outlines.
+- **Inline Documentation Editing**: Edit `TableGroup`, `Table`, and non-partial `Column` notes directly inside Docs View (`InlineNoteEditor`) with live DBML synchronization—automatically locked in read-only `/share/:token` links.
+- **GitHub-Flavored Markdown**: Supports tables, dark syntax-highlighted fenced code blocks with line numbers, diff row highlights, and copy buttons, `[!NOTE|TIP|IMPORTANT|WARNING|CAUTION]` callout alerts, task lists, read-time estimates, and README table-of-contents outlines.
+- **Exportable Documentation (Markdown / Static HTML / Print-to-PDF)**: Export scoped or full documentation via **Export Docs** (`DocsExportMenu`) or the **Import / Export Studio** to `.docs.md`, self-contained `.docs.html`, or clean **Print / Save as PDF**. Static HTML bundles match SchemaForge Docs CSS & syntax highlighting and embed an **interactive ER diagram SVG viewport** (`+` / `−` / `Fit` / `100%`, `Ctrl`/`⌘` + scroll cursor-anchored zoom, click-and-drag panning, and clean full-width `@media print` output).
 
 ### Local-First Persistence, Offline PWA, Cloud Sync & Shareable Links
 - **Installable Offline PWA**: Includes Web App Manifest, Service Worker app-shell precaching (`vite-plugin-pwa`), desktop/mobile **Install App** prompt (plus iOS Safari Add to Home Screen guide), and live offline connectivity indicator—so you can install SchemaForge to your computer and keep editing, diagramming, and exporting even without internet.
@@ -49,7 +51,7 @@
 - **View DBML from URL**: Load public `.dbml` files from raw URLs, GitHub `blob` URLs, or GitHub Gists via **Open URL** or `?url=<encoded_url>`.
 - **Import & Scoped Domain Export**:
   - **Import**: DBML, PostgreSQL/MySQL/SQL DDL (`CREATE TABLE`, `ALTER TABLE ... FOREIGN KEY`), CSV column definitions, and remote `.dbml` URLs.
-  - **Export**: DBML, PostgreSQL/MySQL DDL, CSV data dictionary, **SVG**, and **high-resolution PNG** — export the **All Domains & Tables** workspace or scope any export strictly to **Selected Domains** (including **Ungrouped** tables).
+  - **Export**: DBML, PostgreSQL/MySQL DDL, CSV data dictionary, **Markdown (`.docs.md`)**, **Static HTML (`.docs.html`)**, **Print / Save PDF**, **SVG**, and **high-resolution PNG** — export the **All Domains & Tables** workspace or scope any export strictly to **Selected Domains** (including **Ungrouped** tables). SVG and PNG exports preserve active canvas preferences (cardinality visibility, edge routing, cross-domain bundling, and collapsed `TableGroup` containers), while canvas sticky notes are automatically excluded from exported diagrams and docs so tables remain unobstructed.
 
 ### Architecture, Security & Production Hardening
 - **Clean Architecture & Shared Domain Kernel**: Framework-free `@shared/domain/*` kernel (DBML lexer/parser/mutators, GitHub target parser, share expiration rules, core schema types) consumed across both backend (`server/domain/`, `server/application/`, `server/infrastructure/`, `server/presentation/`) and frontend (`src/services/`, `src/hooks/`, `src/features/`, `src/components/`).
@@ -158,7 +160,7 @@
 │   │   ├── app/                      # Global shortcut hook & root app helpers
 │   │   ├── command/                  # Global Command Palette modal & fuzzy search engine
 │   │   ├── diagram/                  # ER canvas, interaction/viewport/preference hooks, virtualization/LOD engine, alignment bar, minimap
-│   │   ├── docs/                     # dbdocs-style Schema, Domain, Table, Partials, Enums, Refs & Notes views
+│   │   ├── docs/                     # dbdocs-style Schema, Domain, Table, Partials, Enums, Refs, Notes, InlineNoteEditor & DocsExportMenu
 │   │   ├── editor/                   # CodeMirror 6 DBML editor, QualityLinterPanel, syntax highlighter, folder explorer
 │   │   ├── github/                   # GitHub OAuth modal, repo/branch/folder browser, commit diff/SQL migrations hook & tabs
 │   │   ├── markdown/                 # GFM Markdown parser, callouts, read-time & syntax highlighter
@@ -168,7 +170,7 @@
 │   │   └── workspace/                # IndexedDB/Cloud store, useWorkspaceShares hook & modals (ShareModal subcomponents, Workspaces, Import/Export, TableGroup, SaveVersion)
 │   └── utils/
 │       ├── highlight/                # Syntax highlighting utilities for SQL, DBML & code blocks
-│       ├── io/                       # Auto-layout, edge geometry, SQL/CSV/DBML converters, SQL ALTER migration generator, SVG/PNG export
+│       ├── io/                       # Auto-layout, edge geometry, SQL/CSV/DBML converters, SQL ALTER migration generator, Markdown/HTML/PDF docs export (`docsExport.ts`, `docsMarkdownHtml.ts`), SVG/PNG export
 │       ├── autoLayout.ts             # Domain-aware & group-level auto-layout engine
 │       ├── codeHighlight.ts          # Unified syntax highlight entrypoint
 │       ├── importExport.ts           # Export orchestration helpers (PNG/SVG/SQL/CSV/DBML)
