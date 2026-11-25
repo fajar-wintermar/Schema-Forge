@@ -1,4 +1,4 @@
-import { TablePosition } from '../../types/schema';
+import { TablePosition } from '@shared/domain/schemaTypes';
 import { TABLE_WIDTH } from '../autoLayout';
 
 export type EdgeRoutingMode = 'bezier' | 'orthogonal';

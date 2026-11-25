@@ -4,14 +4,14 @@ import {
   SchemaModuleFile,
   UrlFileLink,
   WorkspaceProject,
-} from '../../../types/schema';
+} from '@shared/domain/schemaTypes';
 import { computeAutoLayout } from '../../../utils/autoLayout';
-import { parseDbml } from '../../../utils/dbmlParser';
+import { parseDbml } from '@shared/domain/dbml';
 import {
   GithubFileResult,
   GithubFolderResult,
   RemoteFetchResult,
-} from '../../../utils/remoteService';
+} from '../../../services/api/remoteService';
 import {
   createModularStarterWorkspace,
   createSaaSTelemetryWorkspace,

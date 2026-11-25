@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { Check, Copy, Download, Maximize2, X } from 'lucide-react';
-import { SchemaDiffResult, SqlDialect } from '../types/schema';
+import { SchemaDiffResult, SqlDialect } from '@shared/domain/schemaTypes';
 import { generateSqlMigration, SqlMigrationOptions } from '../utils/schemaDiff';
 import { highlightSql } from '../utils/highlight/dbmlAndSql';
 import { TOKEN_CLASS_MAP } from '../utils/highlight/types';

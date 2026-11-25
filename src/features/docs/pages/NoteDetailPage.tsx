@@ -1,6 +1,6 @@
 import React from 'react';
 import { ArrowLeft, ArrowRight, ExternalLink } from 'lucide-react';
-import { SchemaNoteDef } from '../../../types/schema';
+import { SchemaNoteDef } from '@shared/domain/schemaTypes';
 import { DocsBreadcrumb } from '../components/DocsBreadcrumb';
 import { ReadmeNoteCard } from '../components/ReadmeNoteCard';
 import type { DocsNoteEntry, DocsSection } from '../types';

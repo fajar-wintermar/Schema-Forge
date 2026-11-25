@@ -1,9 +1,10 @@
-import {
+import type {
   CloudAuthStatusResponse,
   SharedWorkspacePayload,
   ShareLinkRecord,
   WorkspaceProject,
-} from '../types/schema';
+} from '@shared/domain/schemaTypes';
+import { isTrustedOAuthMessageOrigin } from '../../utils/urlSafety';
 import {
   apiClient,
   notifyAuthChanged,
@@ -12,7 +13,6 @@ import {
   setStoredGithubSessionToken,
 } from './apiClient';
 import { getGithubAuthUrl, logoutGithub } from './remoteService';
-import { isTrustedOAuthMessageOrigin } from './urlSafety';
 
 export async function getCloudAuthStatus(
   signal?: AbortSignal

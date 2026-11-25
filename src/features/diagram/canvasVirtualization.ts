@@ -1,4 +1,4 @@
-import { DetailLevel, StickyNote, TablePosition } from '../../types/schema';
+import { DetailLevel, StickyNote, TablePosition } from '@shared/domain/schemaTypes';
 import {
   getTableHeight,
   GroupBoundingBox,

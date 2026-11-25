@@ -1,6 +1,6 @@
 import React from 'react';
 import { Plus, RotateCcw } from 'lucide-react';
-import { SchemaVersion } from '../../../types/schema';
+import { SchemaVersion } from '@shared/domain/schemaTypes';
 
 export interface VersionsTabProps {
   versions: SchemaVersion[];

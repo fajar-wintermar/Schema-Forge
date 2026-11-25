@@ -26,7 +26,7 @@ import {
   TablePosition,
   UNGROUPED_DOMAIN_ID,
   ViewMode,
-} from './types/schema';
+} from '@shared/domain/schemaTypes';
 import { lintSchemaQuality, SchemaLintIssue } from './utils/schemaLinter';
 
 const SharedViewerPage = lazy(() =>

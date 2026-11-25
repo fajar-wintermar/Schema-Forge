@@ -33,22 +33,21 @@ import {
 import { DiagramCanvas } from '../diagram/DiagramCanvas';
 import type { DocsSection } from '../docs/types';
 import {
-  DetailLevel,
+  type DetailLevel,
   formatDomainLabel,
-  ParsedSchema,
-  SharedWorkspacePayload,
-  StickyNote,
-  TablePosition,
-  ViewMode,
-} from '../../types/schema';
-import { isAbortError } from '../../utils/apiClient';
+  type ParsedSchema,
+  type SharedWorkspacePayload,
+  type StickyNote,
+  type TablePosition,
+  type ViewMode,
+} from '@shared/domain/schemaTypes';
 import { autoLayoutSingleGroup, computeAutoLayout } from '../../utils/autoLayout';
-import { fetchPublicShare } from '../../utils/cloudService';
 import {
   buildDiagramSvg,
   downloadTextFile,
   exportDiagramAsPng,
 } from '../../utils/importExport';
+import { usePublicShareLoader } from './hooks/usePublicShareLoader';
 
 const CommandPaletteModal = lazy(() =>
   import('../command/CommandPaletteModal').then((m) => ({
@@ -85,9 +84,6 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
   onToggleDarkMode,
   onForkToStudio,
 }) => {
-  const [payload, setPayload] = useState<SharedWorkspacePayload | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [selectedVersionTag, setSelectedVersionTag] = useState<string | null>(
     initialVersionTag || null
   );
@@ -120,7 +116,6 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
   const [exportingPng, setExportingPng] = useState(false);
   const [exportFeedback, setExportFeedback] = useState<string | null>(null);
-  const [reloadNonce, setReloadNonce] = useState(0);
   const feedbackTimerRef = useRef<number | null>(null);
 
   const modKey = useModKey();
@@ -157,39 +152,25 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
     setHasCustomLayout(false);
   }, []);
 
-  useEffect(() => {
-    const controller = new AbortController();
-    setLoading(true);
-    setError(null);
+  const handleShareLoaded = useCallback(
+    (res: SharedWorkspacePayload) => {
+      setViewMode(res.share.defaultView);
+      resetEphemeralLayout(res);
+      setFocusRequest({ type: 'fit', nonce: Date.now() });
+    },
+    [resetEphemeralLayout]
+  );
 
-    (async () => {
-      try {
-        const res = await fetchPublicShare(
-          token,
-          selectedVersionTag,
-          controller.signal
-        );
-        if (controller.signal.aborted) return;
-        setPayload(res);
-        setViewMode(res.share.defaultView);
-        resetEphemeralLayout(res);
-        setFocusRequest({ type: 'fit', nonce: Date.now() });
-      } catch (err) {
-        if (isAbortError(err) || controller.signal.aborted) return;
-        setError(
-          err instanceof Error ? err.message : 'Unable to load shared schema.'
-        );
-      } finally {
-        if (!controller.signal.aborted) {
-          setLoading(false);
-        }
-      }
-    })();
-
-    return () => {
-      controller.abort();
-    };
-  }, [token, selectedVersionTag, reloadNonce, resetEphemeralLayout]);
+  const {
+    payload,
+    loading,
+    error,
+    reload: reloadShare,
+  } = usePublicShareLoader({
+    token,
+    versionTag: selectedVersionTag,
+    onLoaded: handleShareLoaded,
+  });
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -437,7 +418,7 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => setReloadNonce((n) => n + 1)}
+              onClick={reloadShare}
               className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-medium border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
             >
               <RefreshCw className="w-3.5 h-3.5" />

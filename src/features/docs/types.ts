@@ -1,4 +1,4 @@
-import { ParsedSchema, RefRelation, StickyNote } from '../../types/schema';
+import { ParsedSchema, RefRelation, StickyNote } from '@shared/domain/schemaTypes';
 
 export interface DocsViewProps {
   schema: ParsedSchema;

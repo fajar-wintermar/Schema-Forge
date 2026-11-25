@@ -274,5 +274,3 @@ export async function pushGithubFile(
   }
   return await res.json();
 }
-
-export { parseGithubTargetInput } from '../../shared/domain/github/githubTargetParser';

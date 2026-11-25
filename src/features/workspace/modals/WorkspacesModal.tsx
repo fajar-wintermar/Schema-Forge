@@ -13,7 +13,7 @@ import {
 import {
   CloudAuthStatusResponse,
   WorkspaceProject,
-} from '../../../types/schema';
+} from '@shared/domain/schemaTypes';
 import { sanitizeExternalUrl } from '../../../utils/urlSafety';
 
 interface WorkspacesModalProps {

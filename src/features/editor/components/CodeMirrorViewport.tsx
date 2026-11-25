@@ -53,7 +53,7 @@ import {
   lineNumbers,
   rectangularSelection,
 } from '@codemirror/view';
-import { ParseError, TableDef } from '../../../types/schema';
+import { ParseError, TableDef } from '@shared/domain/schemaTypes';
 import {
   DbmlAutocompleteContextRefs,
   createDbmlCompletionSource,

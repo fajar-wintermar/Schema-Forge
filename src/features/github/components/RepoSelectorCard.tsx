@@ -8,7 +8,7 @@ import {
   Lock,
   ShieldCheck,
 } from 'lucide-react';
-import { GithubAuthStatus, GithubRepoInfo } from '../../../utils/remoteService';
+import { GithubAuthStatus, GithubRepoInfo } from '../../../services/api/remoteService';
 import { sanitizeExternalUrl } from '../../../utils/urlSafety';
 
 interface RepoSelectorCardProps {

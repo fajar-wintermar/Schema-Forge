@@ -1,6 +1,6 @@
 import React from 'react';
 import { GitBranch } from 'lucide-react';
-import { RefRelation } from '../../../types/schema';
+import { RefRelation } from '@shared/domain/schemaTypes';
 import { CARDINALITY_META } from '../types';
 
 export const CardinalityBadge: React.FC<{ relation: RefRelation }> = ({

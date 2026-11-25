@@ -26,7 +26,7 @@ import {
   GithubFileLink,
   GithubRepoLink,
   ViewMode,
-} from '../types/schema';
+} from '@shared/domain/schemaTypes';
 import { BrandLogo } from './BrandLogo';
 import { usePWAInstall } from '../features/pwa/usePWAInstall';
 

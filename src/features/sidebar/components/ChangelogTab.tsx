@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { ParsedSchema, SchemaVersion, SqlDialect } from '../../../types/schema';
+import { ParsedSchema, SchemaVersion, SqlDialect } from '@shared/domain/schemaTypes';
 import { computeSchemaDiff } from '../../../utils/schemaDiff';
 import { SqlMigrationViewer } from '../../../components/SqlMigrationViewer';
 

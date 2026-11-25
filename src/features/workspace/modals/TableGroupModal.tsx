@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Check, X } from 'lucide-react';
-import { TableGroupDef } from '../../../types/schema';
+import { TableGroupDef } from '@shared/domain/schemaTypes';
 
 interface GroupModalProps {
   initialGroup: TableGroupDef | null;

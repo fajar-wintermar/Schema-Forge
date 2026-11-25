@@ -3,7 +3,7 @@ import {
   ParsedSchema,
   SchemaModuleFile,
   WorkspaceProject,
-} from '../../../types/schema';
+} from '@shared/domain/schemaTypes';
 import {
   cleanFolderPrefix,
   detectSchemaFolder,

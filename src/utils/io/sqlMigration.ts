@@ -6,7 +6,7 @@ import {
   SchemaDiffResult,
   SqlDialect,
   TableDef,
-} from '../../types/schema';
+} from '@shared/domain/schemaTypes';
 
 export interface SqlMigrationOptions {
   baseLabel?: string;

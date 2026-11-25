@@ -11,7 +11,7 @@ import {
   TablePosition,
   ViewMode,
   WorkspaceProject,
-} from '../types/schema';
+} from '@shared/domain/schemaTypes';
 import { AsyncLoadingState } from './AsyncStateView';
 import { ErrorBoundary } from './ErrorBoundary';
 import { MinimizedEditorRail } from './MinimizedEditorRail';

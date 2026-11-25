@@ -1,4 +1,4 @@
-import { ParsedSchema, TableDef } from '../types/schema';
+import { ParsedSchema, TableDef } from '@shared/domain/schemaTypes';
 
 export type LintRuleId =
   | 'unindexed-fk'

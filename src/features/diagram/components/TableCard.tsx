@@ -1,6 +1,6 @@
 import React from 'react';
 import { KeyRound, Link2, Palette, Share2 } from 'lucide-react';
-import { DetailLevel, TablePosition } from '../../../types/schema';
+import { DetailLevel, TablePosition } from '@shared/domain/schemaTypes';
 import { TABLE_WIDTH, TableInstance } from '../../../utils/autoLayout';
 import { getContrastTextColor } from '../../../utils/importExport';
 import { stripMarkdownToPlainText } from '../../markdown/markdownUtils';

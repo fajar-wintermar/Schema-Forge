@@ -17,7 +17,7 @@ import {
   Table2,
   X,
 } from 'lucide-react';
-import { ParsedSchema, TableDef, TableGroupDef } from '../../../types/schema';
+import { ParsedSchema, TableDef, TableGroupDef } from '@shared/domain/schemaTypes';
 import type { DocsSection, TreeFilterMode } from '../types';
 
 export interface DocsSidebarProps {

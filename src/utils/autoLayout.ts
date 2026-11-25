@@ -4,7 +4,7 @@ import {
   RefDef,
   TableDef,
   TablePosition,
-} from '../types/schema';
+} from '@shared/domain/schemaTypes';
 
 export const TABLE_WIDTH = 276;
 

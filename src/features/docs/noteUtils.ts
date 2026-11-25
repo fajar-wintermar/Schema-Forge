@@ -1,4 +1,4 @@
-import { ParsedSchema, StickyNote, TableDef } from '../../types/schema';
+import { ParsedSchema, StickyNote, TableDef } from '@shared/domain/schemaTypes';
 import {
   isRichMarkdownNote,
   stripMarkdownToPlainText,

@@ -8,7 +8,7 @@ import {
   StickyNote as StickyNoteIcon,
   X,
 } from 'lucide-react';
-import { ParsedSchema, TableDef } from '../types/schema';
+import { ParsedSchema, TableDef } from '@shared/domain/schemaTypes';
 import { MarkdownContent } from '../features/markdown/MarkdownContent';
 
 interface InspectorDrawerProps {

@@ -10,8 +10,8 @@ import {
 } from '../../src/features/diagram/canvasVirtualization';
 import { buildTableRects } from '../../src/features/diagram/canvasGeometry';
 import { buildTableInstances, resolveSchemaEdges } from '../../src/utils/autoLayout';
-import { parseDbml } from '../../src/utils/dbmlParser';
-import type { StickyNote, TablePosition } from '../../src/types/schema';
+import { parseDbml } from '@shared/domain/dbml';
+import type { StickyNote, TablePosition } from '@shared/domain/schemaTypes';
 
 function buildMassiveSchema(tableCount: number) {
   const blocks: string[] = [];

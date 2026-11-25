@@ -5,7 +5,7 @@ import {
   TableDef,
   TablePosition,
   UNGROUPED_DOMAIN_ID,
-} from '../../types/schema';
+} from '@shared/domain/schemaTypes';
 import {
   buildTableInstances,
   computeGroupBoundingBoxes,

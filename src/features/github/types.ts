@@ -3,11 +3,11 @@ import {
   GithubRepoLink,
   SchemaModuleFile,
   WorkspaceProject,
-} from '../../types/schema';
+} from '@shared/domain/schemaTypes';
 import {
   GithubFileResult,
   GithubFolderResult,
-} from '../../utils/remoteService';
+} from '../../services/api/remoteService';
 
 export interface GitHubModalProps {
   workspace: WorkspaceProject;

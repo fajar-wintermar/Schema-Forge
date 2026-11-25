@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseDbml } from '../../src/utils/dbmlParser';
+import { parseDbml } from '@shared/domain/dbml';
 import { exportSchemaToSql, importSqlToDbml } from '../../src/utils/io/sqlIo';
 import { generateIncrementalSqlMigration } from '../../src/utils/schemaDiff';
 

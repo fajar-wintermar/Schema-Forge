@@ -19,7 +19,7 @@ import {
   ParsedSchema,
   TableGroupDef,
   UNGROUPED_DOMAIN_ID,
-} from '../../../types/schema';
+} from '@shared/domain/schemaTypes';
 
 export interface DomainsTabProps {
   schema: ParsedSchema;

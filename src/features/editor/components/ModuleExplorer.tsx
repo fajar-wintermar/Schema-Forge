@@ -13,7 +13,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { ParseError, SchemaModuleFile } from '../../../types/schema';
+import { ParseError, SchemaModuleFile } from '@shared/domain/schemaTypes';
 import { MERGED_SCHEMA_VIEW_ID } from '../../../utils/schemaModules';
 import { SchemaTreeNode } from '../types';
 

@@ -14,8 +14,8 @@ import {
   SchemaDiffResult,
   SqlDialect,
   TableDiff,
-} from '../types/schema';
-import { parseDbml } from './dbmlParser';
+} from '@shared/domain/schemaTypes';
+import { parseDbml } from '@shared/domain/dbml';
 import {
   generateSqlMigration,
   resolveIndexName,

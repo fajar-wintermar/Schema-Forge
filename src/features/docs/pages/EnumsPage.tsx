@@ -1,6 +1,6 @@
 import React from 'react';
 import { ListChecks, Search } from 'lucide-react';
-import { EnumDef } from '../../../types/schema';
+import { EnumDef } from '@shared/domain/schemaTypes';
 import { DocsBreadcrumb } from '../components/DocsBreadcrumb';
 import { PaginationBar } from '../components/PaginationBar';
 import { TrimmableNote } from '../components/TrimmableNote';

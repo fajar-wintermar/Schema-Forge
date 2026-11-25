@@ -4,7 +4,7 @@ import {
   formatDomainLabel,
   TableGroupDef,
   UNGROUPED_DOMAIN_ID,
-} from '../../../types/schema';
+} from '@shared/domain/schemaTypes';
 import type { CrossDomainEdgeMode } from '../types';
 
 export interface DomainFilterBarProps {

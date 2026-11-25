@@ -5,7 +5,7 @@ import {
   StickyNoteColor,
   TableGroupDef,
   TablePosition,
-} from '../../types/schema';
+} from '@shared/domain/schemaTypes';
 import { ResolvedEdge } from '../../utils/autoLayout';
 
 export interface DiagramCanvasProps {

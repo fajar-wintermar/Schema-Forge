@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowUp, ChevronLeft, ChevronRight } from 'lucide-react';
-import { UNGROUPED_DOMAIN_ID } from '../../types/schema';
+import { UNGROUPED_DOMAIN_ID } from '@shared/domain/schemaTypes';
 import { DocsSidebar } from './components/DocsSidebar';
 import { buildAllNoteEntries, matchesTableQuery } from './noteUtils';
 import { AllNotesPage } from './pages/AllNotesPage';

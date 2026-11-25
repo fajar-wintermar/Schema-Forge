@@ -5,7 +5,7 @@ import {
   CompletionSource,
 } from '@codemirror/autocomplete';
 import { EditorSelection } from '@codemirror/state';
-import { TableDef } from '../../../types/schema';
+import { TableDef } from '@shared/domain/schemaTypes';
 import { getAutocompleteContext } from '../dbmlLanguage';
 import { AutocompleteItem } from '../types';
 

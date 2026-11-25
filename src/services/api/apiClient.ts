@@ -1,5 +1,5 @@
 import { hc } from 'hono/client';
-import type { AppType } from '../../server/api';
+import type { AppType } from '../../../server/api';
 
 const SESSION_STORAGE_KEY = 'sf_gh_session_token';
 export const AUTH_CHANGED_EVENT = 'schemaforge:auth-changed';

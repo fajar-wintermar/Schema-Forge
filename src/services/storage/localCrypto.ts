@@ -1,4 +1,4 @@
-import { WorkspaceProject } from '../types/schema';
+import type { WorkspaceProject } from '@shared/domain/schemaTypes';
 
 export interface SealedWorkspaceBlob {
   v: 1;

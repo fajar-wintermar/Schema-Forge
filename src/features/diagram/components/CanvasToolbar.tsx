@@ -18,7 +18,7 @@ import {
   Spline,
   StickyNote as StickyNoteIcon,
 } from 'lucide-react';
-import { DetailLevel } from '../../../types/schema';
+import { DetailLevel } from '@shared/domain/schemaTypes';
 import type { EdgeRoutingMode } from '../../../utils/io/edgeGeometry';
 import type { CursorMode } from '../types';
 

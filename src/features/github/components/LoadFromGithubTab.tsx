@@ -8,7 +8,7 @@ import {
   Search,
   UploadCloud,
 } from 'lucide-react';
-import { GithubRepoInfo, GithubTreeFile } from '../../../utils/remoteService';
+import { GithubRepoInfo, GithubTreeFile } from '../../../services/api/remoteService';
 
 interface LoadFromGithubTabProps {
   selectedRepo: GithubRepoInfo | null;

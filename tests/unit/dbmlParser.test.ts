@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseDbml } from '../../src/utils/dbmlParser';
+import { parseDbml } from '@shared/domain/dbml';
 
 describe('parseDbml', () => {
   it('parses Project metadata, Enums, Tables, Indexes, Checks, TableGroups, Refs, and Notes', () => {

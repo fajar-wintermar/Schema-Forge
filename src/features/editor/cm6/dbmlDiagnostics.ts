@@ -1,6 +1,6 @@
 import { Diagnostic, setDiagnostics } from '@codemirror/lint';
 import { EditorView } from '@codemirror/view';
-import { ParseError } from '../../../types/schema';
+import { ParseError } from '@shared/domain/schemaTypes';
 
 export function syncErrorsToDiagnostics(
   view: EditorView,

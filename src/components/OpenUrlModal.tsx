@@ -8,9 +8,9 @@ import {
   Loader2,
   X,
 } from 'lucide-react';
-import { UrlFileLink } from '../types/schema';
-import { isAbortError } from '../utils/apiClient';
-import { fetchDbmlFromUrl, RemoteFetchResult } from '../utils/remoteService';
+import type { UrlFileLink } from '@shared/domain/schemaTypes';
+import { useFetchRemoteDbml } from '../hooks/useFetchRemoteDbml';
+import type { RemoteFetchResult } from '../services/api/remoteService';
 
 interface OpenUrlModalProps {
   currentUrlLink?: UrlFileLink;
@@ -28,16 +28,20 @@ export const OpenUrlModal: React.FC<OpenUrlModalProps> = ({
 }) => {
   const [urlInput, setUrlInput] = useState(currentUrlLink?.url || '');
   const [openAsNew, setOpenAsNew] = useState(true);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [copiedShare, setCopiedShare] = useState(false);
 
-  const abortRef = useRef<AbortController | null>(null);
+  const {
+    loading,
+    error,
+    setError,
+    clearError,
+    fetchUrl,
+  } = useFetchRemoteDbml();
+
   const copyTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     return () => {
-      abortRef.current?.abort();
       if (copyTimerRef.current !== null) {
         window.clearTimeout(copyTimerRef.current);
       }
@@ -52,32 +56,10 @@ export const OpenUrlModal: React.FC<OpenUrlModalProps> = ({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    const target = urlInput.trim();
-    if (!target) {
-      setError('Enter a DBML URL to load.');
-      return;
-    }
-    abortRef.current?.abort();
-    const controller = new AbortController();
-    abortRef.current = controller;
-
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await fetchDbmlFromUrl(target, controller.signal);
-      if (controller.signal.aborted) return;
-      onLoadUrlResult(result, openAsNew);
-      onClose();
-    } catch (err) {
-      if (isAbortError(err) || controller.signal.aborted) return;
-      setError(
-        err instanceof Error ? err.message : 'Failed to load DBML from URL.'
-      );
-    } finally {
-      if (!controller.signal.aborted) {
-        setLoading(false);
-      }
-    }
+    const result = await fetchUrl(urlInput);
+    if (!result) return;
+    onLoadUrlResult(result, openAsNew);
+    onClose();
   };
 
   const handleCopyShareLink = async () => {

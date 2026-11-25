@@ -18,7 +18,7 @@ import {
   SchemaModuleFile,
   StickyNote,
   ViewMode,
-} from '../../types/schema';
+} from '@shared/domain/schemaTypes';
 import {
   buildCommandItems,
   CommandFilterTab,

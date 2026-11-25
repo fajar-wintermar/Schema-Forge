@@ -1,6 +1,6 @@
-import { SchemaModuleFile, WorkspaceProject } from '../types/schema';
+import { SchemaModuleFile, WorkspaceProject } from '@shared/domain/schemaTypes';
 import { computeAutoLayout } from './autoLayout';
-import { parseDbml } from './dbmlParser';
+import { parseDbml } from '@shared/domain/dbml';
 import { mergeSchemaFiles } from './schemaModules';
 
 export const COMMERCE_V1_DBML = `Project OmnichannelCommerce {

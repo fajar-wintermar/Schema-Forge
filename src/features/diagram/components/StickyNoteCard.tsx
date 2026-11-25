@@ -1,6 +1,6 @@
 import React from 'react';
 import { Maximize2, Minimize2, Trash2 } from 'lucide-react';
-import { StickyNote, StickyNoteColor } from '../../../types/schema';
+import { StickyNote, StickyNoteColor } from '@shared/domain/schemaTypes';
 import { CursorMode, NOTE_STYLES } from '../types';
 
 export interface StickyNoteCardProps {

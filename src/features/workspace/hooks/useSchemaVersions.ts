@@ -1,8 +1,8 @@
 import { useMemo } from 'react';
 import { SidebarTab } from '../../sidebar/types';
-import { SchemaVersion, WorkspaceProject } from '../../../types/schema';
+import { SchemaVersion, WorkspaceProject } from '@shared/domain/schemaTypes';
 import { computeAutoLayout } from '../../../utils/autoLayout';
-import { parseDbml } from '../../../utils/dbmlParser';
+import { parseDbml } from '@shared/domain/dbml';
 import { splitDbmlIntoModuleFiles } from '../../../utils/schemaModules';
 
 interface UseSchemaVersionsOptions {

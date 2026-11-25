@@ -7,7 +7,7 @@ import {
   ChevronUp,
   Info,
 } from 'lucide-react';
-import { ParseError } from '../../../types/schema';
+import { ParseError } from '@shared/domain/schemaTypes';
 import { SchemaLintIssue, SchemaLintResult } from '../../../utils/schemaLinter';
 import { QualityLinterPanel } from './QualityLinterPanel';
 

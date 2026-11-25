@@ -1,4 +1,4 @@
-import { ParseError, SchemaModuleFile, TableDef } from '../../types/schema';
+import { ParseError, SchemaModuleFile, TableDef } from '@shared/domain/schemaTypes';
 import { SchemaLintIssue, SchemaLintResult } from '../../utils/schemaLinter';
 
 export interface DbmlEditorProps {

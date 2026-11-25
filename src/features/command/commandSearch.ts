@@ -1,4 +1,4 @@
-import { ParsedSchema, SchemaModuleFile, StickyNote } from '../../types/schema';
+import { ParsedSchema, SchemaModuleFile, StickyNote } from '@shared/domain/schemaTypes';
 import { MERGED_SCHEMA_VIEW_ID } from '../../utils/schemaModules';
 import { buildAllNoteEntries } from '../docs/noteUtils';
 import type { DocsNoteEntry, DocsSection } from '../docs/types';

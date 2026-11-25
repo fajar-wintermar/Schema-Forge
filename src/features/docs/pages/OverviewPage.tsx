@@ -13,7 +13,7 @@ import {
   ParsedSchema,
   TableDef,
   TableGroupDef,
-} from '../../../types/schema';
+} from '@shared/domain/schemaTypes';
 import {
   isRichMarkdownNote,
   stripMarkdownToPlainText,

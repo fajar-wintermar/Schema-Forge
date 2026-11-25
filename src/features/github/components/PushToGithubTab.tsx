@@ -16,8 +16,8 @@ import {
   SchemaModuleFile,
   SqlDialect,
   WorkspaceProject,
-} from '../../../types/schema';
-import { GithubAuthStatus, GithubRepoInfo } from '../../../utils/remoteService';
+} from '@shared/domain/schemaTypes';
+import { GithubAuthStatus, GithubRepoInfo } from '../../../services/api/remoteService';
 import { cleanFolderPrefix } from '../../../utils/schemaModules';
 import { SqlMigrationViewer } from '../../../components/SqlMigrationViewer';
 import { sanitizeExternalUrl } from '../../../utils/urlSafety';

@@ -1,6 +1,6 @@
 import React from 'react';
 import { Edit3, Eye, EyeOff, Sparkles } from 'lucide-react';
-import { TableGroupDef } from '../../../types/schema';
+import { TableGroupDef } from '@shared/domain/schemaTypes';
 import { GroupBoundingBox } from '../../../utils/autoLayout';
 import { stripMarkdownToPlainText } from '../../markdown/markdownUtils';
 import type { CanvasLodTier } from '../canvasVirtualization';

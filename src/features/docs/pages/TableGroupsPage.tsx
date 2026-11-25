@@ -1,6 +1,6 @@
 import React from 'react';
 import { ArrowRight, Search } from 'lucide-react';
-import { TableGroupDef } from '../../../types/schema';
+import { TableGroupDef } from '@shared/domain/schemaTypes';
 import { DocsBreadcrumb } from '../components/DocsBreadcrumb';
 import { PaginationBar } from '../components/PaginationBar';
 import { TrimmableNote } from '../components/TrimmableNote';

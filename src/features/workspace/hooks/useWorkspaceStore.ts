@@ -5,14 +5,14 @@ import {
   loadAllWorkspaces,
   saveWorkspace,
   setMetaValue,
-} from '../../../db/localDb';
+} from '../../../services/storage/localDb';
 import {
   CloudAuthStatusResponse,
   CloudSyncStatus,
   ViewMode,
   WorkspaceProject,
-} from '../../../types/schema';
-import { isAbortError } from '../../../utils/apiClient';
+} from '@shared/domain/schemaTypes';
+import { isAbortError } from '../../../services/api/apiClient';
 import { computeAutoLayout } from '../../../utils/autoLayout';
 import {
   connectWithGithubOAuth,
@@ -21,12 +21,12 @@ import {
   listCloudWorkspaces,
   saveCloudWorkspace,
   signOutCloud,
-} from '../../../utils/cloudService';
-import { parseDbml } from '../../../utils/dbmlParser';
+} from '../../../services/api/cloudService';
+import { parseDbml } from '@shared/domain/dbml';
 import {
   AUTH_CHANGED_EVENT,
   fetchDbmlFromUrl,
-} from '../../../utils/remoteService';
+} from '../../../services/api/remoteService';
 import { createInitialWorkspace } from '../../../utils/sampleSchemas';
 
 interface UseWorkspaceStoreOptions {

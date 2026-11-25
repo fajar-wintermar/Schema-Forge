@@ -6,7 +6,7 @@ import {
   SchemaModuleFile,
   StickyNote,
   WorkspaceProject,
-} from '../../../types/schema';
+} from '@shared/domain/schemaTypes';
 import {
   autoLayoutSingleGroup,
   computeAutoLayout,
@@ -21,7 +21,7 @@ import {
   setTableGroupsForTableInDbml,
   setTableHeaderColorInDbml,
   upsertTableGroupInDbml,
-} from '../../../utils/dbmlParser';
+} from '@shared/domain/dbml';
 import {
   findModuleDefiningTable,
   findModuleDefiningTableGroup,

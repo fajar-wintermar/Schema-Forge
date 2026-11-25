@@ -1,4 +1,4 @@
-import { DetailLevel, TableDef, TablePosition } from '../../types/schema';
+import { DetailLevel, TableDef, TablePosition } from '@shared/domain/schemaTypes';
 import { getTableHeight, TABLE_WIDTH, TableInstance } from '../../utils/autoLayout';
 
 export interface TableRect {

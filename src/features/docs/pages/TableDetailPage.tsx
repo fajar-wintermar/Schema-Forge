@@ -6,7 +6,7 @@ import {
   KeyRound,
   Link2,
 } from 'lucide-react';
-import { ParsedSchema, StickyNote, TableDef } from '../../../types/schema';
+import { ParsedSchema, StickyNote, TableDef } from '@shared/domain/schemaTypes';
 import { isRichMarkdownNote } from '../../markdown/markdownUtils';
 import { CardinalityBadge } from '../components/CardinalityBadge';
 import { DocsBreadcrumb } from '../components/DocsBreadcrumb';

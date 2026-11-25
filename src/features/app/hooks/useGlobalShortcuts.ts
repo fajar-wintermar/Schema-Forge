@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { ViewMode } from '../../../types/schema';
+import { ViewMode } from '@shared/domain/schemaTypes';
 
 interface UseGlobalShortcutsOptions {
   viewMode: ViewMode;

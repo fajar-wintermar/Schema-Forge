@@ -12,12 +12,12 @@ import {
   TableGroupDef,
   ViewMode,
   WorkspaceProject,
-} from '../types/schema';
+} from '@shared/domain/schemaTypes';
 import {
   GithubFileResult,
   GithubFolderResult,
   RemoteFetchResult,
-} from '../utils/remoteService';
+} from '../services/api/remoteService';
 import { ErrorBoundary } from './ErrorBoundary';
 
 const CommandPaletteModal = lazy(() =>

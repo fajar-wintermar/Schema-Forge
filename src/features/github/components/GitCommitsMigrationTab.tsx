@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   ArrowLeftRight,
   FolderGit2,
@@ -7,25 +7,22 @@ import {
   Loader2,
   RefreshCw,
 } from 'lucide-react';
-import {
+import type {
   GithubFileLink,
   GithubRepoLink,
   SchemaModuleFile,
   SqlDialect,
   WorkspaceProject,
-} from '../../../types/schema';
-import { isAbortError } from '../../../utils/apiClient';
-import {
-  getGithubCommits,
-  getGithubFile,
-  getGithubFolderFiles,
+} from '@shared/domain/schemaTypes';
+import type {
   GithubCommitInfo,
   GithubRepoInfo,
   GithubTreeFile,
-} from '../../../utils/remoteService';
+} from '../../../services/api/remoteService';
 import { computeSchemaDiff } from '../../../utils/schemaDiff';
 import { cleanFolderPrefix, mergeSchemaFiles } from '../../../utils/schemaModules';
 import { SqlMigrationViewer } from '../../../components/SqlMigrationViewer';
+import { useGithubCommitsDiff } from '../hooks/useGithubCommitsDiff';
 
 export interface GitCommitsMigrationTabProps {
   workspace: WorkspaceProject;
@@ -95,26 +92,7 @@ export const GitCommitsMigrationTab: React.FC<GitCommitsMigrationTabProps> = ({
     }
   }, [dbmlFolders, repoLinked, targetFolder]);
 
-  const [commits, setCommits] = useState<GithubCommitInfo[]>([]);
-  const [loadingCommits, setLoadingCommits] = useState(false);
-  const [baseRef, setBaseRef] = useState<string>(() =>
-    linked || repoLinked ? 'last-synced' : ''
-  );
-  const [targetRef, setTargetRef] = useState<string>('working');
   const [sqlDialect, setSqlDialect] = useState<SqlDialect>('postgres');
-
-  const [baseDbml, setBaseDbml] = useState<string>('');
-  const [targetDbml, setTargetDbml] = useState<string>('');
-  const [loadingSql, setLoadingSql] = useState(false);
-
-  const snapshotCacheRef = useRef<Map<string, string>>(new Map());
-  const commitsAbortRef = useRef<AbortController | null>(null);
-
-  useEffect(() => {
-    return () => {
-      commitsAbortRef.current?.abort();
-    };
-  }, []);
 
   const activePathFilter =
     targetKind === 'folder'
@@ -154,162 +132,32 @@ export const GitCommitsMigrationTab: React.FC<GitCommitsMigrationTabProps> = ({
     linked?.lastSyncedDbml,
   ]);
 
-  const fetchCommits = useCallback(async () => {
-    if (!effectiveOwner || !effectiveRepo) return;
-    commitsAbortRef.current?.abort();
-    const controller = new AbortController();
-    commitsAbortRef.current = controller;
-
-    setLoadingCommits(true);
-    onError(null);
-    try {
-      const res = await getGithubCommits({
-        owner: effectiveOwner,
-        repo: effectiveRepo,
-        branch: effectiveBranch,
-        path: activePathFilter || undefined,
-        perPage: 25,
-        signal: controller.signal,
-      });
-      if (controller.signal.aborted) return;
-      setCommits(res.commits);
-
-      if (res.commits.length >= 2 && !hasLocalChanges) {
-        setBaseRef((prev) =>
-          prev && prev !== 'last-synced' ? prev : res.commits[1].sha
-        );
-        setTargetRef((prev) =>
-          prev && prev !== 'working' ? prev : res.commits[0].sha
-        );
-      } else if (res.commits.length >= 1) {
-        setBaseRef((prev) =>
-          prev && prev !== 'last-synced' ? prev : res.commits[0].sha
-        );
-        setTargetRef('working');
-      }
-    } catch (err) {
-      if (isAbortError(err) || controller.signal.aborted) return;
-      onError(
-        err instanceof Error ? err.message : 'Failed to load Git commit history.'
-      );
-    } finally {
-      if (!controller.signal.aborted) {
-        setLoadingCommits(false);
-      }
-    }
-  }, [
-    effectiveOwner,
-    effectiveRepo,
-    effectiveBranch,
+  const {
+    commits,
+    loadingCommits,
+    baseRef,
+    setBaseRef,
+    targetRef,
+    setTargetRef,
+    baseDbml,
+    targetDbml,
+    loadingSql,
+    fetchCommits,
+  } = useGithubCommitsDiff({
+    owner: effectiveOwner,
+    repo: effectiveRepo,
+    branch: effectiveBranch,
+    isRepoEmpty: selectedRepo?.isEmpty,
+    targetKind,
+    targetFolder,
+    targetFilePath,
     activePathFilter,
+    localWorkingDbml,
+    localLastSyncedDbml,
+    hasLinkedRepo: Boolean(linked || repoLinked),
     hasLocalChanges,
     onError,
-  ]);
-
-  useEffect(() => {
-    if (effectiveOwner && effectiveRepo && !selectedRepo?.isEmpty) {
-      void fetchCommits();
-    }
-    return () => {
-      commitsAbortRef.current?.abort();
-    };
-  }, [effectiveOwner, effectiveRepo, effectiveBranch, activePathFilter, selectedRepo?.isEmpty, fetchCommits]);
-
-  const resolveSnapshotDbml = useCallback(
-    async (refKey: string, signal?: AbortSignal): Promise<string> => {
-      if (!refKey) return '';
-      if (refKey === 'working') return localWorkingDbml;
-      if (refKey === 'last-synced') return localLastSyncedDbml || '';
-
-      const cacheKey = `${effectiveOwner}/${effectiveRepo}:${refKey}:${targetKind}:${activePathFilter}`;
-      const cached = snapshotCacheRef.current.get(cacheKey);
-      if (cached !== undefined) return cached;
-
-      if (targetKind === 'folder') {
-        const res = await getGithubFolderFiles(
-          effectiveOwner,
-          effectiveRepo,
-          refKey,
-          cleanFolderPrefix(targetFolder),
-          signal
-        );
-        const modFiles: SchemaModuleFile[] = res.files.map((f, i) => ({
-          id: `cmp_${i}`,
-          path: f.path,
-          content: f.content,
-          sha: f.sha,
-        }));
-        const merged = mergeSchemaFiles(modFiles, {
-          schemaFolder: res.folder,
-        }).mergedDbml;
-        snapshotCacheRef.current.set(cacheKey, merged);
-        return merged;
-      }
-
-      if (!targetFilePath.trim()) {
-        throw new Error('Select a .dbml file path first.');
-      }
-      const file = await getGithubFile(
-        effectiveOwner,
-        effectiveRepo,
-        targetFilePath.trim(),
-        refKey,
-        signal
-      );
-      snapshotCacheRef.current.set(cacheKey, file.content);
-      return file.content;
-    },
-    [
-      localWorkingDbml,
-      localLastSyncedDbml,
-      effectiveOwner,
-      effectiveRepo,
-      targetKind,
-      activePathFilter,
-      targetFolder,
-      targetFilePath,
-    ]
-  );
-
-  useEffect(() => {
-    if (!baseRef || !targetRef) {
-      setBaseDbml('');
-      setTargetDbml('');
-      return;
-    }
-
-    const controller = new AbortController();
-
-    const loadSnapshots = async () => {
-      setLoadingSql(true);
-      onError(null);
-      try {
-        const [a, b] = await Promise.all([
-          resolveSnapshotDbml(baseRef, controller.signal),
-          resolveSnapshotDbml(targetRef, controller.signal),
-        ]);
-        if (!controller.signal.aborted) {
-          setBaseDbml(a);
-          setTargetDbml(b);
-        }
-      } catch (err) {
-        if (!isAbortError(err) && !controller.signal.aborted) {
-          onError(
-            err instanceof Error
-              ? err.message
-              : 'Failed to load commit schema snapshots.'
-          );
-        }
-      } finally {
-        if (!controller.signal.aborted) setLoadingSql(false);
-      }
-    };
-
-    void loadSnapshots();
-    return () => {
-      controller.abort();
-    };
-  }, [baseRef, targetRef, resolveSnapshotDbml, onError]);
+  });
 
   const diffResult = useMemo(
     () => computeSchemaDiff(baseDbml, targetDbml),

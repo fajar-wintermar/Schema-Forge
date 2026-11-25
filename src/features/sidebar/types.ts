@@ -2,7 +2,7 @@ import {
   ParsedSchema,
   SchemaVersion,
   TableGroupDef,
-} from '../../types/schema';
+} from '@shared/domain/schemaTypes';
 
 export type SidebarTab = 'domains' | 'versions' | 'changelog';
 

@@ -1,8 +1,8 @@
 import { useEffect, useMemo } from 'react';
 import { SidebarTab } from '../../sidebar/types';
-import { TablePosition, WorkspaceProject } from '../../../types/schema';
+import { TablePosition, WorkspaceProject } from '@shared/domain/schemaTypes';
 import { buildTableInstances } from '../../../utils/autoLayout';
-import { parseDbml } from '../../../utils/dbmlParser';
+import { parseDbml } from '@shared/domain/dbml';
 import { useModularSchemaFiles } from './useModularSchemaFiles';
 import { useDiagramSchemaActions } from './useDiagramSchemaActions';
 import { useSchemaVersions } from './useSchemaVersions';

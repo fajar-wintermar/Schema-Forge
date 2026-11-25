@@ -1,5 +1,5 @@
 import React from 'react';
-import { StickyNote, TableDef, TableGroupDef } from '../../../types/schema';
+import { StickyNote, TableDef, TableGroupDef } from '@shared/domain/schemaTypes';
 import { stripMarkdownToPlainText } from '../../markdown/markdownUtils';
 import { DocsBreadcrumb } from '../components/DocsBreadcrumb';
 import { ReadmeNoteCard } from '../components/ReadmeNoteCard';

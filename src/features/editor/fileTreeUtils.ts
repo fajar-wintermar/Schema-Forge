@@ -1,4 +1,4 @@
-import { ParseError, SchemaModuleFile } from '../../types/schema';
+import { ParseError, SchemaModuleFile } from '@shared/domain/schemaTypes';
 import {
   SchemaTreeFileNode,
   SchemaTreeFolderNode,

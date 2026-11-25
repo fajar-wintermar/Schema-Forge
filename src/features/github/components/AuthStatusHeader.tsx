@@ -8,7 +8,7 @@ import {
   LogOut,
   X,
 } from 'lucide-react';
-import { GithubAuthStatus } from '../../../utils/remoteService';
+import { GithubAuthStatus } from '../../../services/api/remoteService';
 import { sanitizeExternalUrl } from '../../../utils/urlSafety';
 
 interface AuthStatusHeaderProps {

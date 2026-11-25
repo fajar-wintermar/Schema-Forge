@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SchemaModuleFile } from '../../src/types/schema';
+import { SchemaModuleFile } from '@shared/domain/schemaTypes';
 import {
   detectSchemaFolder,
   findModuleDefiningTable,

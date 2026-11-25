@@ -9,7 +9,7 @@ import {
   TableGroupDef,
   TablePartialDef,
   UNGROUPED_DOMAIN_ID,
-} from '../../types/schema';
+} from '@shared/domain/schemaTypes';
 
 export function filterSchemaByDomains(
   schema: ParsedSchema,

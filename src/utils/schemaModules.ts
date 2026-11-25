@@ -1,4 +1,4 @@
-import { ParseError, SchemaModuleFile } from '../types/schema';
+import { ParseError, SchemaModuleFile } from '@shared/domain/schemaTypes';
 
 export const MERGED_SCHEMA_VIEW_ID = '__merged__';
 

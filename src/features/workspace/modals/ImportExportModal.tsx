@@ -11,13 +11,15 @@ import {
   X,
 } from 'lucide-react';
 import {
-  DetailLevel,
+  type DetailLevel,
   formatDomainLabel,
-  ParsedSchema,
-  StickyNote,
-  TablePosition,
+  type ParsedSchema,
+  type StickyNote,
+  type TablePosition,
   UNGROUPED_DOMAIN_ID,
-} from '../../../types/schema';
+} from '@shared/domain/schemaTypes';
+import { useFetchRemoteDbml } from '../../../hooks/useFetchRemoteDbml';
+import type { RemoteFetchResult } from '../../../services/api/remoteService';
 import {
   buildDiagramSvg,
   downloadTextFile,
@@ -29,7 +31,6 @@ import {
   importCsvToDbml,
   importSqlToDbml,
 } from '../../../utils/importExport';
-import { fetchDbmlFromUrl, RemoteFetchResult } from '../../../utils/remoteService';
 
 interface ImportExportModalProps {
   projectName: string;
@@ -79,9 +80,16 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
   const [importFormat, setImportFormat] = useState<'sql' | 'csv' | 'dbml' | 'url'>('sql');
   const [importText, setImportText] = useState('');
   const [importUrl, setImportUrl] = useState('');
-  const [importingUrl, setImportingUrl] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
+
+  const {
+    loading: importingUrl,
+    error: urlImportError,
+    clearError: clearUrlImportError,
+    fetchUrl,
+  } = useFetchRemoteDbml();
+  const activeImportError = importError || urlImportError;
 
   const ungroupedCount = useMemo(() => {
     const grouped = new Set<string>();
@@ -214,28 +222,16 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
 
   const handleImportSubmit = async () => {
     setImportError(null);
+    clearUrlImportError();
     if (importFormat === 'url') {
-      const target = importUrl.trim();
-      if (!target) {
-        setImportError('Enter a DBML URL to load.');
-        return;
+      const res = await fetchUrl(importUrl);
+      if (!res) return;
+      if (onImportUrlResult) {
+        onImportUrlResult(res);
+      } else {
+        onImportDbml(res.content);
       }
-      setImportingUrl(true);
-      try {
-        const res = await fetchDbmlFromUrl(target);
-        if (onImportUrlResult) {
-          onImportUrlResult(res);
-        } else {
-          onImportDbml(res.content);
-        }
-        onClose();
-      } catch (err) {
-        setImportError(
-          err instanceof Error ? err.message : 'Failed to load DBML from URL.'
-        );
-      } finally {
-        setImportingUrl(false);
-      }
+      onClose();
       return;
     }
 
@@ -621,6 +617,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
                     onClick={() => {
                       setImportFormat(fmt);
                       setImportError(null);
+                      clearUrlImportError();
                     }}
                     className={`px-3 py-1 text-xs font-medium rounded-md uppercase transition-colors ${
                       importFormat === fmt
@@ -682,9 +679,9 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
               />
             )}
 
-            {importError && (
+            {activeImportError && (
               <div className="px-3 py-2 rounded-lg bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-800 text-xs text-rose-700 dark:text-rose-300">
-                {importError}
+                {activeImportError}
               </div>
             )}
 

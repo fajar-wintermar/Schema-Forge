@@ -4,7 +4,7 @@ import {
   CommandTargetView,
 } from '../features/command/commandSearch';
 import type { DocsSection } from '../features/docs/types';
-import { DetailLevel, ViewMode } from '../types/schema';
+import { DetailLevel, ViewMode } from '@shared/domain/schemaTypes';
 
 interface FocusRequest {
   type: 'table' | 'group' | 'fit';

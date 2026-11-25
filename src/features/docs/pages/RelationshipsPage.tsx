@@ -1,6 +1,6 @@
 import React from 'react';
 import { Search } from 'lucide-react';
-import { RefDef } from '../../../types/schema';
+import { RefDef } from '@shared/domain/schemaTypes';
 import { CardinalityBadge, CardinalityLegend } from '../components/CardinalityBadge';
 import { DocsBreadcrumb } from '../components/DocsBreadcrumb';
 import { PaginationBar } from '../components/PaginationBar';

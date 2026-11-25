@@ -4,8 +4,8 @@ import {
   GithubRepoLink,
   SchemaModuleFile,
   WorkspaceProject,
-} from '../../../types/schema';
-import { ApiClientError } from '../../../utils/apiClient';
+} from '@shared/domain/schemaTypes';
+import { ApiClientError } from '../../../services/api/apiClient';
 import {
   getGithubFile,
   getGithubFolderFiles,
@@ -14,7 +14,7 @@ import {
   GithubTreeFile,
   pushGithubBatch,
   pushGithubFile,
-} from '../../../utils/remoteService';
+} from '../../../services/api/remoteService';
 import { computeSchemaDiff } from '../../../utils/schemaDiff';
 import { cleanFolderPrefix, mergeSchemaFiles } from '../../../utils/schemaModules';
 import { BatchPushSummary } from '../types';

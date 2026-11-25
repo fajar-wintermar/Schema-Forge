@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addRefInDbml, parseDbml } from '../../src/utils/dbmlParser';
+import { addRefInDbml, parseDbml } from '@shared/domain/dbml';
 import {
   alignSelectedTables,
   computeSnapAlignment,

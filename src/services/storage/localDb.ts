@@ -1,4 +1,4 @@
-import { WorkspaceProject } from '../types/schema';
+import type { WorkspaceProject } from '@shared/domain/schemaTypes';
 import {
   createRandomSaltBase64,
   deriveFallbackAesKey,
@@ -7,7 +7,6 @@ import {
   isSealedWorkspaceRecord,
   isWorkspaceProject,
   sealWorkspace,
-  type StoredWorkspaceRecord,
   unsealWorkspace,
 } from './localCrypto';
 

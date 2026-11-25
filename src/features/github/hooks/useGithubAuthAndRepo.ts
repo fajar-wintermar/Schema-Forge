@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { isAbortError } from '../../../utils/apiClient';
+import { isAbortError } from '../../../services/api/apiClient';
 import {
   getGithubAuthStatus,
   getGithubAuthUrl,
@@ -14,11 +14,11 @@ import {
   GithubTreeFile,
   initGithubBranch,
   logoutGithub,
-  parseGithubTargetInput,
   setStoredGithubSessionToken,
-} from '../../../utils/remoteService';
+} from '../../../services/api/remoteService';
+import { parseGithubTargetInput } from '@shared/domain/github/githubTargetParser';
 import { isTrustedOAuthMessageOrigin } from '../../../utils/urlSafety';
-import { WorkspaceProject } from '../../../types/schema';
+import { WorkspaceProject } from '@shared/domain/schemaTypes';
 
 export interface UseGithubAuthAndRepoParams {
   workspace: WorkspaceProject;

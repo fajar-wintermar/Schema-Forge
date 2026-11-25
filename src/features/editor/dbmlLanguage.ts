@@ -1,4 +1,4 @@
-import { TableDef } from '../../types/schema';
+import { TableDef } from '@shared/domain/schemaTypes';
 import { AutocompleteItem } from './types';
 
 export const TOP_KEYWORDS = new Set([

@@ -1,5 +1,5 @@
 import React, { useMemo } from 'react';
-import { DetailLevel, TableDef, TablePosition } from '../../../types/schema';
+import { DetailLevel, TableDef, TablePosition } from '@shared/domain/schemaTypes';
 import { ResolvedEdge } from '../../../utils/autoLayout';
 import {
   AnchorBox,

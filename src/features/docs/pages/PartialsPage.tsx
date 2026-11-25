@@ -1,6 +1,6 @@
 import React from 'react';
 import { Blocks, KeyRound, Search } from 'lucide-react';
-import { TableDef, TablePartialDef } from '../../../types/schema';
+import { TableDef, TablePartialDef } from '@shared/domain/schemaTypes';
 import { DocsBreadcrumb } from '../components/DocsBreadcrumb';
 import { TrimmableNote } from '../components/TrimmableNote';
 import type { DocsSection } from '../types';

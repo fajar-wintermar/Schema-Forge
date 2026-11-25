@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { parseDbml } from '../../src/utils/dbmlParser';
+import { parseDbml } from '../../shared/domain/dbml';
 import { COMMERCE_V1_DBML } from '../../src/utils/sampleSchemas';
 
 test.describe('SchemaForge E2E Smoke Suite', () => {
