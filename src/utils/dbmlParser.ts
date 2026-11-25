@@ -1,12 +1,12 @@
-export { parseDbml } from './dbml/parser';
 export {
   addRefInDbml,
   assignTableToGroupInDbml,
   deleteTableGroupInDbml,
   moveTableToGroupInDbml,
+  parseDbml,
   removeTableFromGroupInDbml,
   reorderTableGroupsInDbml,
   setTableGroupsForTableInDbml,
   setTableHeaderColorInDbml,
   upsertTableGroupInDbml,
-} from './dbml/mutations';
+} from '../../shared/domain/dbml';
