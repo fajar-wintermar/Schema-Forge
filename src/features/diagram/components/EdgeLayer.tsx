@@ -27,6 +27,7 @@ export interface EdgeLayerProps {
   routingMode: EdgeRoutingMode;
   cursorMode: CursorMode;
   darkMode: boolean;
+  showCardinality?: boolean;
   onHoverRef: (id: string | null) => void;
   onHoverBundle?: (id: string | null) => void;
 }
@@ -67,6 +68,7 @@ const EdgeLayerComponent: React.FC<EdgeLayerProps> = ({
   routingMode,
   cursorMode,
   darkMode,
+  showCardinality = true,
   onHoverRef,
   onHoverBundle,
 }) => {
@@ -314,42 +316,53 @@ const EdgeLayerComponent: React.FC<EdgeLayerProps> = ({
               r={isHighlighted ? 4.5 : 3.5}
               fill={isHighlighted ? stroke : r.color || '#64748b'}
             />
-            {isHighlighted && (
+            {showCardinality && (
               <>
                 <text
-                  x={anchors.x1 + anchors.dir1 * 12}
+                  x={anchors.x1 + anchors.dir1 * 14}
                   y={anchors.y1 - 6}
+                  textAnchor="middle"
                   fontSize={10}
                   fontWeight={700}
-                  fill={stroke}
-                  className="font-mono"
+                  fill={isHighlighted ? stroke : darkMode ? '#cbd5e1' : '#475569'}
+                  stroke={darkMode ? '#0b1120' : '#f8fafc'}
+                  strokeWidth={3}
+                  paintOrder="stroke"
+                  className="font-mono select-none"
                 >
-                  {r.relation === '>' ? 'N' : '1'}
+                  {r.relation === '>' || r.relation === '<>' ? 'N' : '1'}
                 </text>
                 <text
                   x={anchors.x2 + anchors.dir2 * 14}
                   y={anchors.y2 - 6}
+                  textAnchor="middle"
                   fontSize={10}
                   fontWeight={700}
-                  fill={stroke}
-                  className="font-mono"
+                  fill={isHighlighted ? stroke : darkMode ? '#cbd5e1' : '#475569'}
+                  stroke={darkMode ? '#0b1120' : '#f8fafc'}
+                  strokeWidth={3}
+                  paintOrder="stroke"
+                  className="font-mono select-none"
                 >
-                  {r.relation === '<' ? 'N' : '1'}
+                  {r.relation === '<' || r.relation === '<>' ? 'N' : '1'}
                 </text>
-                {hoveredRefId === edge.id && metaLabel && (
-                  <text
-                    x={midX}
-                    y={midY - 8}
-                    textAnchor="middle"
-                    fontSize={10}
-                    fontWeight={600}
-                    fill={stroke}
-                    className="font-mono"
-                  >
-                    {metaLabel}
-                  </text>
-                )}
               </>
+            )}
+            {isHighlighted && hoveredRefId === edge.id && metaLabel && (
+              <text
+                x={midX}
+                y={midY - 8}
+                textAnchor="middle"
+                fontSize={10}
+                fontWeight={600}
+                fill={stroke}
+                stroke={darkMode ? '#0b1120' : '#f8fafc'}
+                strokeWidth={3}
+                paintOrder="stroke"
+                className="font-mono select-none"
+              >
+                {metaLabel}
+              </text>
             )}
           </g>
         );

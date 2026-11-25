@@ -7,6 +7,7 @@ import {
   CURSOR_MODE_STORAGE_KEY,
   type CursorMode,
   EDGE_ROUTING_STORAGE_KEY,
+  FK_CARDINALITY_STORAGE_KEY,
   FOCUS_MODE_STORAGE_KEY,
 } from '../types';
 
@@ -53,6 +54,13 @@ export function useDiagramPreferences() {
       }
     }
   );
+  const [showCardinality, setShowCardinality] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem(FK_CARDINALITY_STORAGE_KEY) !== 'false';
+    } catch {
+      return true;
+    }
+  });
 
   const toggleAutoLod = useCallback(() => {
     setAutoLod((prev) => {
@@ -112,6 +120,18 @@ export function useDiagramPreferences() {
     }
   }, []);
 
+  const toggleShowCardinality = useCallback(() => {
+    setShowCardinality((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(FK_CARDINALITY_STORAGE_KEY, String(next));
+      } catch {
+        // ignore storage errors
+      }
+      return next;
+    });
+  }, []);
+
   return {
     snapGrid,
     setSnapGrid,
@@ -127,5 +147,7 @@ export function useDiagramPreferences() {
     toggleRoutingMode,
     crossDomainMode,
     updateCrossDomainMode,
+    showCardinality,
+    toggleShowCardinality,
   };
 }

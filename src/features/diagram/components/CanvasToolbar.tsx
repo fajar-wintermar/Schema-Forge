@@ -32,6 +32,7 @@ export interface CanvasToolbarProps {
   snapGrid: boolean;
   showMinimap: boolean;
   autoLod: boolean;
+  showCardinality: boolean;
   zoom: number;
   onUpdateCursorMode: (mode: CursorMode) => void;
   onToggleFocusMode: () => void;
@@ -40,6 +41,7 @@ export interface CanvasToolbarProps {
   onCloseDetailMenu: () => void;
   onChangeDetailLevel: (level: DetailLevel) => void;
   onToggleAutoLod: () => void;
+  onToggleShowCardinality: () => void;
   onAutoLayout: () => void;
   onAddNoteAtCenter: () => void;
   onToggleSnapGrid: () => void;
@@ -62,6 +64,7 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
   snapGrid,
   showMinimap,
   autoLod,
+  showCardinality,
   zoom,
   onUpdateCursorMode,
   onToggleFocusMode,
@@ -70,6 +73,7 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
   onCloseDetailMenu,
   onChangeDetailLevel,
   onToggleAutoLod,
+  onToggleShowCardinality,
   onAutoLayout,
   onAddNoteAtCenter,
   onToggleSnapGrid,
@@ -228,6 +232,21 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
               </label>
             </div>
           )}
+
+          <div className="px-3 py-2 border-t border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/30">
+            <label
+              title="Show 1 and N foreign key cardinality labels on relationship connectors"
+              className="flex items-center justify-between gap-2 text-xs text-slate-600 dark:text-slate-300 cursor-pointer"
+            >
+              <span>Show FK cardinality</span>
+              <input
+                type="checkbox"
+                checked={showCardinality}
+                onChange={onToggleShowCardinality}
+                className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+              />
+            </label>
+          </div>
 
           <div className="px-3 py-2 border-t border-slate-100 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-800/30">
             <label

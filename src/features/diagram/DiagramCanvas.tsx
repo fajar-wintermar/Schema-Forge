@@ -82,6 +82,8 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     toggleRoutingMode,
     crossDomainMode,
     updateCrossDomainMode,
+    showCardinality,
+    toggleShowCardinality,
   } = useDiagramPreferences();
 
   const fkColsByTable = useMemo(() => {
@@ -619,6 +621,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
           routingMode={routingMode}
           cursorMode={cursorMode}
           darkMode={darkMode}
+          showCardinality={showCardinality}
           onHoverRef={interactions.setHoveredRefId}
           onHoverBundle={interactions.setHoveredBundleId}
         />
@@ -783,6 +786,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         snapGrid={snapGrid}
         showMinimap={showMinimap}
         autoLod={autoLod}
+        showCardinality={showCardinality}
         zoom={viewport.zoom}
         onUpdateCursorMode={interactions.handleSetCursorMode}
         onToggleFocusMode={() => updateFocusMode((prev) => !prev)}
@@ -793,6 +797,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         onCloseDetailMenu={() => interactions.setDetailMenuOpen(false)}
         onChangeDetailLevel={onChangeDetailLevel}
         onToggleAutoLod={toggleAutoLod}
+        onToggleShowCardinality={toggleShowCardinality}
         onAutoLayout={onAutoLayout}
         onAddNoteAtCenter={handleAddNoteAtCenter}
         onToggleSnapGrid={() => setSnapGrid((s) => !s)}
