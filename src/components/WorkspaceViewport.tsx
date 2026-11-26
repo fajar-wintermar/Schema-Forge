@@ -1,5 +1,6 @@
 import React, { lazy, Suspense } from 'react';
 import { DiagramCanvas } from '../features/diagram/DiagramCanvas';
+import type { ViewportState } from '../features/diagram/types';
 import type { DocsSection } from '../features/docs/types';
 import { DbmlEditor } from '../features/editor/DbmlEditor';
 import { DbmlEditorProps } from '../features/editor/types';
@@ -80,6 +81,16 @@ interface WorkspaceViewportProps {
   onUpdateTableNote: (tableId: string, note: string) => void;
   onUpdateColumnNote: (tableId: string, columnName: string, note: string) => void;
   onClearDomainFilter?: () => void;
+  diagramInitialViewport?: ViewportState;
+  diagramViewportRestoreRequest?: {
+    viewport: ViewportState;
+    nonce: number;
+  } | null;
+  onDiagramViewportChange?: (viewport: ViewportState) => void;
+  docsInitialSection?: DocsSection;
+  docsInitialScrollTop?: number;
+  onDocsSectionChange?: (section: DocsSection) => void;
+  onDocsScrollTopChange?: (scrollTop: number) => void;
 }
 
 export const WorkspaceViewport: React.FC<WorkspaceViewportProps> = ({
@@ -123,6 +134,13 @@ export const WorkspaceViewport: React.FC<WorkspaceViewportProps> = ({
   onUpdateTableNote,
   onUpdateColumnNote,
   onClearDomainFilter,
+  diagramInitialViewport,
+  diagramViewportRestoreRequest,
+  onDiagramViewportChange,
+  docsInitialSection,
+  docsInitialScrollTop,
+  onDocsSectionChange,
+  onDocsScrollTopChange,
 }) => {
   if (viewMode === 'docs') {
     return (
@@ -157,6 +175,10 @@ export const WorkspaceViewport: React.FC<WorkspaceViewportProps> = ({
               onUpdateGroupNote={onUpdateGroupNote}
               onUpdateTableNote={onUpdateTableNote}
               onUpdateColumnNote={onUpdateColumnNote}
+              initialSection={docsInitialSection}
+              initialScrollTop={docsInitialScrollTop}
+              onSectionChange={onDocsSectionChange}
+              onScrollTopChange={onDocsScrollTopChange}
             />
           </Suspense>
         </ErrorBoundary>
@@ -260,6 +282,9 @@ export const WorkspaceViewport: React.FC<WorkspaceViewportProps> = ({
           onSetAllGroupsCollapsed={onSetAllGroupsCollapsed}
           focusRequest={focusRequest}
           darkMode={darkMode}
+          initialViewport={diagramInitialViewport}
+          viewportRestoreRequest={diagramViewportRestoreRequest}
+          onViewportChange={onDiagramViewportChange}
         />
       </ErrorBoundary>
     </main>

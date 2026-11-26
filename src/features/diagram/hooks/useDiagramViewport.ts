@@ -27,6 +27,9 @@ interface UseDiagramViewportOptions {
   detailLevel: DetailLevel;
   fkColsByTable: Map<string, Set<string>>;
   focusRequest: DiagramCanvasProps['focusRequest'];
+  initialViewport?: ViewportState;
+  viewportRestoreRequest?: DiagramCanvasProps['viewportRestoreRequest'];
+  onViewportChange?: (viewport: ViewportState) => void;
 }
 
 export function useDiagramViewport({
@@ -39,16 +42,40 @@ export function useDiagramViewport({
   detailLevel,
   fkColsByTable,
   focusRequest,
+  initialViewport,
+  viewportRestoreRequest,
+  onViewportChange,
 }: UseDiagramViewportOptions) {
-  const [viewport, setViewport] = useState<ViewportState>({
-    x: 40,
-    y: 40,
-    zoom: 0.85,
-  });
+  const [viewport, setViewport] = useState<ViewportState>(
+    () =>
+      initialViewport || {
+        x: 40,
+        y: 40,
+        zoom: 0.85,
+      }
+  );
   const [containerSize, setContainerSize] = useState<ContainerDimensions>({
     width: 1200,
     height: 800,
   });
+  const onViewportChangeRef = useRef(onViewportChange);
+  onViewportChangeRef.current = onViewportChange;
+
+  useEffect(() => {
+    onViewportChangeRef.current?.(viewport);
+  }, [viewport]);
+
+  const lastHandledRestoreNonceRef = useRef<number | null>(null);
+  useEffect(() => {
+    if (
+      !viewportRestoreRequest ||
+      lastHandledRestoreNonceRef.current === viewportRestoreRequest.nonce
+    ) {
+      return;
+    }
+    lastHandledRestoreNonceRef.current = viewportRestoreRequest.nonce;
+    setViewport(viewportRestoreRequest.viewport);
+  }, [viewportRestoreRequest]);
 
   const rafViewportIdRef = useRef<number | null>(null);
   const pendingViewportRef = useRef<ViewportState | null>(null);
@@ -198,8 +225,14 @@ export function useDiagramViewport({
     setViewport,
   };
 
+  const handledFocusNonceRef = useRef<number | null>(
+    initialViewport && focusRequest ? focusRequest.nonce : null
+  );
+
   useEffect(() => {
     if (!focusRequest) return;
+    if (handledFocusNonceRef.current === focusRequest.nonce) return;
+    handledFocusNonceRef.current = focusRequest.nonce;
     const {
       fitVisibleTables: fitVisible,
       visibleInstances: visInsts,

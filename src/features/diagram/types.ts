@@ -51,6 +51,9 @@ export interface DiagramCanvasProps {
   collapsedGroups?: string[];
   onToggleGroupCollapse?: (groupName: string) => void;
   onSetAllGroupsCollapsed?: (collapsed: boolean) => void;
+  initialViewport?: ViewportState;
+  viewportRestoreRequest?: { viewport: ViewportState; nonce: number } | null;
+  onViewportChange?: (viewport: ViewportState) => void;
 }
 
 export type CursorMode = 'select' | 'marquee' | 'pan';

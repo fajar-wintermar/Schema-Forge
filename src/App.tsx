@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useMemo, useRef, useState } from 'react';
 import { AppModals } from './components/AppModals';
 import {
   AsyncEmptyState,
@@ -7,20 +7,24 @@ import {
 } from './components/AsyncStateView';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { InspectorDrawer } from './components/InspectorDrawer';
+import { TabSafepointMenu } from './components/TabSafepointMenu';
 import { TopBar } from './components/TopBar';
 import { WorkspaceViewport } from './components/WorkspaceViewport';
 import { useGlobalShortcuts } from './features/app/hooks/useGlobalShortcuts';
+import type { ViewportState } from './features/diagram/types';
 import type { DocsSection } from './features/docs/types';
 import { OfflineIndicator } from './features/pwa/OfflineIndicator';
 import { Sidebar, SidebarTab } from './features/sidebar/Sidebar';
 import { useRemoteWorkspaceSync } from './features/workspace/hooks/useRemoteWorkspaceSync';
 import { useSchemaActions } from './features/workspace/hooks/useSchemaActions';
+import { useTabSafepoints } from './features/workspace/hooks/useTabSafepoints';
 import { useWorkspaceStore } from './features/workspace/hooks/useWorkspaceStore';
 import { useModKey } from './hooks/useModKey';
 import { useShareRoute } from './hooks/useShareRoute';
 import { useSplitResize } from './hooks/useSplitResize';
 import { useToast } from './hooks/useToast';
 import { useWorkspaceCommandHandler } from './hooks/useWorkspaceCommandHandler';
+import type { SafepointViewState } from './utils/tabSafepoints';
 import {
   TableGroupDef,
   TablePosition,
@@ -66,6 +70,17 @@ export default function App() {
     nonce: number;
   } | null>(null);
 
+  const [diagramViewportRestoreRequest, setDiagramViewportRestoreRequest] =
+    useState<{ viewport: ViewportState; nonce: number } | null>(null);
+
+  const viewModeRef = useRef<ViewMode>(viewMode);
+  viewModeRef.current = viewMode;
+  const preservedDiagramViewportRef = useRef<ViewportState | undefined>(
+    undefined
+  );
+  const preservedDocsSectionRef = useRef<DocsSection | undefined>(undefined);
+  const preservedDocsScrollTopRef = useRef<number>(0);
+
   // Modal state
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const [groupModalState, setGroupModalState] = useState<{
@@ -88,6 +103,9 @@ export default function App() {
     setSelectedTableId(null);
     setSelectedDomains([]);
     setHighlightedColumn(null);
+    preservedDiagramViewportRef.current = undefined;
+    preservedDocsSectionRef.current = undefined;
+    preservedDocsScrollTopRef.current = 0;
   }, []);
 
   const closeGroupModal = useCallback(() => {
@@ -121,9 +139,94 @@ export default function App() {
     showToast,
   });
 
+  const getCurrentViewState = useCallback(
+    (): SafepointViewState => ({
+      editorState,
+      selectedDomains,
+      selectedTableId,
+      diagramViewport: preservedDiagramViewportRef.current,
+      docsSection: preservedDocsSectionRef.current,
+      docsScrollTop: preservedDocsScrollTopRef.current,
+    }),
+    [editorState, selectedDomains, selectedTableId]
+  );
+
+  const handleRestoreSafepointViewState = useCallback(
+    (targetTab: ViewMode, viewState: SafepointViewState) => {
+      setViewMode(targetTab);
+      if (targetTab === 'split') {
+        setSidebarOpen(false);
+        setEditorState(viewState.editorState || 'normal');
+      } else if (targetTab === 'diagram') {
+        setSidebarOpen(true);
+      }
+
+      if (viewState.selectedDomains) {
+        setSelectedDomains(viewState.selectedDomains);
+      }
+      if (viewState.selectedTableId !== undefined) {
+        setSelectedTableId(viewState.selectedTableId);
+      }
+      if (viewState.diagramViewport) {
+        preservedDiagramViewportRef.current = viewState.diagramViewport;
+        setDiagramViewportRestoreRequest({
+          viewport: viewState.diagramViewport,
+          nonce: Date.now(),
+        });
+      }
+      if (viewState.docsSection) {
+        preservedDocsSectionRef.current = viewState.docsSection;
+        setDocsSectionRequest({
+          section: viewState.docsSection,
+          nonce: Date.now(),
+        });
+      }
+      if (viewState.docsScrollTop !== undefined) {
+        preservedDocsScrollTopRef.current = viewState.docsScrollTop;
+      }
+    },
+    []
+  );
+
+  const {
+    safepoints,
+    hasPendingChanges: hasPendingSafepointChanges,
+    captureSafepoint,
+    restoreSafepoint,
+    deleteSafepoint,
+    clearSafepoints,
+  } = useTabSafepoints({
+    activeWorkspace,
+    updateActiveWorkspace,
+    onRestoreViewState: handleRestoreSafepointViewState,
+    showToast,
+  });
+
+  const handleChangeViewMode = useCallback(
+    (mode: ViewMode) => {
+      const prevMode = viewModeRef.current;
+      if (mode !== prevMode) {
+        captureSafepoint({
+          fromTab: prevMode,
+          toTab: mode,
+          reason: 'tab-switch',
+          viewState: getCurrentViewState(),
+        });
+      }
+      setViewMode(mode);
+      if (mode === 'split') {
+        setSidebarOpen(false);
+        setEditorState((prev) => (prev !== 'normal' ? 'normal' : prev));
+      } else if (mode === 'diagram') {
+        setSidebarOpen(true);
+      }
+    },
+    [captureSafepoint, getCurrentViewState]
+  );
+
   useGlobalShortcuts({
     viewMode,
-    setViewMode,
+    onChangeViewMode: handleChangeViewMode,
     setSidebarOpen,
     setDocsNavOpen,
     setEditorState,
@@ -241,19 +344,6 @@ export default function App() {
     [schemaActions]
   );
 
-  const handleChangeViewMode = useCallback(
-    (mode: ViewMode) => {
-      setViewMode(mode);
-      if (mode === 'split') {
-        setSidebarOpen(false);
-        setEditorState((prev) => (prev !== 'normal' ? 'normal' : prev));
-      } else if (mode === 'diagram') {
-        setSidebarOpen(true);
-      }
-    },
-    []
-  );
-
   const handleChangeSelectedDomains = useCallback((domains: string[]) => {
     setSelectedDomains(domains);
     setFocusRequest({
@@ -269,7 +359,6 @@ export default function App() {
     effectiveSelectedDomains,
     activeDetailLevel: activeWorkspace?.detailLevel ?? 'full',
     onChangeViewMode: handleChangeViewMode,
-    setViewMode,
     setEditorState,
     setDarkMode,
     setSelectedDomains,
@@ -449,6 +538,21 @@ export default function App() {
         darkMode={darkMode}
         onToggleDarkMode={() => setDarkMode((d) => !d)}
         errorCount={parsedSchema.errors.length}
+        safepoints={safepoints}
+        hasPendingSafepointChanges={hasPendingSafepointChanges}
+        onPinSafepoint={() =>
+          captureSafepoint({
+            fromTab: viewMode,
+            toTab: viewMode,
+            reason: 'manual',
+            viewState: getCurrentViewState(),
+          })
+        }
+        onRestoreSafepoint={(id) =>
+          restoreSafepoint(id, viewMode, getCurrentViewState())
+        }
+        onDeleteSafepoint={deleteSafepoint}
+        onClearSafepoints={clearSafepoints}
       />
 
       {/* Compact responsive toolbar for narrow viewports */}
@@ -471,6 +575,23 @@ export default function App() {
             )
           )}
         </div>
+        <TabSafepointMenu
+          safepoints={safepoints}
+          hasPendingChanges={hasPendingSafepointChanges}
+          onPinNow={() =>
+            captureSafepoint({
+              fromTab: viewMode,
+              toTab: viewMode,
+              reason: 'manual',
+              viewState: getCurrentViewState(),
+            })
+          }
+          onRestore={(id) =>
+            restoreSafepoint(id, viewMode, getCurrentViewState())
+          }
+          onDelete={deleteSafepoint}
+          onClearAll={clearSafepoints}
+        />
       </div>
 
       {/* Main Workspace Area */}
@@ -537,7 +658,7 @@ export default function App() {
           onSelectTableFromDocs={(id) => {
             schemaActions.expandGroupsForTable(id);
             setSelectedTableId(id);
-            setViewMode('split');
+            handleChangeViewMode('split');
             setFocusRequest({ type: 'table', id, nonce: Date.now() });
           }}
           effectiveSelectedDomains={effectiveSelectedDomains}
@@ -566,6 +687,19 @@ export default function App() {
           onUpdateTableNote={schemaActions.handleUpdateTableNote}
           onUpdateColumnNote={schemaActions.handleUpdateColumnNote}
           onClearDomainFilter={() => handleChangeSelectedDomains([])}
+          diagramInitialViewport={preservedDiagramViewportRef.current}
+          diagramViewportRestoreRequest={diagramViewportRestoreRequest}
+          onDiagramViewportChange={(vp) => {
+            preservedDiagramViewportRef.current = vp;
+          }}
+          docsInitialSection={preservedDocsSectionRef.current}
+          docsInitialScrollTop={preservedDocsScrollTopRef.current}
+          onDocsSectionChange={(sec) => {
+            preservedDocsSectionRef.current = sec;
+          }}
+          onDocsScrollTopChange={(top) => {
+            preservedDocsScrollTopRef.current = top;
+          }}
         />
 
         {selectedTable &&
@@ -591,7 +725,7 @@ export default function App() {
                   schemaActions.handleChangeTableHeaderColor
                 }
                 onJumpToCode={(line) => {
-                  if (viewMode !== 'split') setViewMode('split');
+                  if (viewMode !== 'split') handleChangeViewMode('split');
                   if (editorState === 'minimized') setEditorState('normal');
                   if (line) schemaActions.jumpToMergedLine(line);
                 }}

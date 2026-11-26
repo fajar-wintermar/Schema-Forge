@@ -27,6 +27,10 @@ export interface DocsViewProps {
     columnName: string,
     note: string
   ) => void;
+  initialSection?: DocsSection;
+  initialScrollTop?: number;
+  onSectionChange?: (section: DocsSection) => void;
+  onScrollTopChange?: (scrollTop: number) => void;
 }
 
 export type TreeFilterMode = 'all' | 'domain';

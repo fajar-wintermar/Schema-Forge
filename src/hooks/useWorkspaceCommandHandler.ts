@@ -28,7 +28,6 @@ interface UseWorkspaceCommandHandlerOptions {
   effectiveSelectedDomains: string[];
   activeDetailLevel: DetailLevel;
   onChangeViewMode: (mode: ViewMode) => void;
-  setViewMode: React.Dispatch<React.SetStateAction<ViewMode>>;
   setEditorState: React.Dispatch<
     React.SetStateAction<'normal' | 'maximized' | 'minimized'>
   >;
@@ -60,7 +59,6 @@ export function useWorkspaceCommandHandler({
   effectiveSelectedDomains,
   activeDetailLevel,
   onChangeViewMode,
-  setViewMode,
   setEditorState,
   setDarkMode,
   setSelectedDomains,
@@ -93,7 +91,7 @@ export function useWorkspaceCommandHandler({
             onChangeViewMode('docs');
             break;
           case 'auto-layout':
-            if (viewMode === 'docs') setViewMode('split');
+            if (viewMode === 'docs') onChangeViewMode('split');
             onAutoLayout();
             break;
           case 'toggle-theme':
@@ -116,7 +114,7 @@ export function useWorkspaceCommandHandler({
       }
 
       if (item.kind === 'file' || target === 'editor') {
-        if (viewMode !== 'split') setViewMode('split');
+        if (viewMode !== 'split') onChangeViewMode('split');
         if (editorState === 'minimized') setEditorState('normal');
         if (item.filePath) {
           onSelectSchemaFile(item.filePath);
@@ -134,7 +132,7 @@ export function useWorkspaceCommandHandler({
         (target === 'docs' || (target === 'auto' && viewMode === 'docs')) &&
         item.docsSection
       ) {
-        setViewMode('docs');
+        onChangeViewMode('docs');
         setDocsSectionRequest({ section: item.docsSection, nonce: Date.now() });
         showToast(`Opened ${item.title} in Docs`);
         return;
@@ -146,7 +144,7 @@ export function useWorkspaceCommandHandler({
           onJumpToMergedLine(item.line);
           showToast(`Jumped to ${item.title}`);
         } else if (item.docsSection) {
-          setViewMode('docs');
+          onChangeViewMode('docs');
           setDocsSectionRequest({
             section: item.docsSection,
             nonce: Date.now(),
@@ -158,14 +156,14 @@ export function useWorkspaceCommandHandler({
 
       if (item.kind === 'note' && !item.tableId && !item.groupName) {
         if (item.docsSection && (viewMode === 'docs' || !item.line)) {
-          setViewMode('docs');
+          onChangeViewMode('docs');
           setDocsSectionRequest({
             section: item.docsSection,
             nonce: Date.now(),
           });
           showToast(`Opened note "${item.title}"`);
         } else if (item.line) {
-          if (viewMode === 'diagram') setViewMode('split');
+          if (viewMode === 'diagram') onChangeViewMode('split');
           if (editorState === 'minimized') setEditorState('normal');
           onJumpToMergedLine(item.line);
           showToast(`Jumped to note "${item.title}"`);
@@ -176,7 +174,7 @@ export function useWorkspaceCommandHandler({
       if (item.kind === 'group' && item.groupName) {
         setHighlightedColumn(null);
         setSelectedTableId(null);
-        if (viewMode === 'docs') setViewMode('split');
+        if (viewMode === 'docs') onChangeViewMode('split');
         if (editorState === 'maximized') setEditorState('normal');
         setSelectedDomains([item.groupName]);
         if (item.line) onJumpToMergedLine(item.line);
@@ -191,7 +189,7 @@ export function useWorkspaceCommandHandler({
 
       if (item.tableId) {
         onExpandGroupsForTable?.(item.tableId);
-        if (viewMode === 'docs') setViewMode('split');
+        if (viewMode === 'docs') onChangeViewMode('split');
         if (editorState === 'maximized') setEditorState('normal');
         if (
           effectiveSelectedDomains.length > 0 &&
@@ -232,7 +230,6 @@ export function useWorkspaceCommandHandler({
       effectiveSelectedDomains,
       activeDetailLevel,
       onChangeViewMode,
-      setViewMode,
       setEditorState,
       setDarkMode,
       setSelectedDomains,

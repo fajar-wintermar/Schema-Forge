@@ -3,7 +3,7 @@ import { ViewMode } from '@shared/domain/schemaTypes';
 
 interface UseGlobalShortcutsOptions {
   viewMode: ViewMode;
-  setViewMode: React.Dispatch<React.SetStateAction<ViewMode>>;
+  onChangeViewMode: (mode: ViewMode) => void;
   setSidebarOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setDocsNavOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setEditorState: React.Dispatch<
@@ -31,7 +31,7 @@ interface UseGlobalShortcutsOptions {
 
 export function useGlobalShortcuts({
   viewMode,
-  setViewMode,
+  onChangeViewMode,
   setSidebarOpen,
   setDocsNavOpen,
   setEditorState,
@@ -134,7 +134,7 @@ export function useGlobalShortcuts({
       if (!e.shiftKey && (e.key === '\\' || e.code === 'Backslash')) {
         e.preventDefault();
         if (viewMode !== 'split') {
-          setViewMode('split');
+          onChangeViewMode('split');
           setEditorState('normal');
         } else {
           setEditorState((prev) =>
@@ -148,7 +148,7 @@ export function useGlobalShortcuts({
       if (e.shiftKey && key === 'e') {
         e.preventDefault();
         if (viewMode !== 'split') {
-          setViewMode('split');
+          onChangeViewMode('split');
           setEditorState('maximized');
         } else {
           setEditorState((prev) =>
@@ -162,7 +162,7 @@ export function useGlobalShortcuts({
     return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [
     viewMode,
-    setViewMode,
+    onChangeViewMode,
     setSidebarOpen,
     setDocsNavOpen,
     setEditorState,

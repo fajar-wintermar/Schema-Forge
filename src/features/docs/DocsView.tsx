@@ -40,16 +40,43 @@ export const DocsView: React.FC<DocsViewProps> = ({
   onUpdateGroupNote,
   onUpdateTableNote,
   onUpdateColumnNote,
+  initialSection,
+  initialScrollTop,
+  onSectionChange,
+  onScrollTopChange,
 }) => {
   const [search, setSearch] = useState('');
   const [navSearch, setNavSearch] = useState('');
   const [treeMode, setTreeMode] = useState<TreeFilterMode>('all');
   const [sortAZ, setSortAZ] = useState(true);
-  const [section, setSection] = useState<DocsSection>({ kind: 'overview' });
+  const [section, setSection] = useState<DocsSection>(
+    () => initialSection || { kind: 'overview' }
+  );
   const [expandedDomains, setExpandedDomains] = useState<Record<string, boolean>>({});
   const [expandedTreeTables, setExpandedTreeTables] = useState<Record<string, boolean>>({});
   const [showScrollTop, setShowScrollTop] = useState(false);
   const mainPaneRef = useRef<HTMLDivElement | null>(null);
+  const onSectionChangeRef = useRef(onSectionChange);
+  const onScrollTopChangeRef = useRef(onScrollTopChange);
+  onSectionChangeRef.current = onSectionChange;
+  onScrollTopChangeRef.current = onScrollTopChange;
+
+  useEffect(() => {
+    onSectionChangeRef.current?.(section);
+  }, [section]);
+
+  const initialScrollAppliedRef = useRef(false);
+  useEffect(() => {
+    if (initialScrollAppliedRef.current) return;
+    initialScrollAppliedRef.current = true;
+    if (initialScrollTop && initialScrollTop > 0) {
+      requestAnimationFrame(() => {
+        if (mainPaneRef.current) {
+          mainPaneRef.current.scrollTop = initialScrollTop;
+        }
+      });
+    }
+  }, [initialScrollTop]);
 
   // Pagination & search states
   const [overviewPage, setOverviewPage] = useState(1);
@@ -406,7 +433,9 @@ export const DocsView: React.FC<DocsViewProps> = ({
 
   const updateScrollTopVisibility = useCallback(() => {
     const pane = mainPaneRef.current;
-    setShowScrollTop(Boolean(pane && pane.scrollTop > 160));
+    const top = pane ? pane.scrollTop : 0;
+    setShowScrollTop(top > 160);
+    onScrollTopChangeRef.current?.(top);
   }, []);
 
   useEffect(() => {

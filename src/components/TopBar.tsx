@@ -28,7 +28,9 @@ import {
   ViewMode,
 } from '@shared/domain/schemaTypes';
 import { BrandLogo } from './BrandLogo';
+import { TabSafepointMenu } from './TabSafepointMenu';
 import { usePWAInstall } from '../features/pwa/usePWAInstall';
+import type { TabSafepoint } from '../utils/tabSafepoints';
 
 interface TopBarProps {
   projectName: string;
@@ -53,6 +55,12 @@ interface TopBarProps {
   darkMode: boolean;
   onToggleDarkMode: () => void;
   errorCount: number;
+  safepoints: TabSafepoint[];
+  hasPendingSafepointChanges: boolean;
+  onPinSafepoint: () => void;
+  onRestoreSafepoint: (safepointId: string) => void;
+  onDeleteSafepoint: (safepointId: string) => void;
+  onClearSafepoints: () => void;
 }
 
 const VIEW_OPTIONS: Array<{
@@ -88,6 +96,12 @@ export const TopBar: React.FC<TopBarProps> = ({
   darkMode,
   onToggleDarkMode,
   errorCount,
+  safepoints,
+  hasPendingSafepointChanges,
+  onPinSafepoint,
+  onRestoreSafepoint,
+  onDeleteSafepoint,
+  onClearSafepoints,
 }) => {
   const [sourceMenuOpen, setSourceMenuOpen] = useState(false);
   const [moreMenuOpen, setMoreMenuOpen] = useState(false);
@@ -240,8 +254,8 @@ export const TopBar: React.FC<TopBarProps> = ({
           )}
         </div>
 
-        {/* Center: View Mode Segmented Switch */}
-        <div className="hidden lg:flex items-center shrink-0">
+        {/* Center: View Mode Segmented Switch + Tab Safepoints */}
+        <div className="hidden lg:flex items-center gap-1.5 shrink-0">
           <div
             className="flex items-center p-1 rounded-lg bg-slate-100 dark:bg-slate-800/80 border border-slate-200/70 dark:border-slate-700/70"
             role="group"
@@ -266,6 +280,15 @@ export const TopBar: React.FC<TopBarProps> = ({
               );
             })}
           </div>
+
+          <TabSafepointMenu
+            safepoints={safepoints}
+            hasPendingChanges={hasPendingSafepointChanges}
+            onPinNow={onPinSafepoint}
+            onRestore={onRestoreSafepoint}
+            onDelete={onDeleteSafepoint}
+            onClearAll={onClearSafepoints}
+          />
         </div>
 
         {/* Right: Tidy Grouped Controls — Source & Export dropdown | Primary Actions (Share, Save) | Utility Cluster (Theme, More) */}

@@ -63,6 +63,9 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
   collapsedGroups = [],
   onToggleGroupCollapse,
   onSetAllGroupsCollapsed,
+  initialViewport,
+  viewportRestoreRequest,
+  onViewportChange,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const filterMenuRef = useRef<HTMLDivElement>(null);
@@ -325,6 +328,9 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     detailLevel,
     fkColsByTable,
     focusRequest,
+    initialViewport,
+    viewportRestoreRequest,
+    onViewportChange,
   });
 
   const interactions = useDiagramInteractions({
