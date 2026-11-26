@@ -57,6 +57,15 @@ export interface GithubCommitTreeResult {
   files: Array<{ path: string; sha: string; htmlUrl: string }>;
 }
 
+export interface GithubPullRequestResult {
+  number: number;
+  url: string;
+  title: string;
+  state: string;
+  headBranch: string;
+  baseBranch: string;
+}
+
 export interface IGithubGateway {
   getRepository(
     owner: string,
@@ -185,4 +194,13 @@ export interface IGithubGateway {
     refAdvanceErrorMessage: string;
     conflictOn422?: boolean;
   }): Promise<GithubCommitTreeResult>;
+  createPullRequest(params: {
+    owner: string;
+    repo: string;
+    title: string;
+    body: string;
+    head: string;
+    base: string;
+    accessToken: string;
+  }): Promise<GithubPullRequestResult>;
 }

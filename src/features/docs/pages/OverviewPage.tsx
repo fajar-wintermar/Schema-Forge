@@ -1,12 +1,14 @@
-import React from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   ArrowRight,
+  CheckCircle2,
   Database,
   FileText,
   Layers,
   PanelLeft,
   Search,
   Table2,
+  Tag,
 } from 'lucide-react';
 import {
   formatDomainLabel,
@@ -16,11 +18,17 @@ import {
   TableGroupDef,
   TablePosition,
 } from '@shared/domain/schemaTypes';
+import { computeDocsCoverage } from '../../../utils/docsCoverage';
+import {
+  collectSchemaTagCatalog,
+  extractMetadataTags,
+} from '../../../utils/metadataTags';
 import {
   isRichMarkdownNote,
   stripMarkdownToPlainText,
 } from '../../markdown/markdownUtils';
 import { DocsExportMenu } from '../components/DocsExportMenu';
+import { getTagToneBadgeClass, MetadataTagPills } from '../components/MetadataTagPills';
 import { PaginationBar } from '../components/PaginationBar';
 import { ReadmeNoteCard } from '../components/ReadmeNoteCard';
 import { TrimmableNote } from '../components/TrimmableNote';
@@ -87,343 +95,564 @@ export const OverviewPage: React.FC<OverviewPageProps> = ({
   onClearDomainFilter,
   onNavigateSection,
   onOpenTableDetail,
-}) => (
-  <div className="w-full px-6 lg:px-10 py-8 space-y-6">
-    {/* Project Header */}
-    <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-6 border-b border-slate-200 dark:border-slate-800">
-      <div className="space-y-1.5">
-        <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-blue-600 dark:text-blue-400">
-          {!navOpen && (
-            <button
-              type="button"
-              onClick={onToggleNav}
-              title={`Show Docs navigation (${modKey}J)`}
-              className="p-1 mr-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
-            >
-              <PanelLeft className="w-3.5 h-3.5" />
-            </button>
-          )}
-          <Database className="w-3.5 h-3.5" />
-          <span>{schema.project.databaseType || 'Relational Schema'}</span>
-          <span>·</span>
-          <span className="tabular-nums">{schema.tables.length} Tables</span>
-          <span>·</span>
-          <span className="tabular-nums">{totalFieldsCount} Fields</span>
-          <span>·</span>
-          <button
-            type="button"
-            onClick={() => onNavigateSection({ kind: 'groups' })}
-            className="tabular-nums hover:underline"
-          >
-            {schema.tableGroups.length} Table Groups
-          </button>
-          <span>·</span>
-          <button
-            type="button"
-            onClick={() => onNavigateSection({ kind: 'enums' })}
-            className="tabular-nums hover:underline"
-          >
-            {schema.enums.length} Enums
-          </button>
-          {schema.tablePartials.length > 0 && (
-            <>
-              <span>·</span>
+}) => {
+  const [onlyUndocumented, setOnlyUndocumented] = useState(false);
+  const [selectedTagLabel, setSelectedTagLabel] = useState<string | null>(null);
+
+  const coverage = useMemo(() => computeDocsCoverage(schema), [schema]);
+  const tagCatalog = useMemo(() => collectSchemaTagCatalog(schema), [schema]);
+
+  const tableTagsMap = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof extractMetadataTags>>();
+    for (const t of schema.tables) {
+      const seen = new Set<string>();
+      const collected: ReturnType<typeof extractMetadataTags> = [];
+      for (const tag of extractMetadataTags(t.note)) {
+        if (!seen.has(tag.label)) {
+          seen.add(tag.label);
+          collected.push(tag);
+        }
+      }
+      for (const c of t.columns) {
+        for (const tag of extractMetadataTags(c.note)) {
+          if (!seen.has(tag.label)) {
+            seen.add(tag.label);
+            collected.push(tag);
+          }
+        }
+      }
+      if (collected.length > 0) map.set(t.id, collected);
+    }
+    return map;
+  }, [schema.tables]);
+
+  const isLocalTableFilterActive = onlyUndocumented || selectedTagLabel !== null;
+  const filteredLocalTables = useMemo(() => {
+    if (!isLocalTableFilterActive) return overviewTables;
+    return overviewTables.filter((t) => {
+      if (onlyUndocumented && t.note && t.note.trim()) return false;
+      if (selectedTagLabel) {
+        const tags = tableTagsMap.get(t.id) || [];
+        if (!tags.some((tag) => tag.label === selectedTagLabel)) return false;
+      }
+      return true;
+    });
+  }, [
+    isLocalTableFilterActive,
+    overviewTables,
+    onlyUndocumented,
+    selectedTagLabel,
+    tableTagsMap,
+  ]);
+
+  const displayedTables = isLocalTableFilterActive
+    ? filteredLocalTables
+    : pagedOverviewTables;
+
+  return (
+    <div className="w-full px-6 lg:px-10 py-8 space-y-6">
+      {/* Project Header */}
+      <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-6 border-b border-slate-200 dark:border-slate-800">
+        <div className="space-y-1.5">
+          <div className="flex flex-wrap items-center gap-2 text-xs font-medium text-blue-600 dark:text-blue-400">
+            {!navOpen && (
               <button
                 type="button"
-                onClick={() => onNavigateSection({ kind: 'partials' })}
-                className="tabular-nums hover:underline"
+                onClick={onToggleNav}
+                title={`Show Docs navigation (${modKey}J)`}
+                className="p-1 mr-1 rounded border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800"
               >
-                {schema.tablePartials.length} Partials
+                <PanelLeft className="w-3.5 h-3.5" />
               </button>
-            </>
-          )}
-          <span>·</span>
-          <button
-            type="button"
-            onClick={() => onNavigateSection({ kind: 'relationships' })}
-            className="tabular-nums hover:underline"
-          >
-            {schema.refs.length} Relationships
-          </button>
-          <span>·</span>
-          <button
-            type="button"
-            onClick={() => onNavigateSection({ kind: 'notes' })}
-            className="tabular-nums hover:underline"
-          >
-            {allNotesCount} Notes
-          </button>
-        </div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-50">
-          {schema.project.name || 'Database Schema Documentation'}
-        </h1>
-        {schema.project.note && !isRichMarkdownNote(schema.project.note) && (
-          <div className="text-sm text-slate-600 dark:text-slate-300 max-w-3xl">
-            <TrimmableNote
-              key={`ov-proj-short-${schema.project.name || 'default'}`}
-              content={schema.project.note}
-              compact
-              maxChars={120}
-              defaultExpanded={false}
-            />
-          </div>
-        )}
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto shrink-0">
-        <div className="relative flex-1 md:w-72">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => onSetSearch(e.target.value)}
-            placeholder="Search tables, columns, notes..."
-            className="w-full pl-9 pr-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
-          />
-        </div>
-        {allowExport && (
-          <DocsExportMenu
-            schema={schema}
-            stickyNotes={stickyNotes}
-            projectName={projectName}
-            selectedDomains={selectedDomains}
-            positions={positions}
-            collapsedGroups={collapsedGroups}
-            darkMode={darkMode}
-          />
-        )}
-      </div>
-    </div>
-
-    {/* Project README Card */}
-    {schema.project.note && isRichMarkdownNote(schema.project.note) && (
-      <ReadmeNoteCard
-        key={`ov-readme-${schema.project.name || 'default'}`}
-        title="README"
-        subtitle={schema.project.name || 'Project Documentation'}
-        content={schema.project.note}
-        defaultExpanded={false}
-        scrollContainerRef={mainPaneRef}
-      />
-    )}
-
-    {/* Standalone Project Notes Directory */}
-    {schema.notes.length > 0 && (
-      <div className="space-y-2.5">
-        <div className="flex items-center justify-between text-xs font-semibold text-slate-700 dark:text-slate-200">
-          <span className="flex items-center gap-2">
-            <FileText className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-            <span>Documentation Notes ({schema.notes.length})</span>
-          </span>
-          <button
-            type="button"
-            onClick={() => onNavigateSection({ kind: 'notes' })}
-            className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
-          >
-            View all {allNotesCount} notes →
-          </button>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {schema.notes.map((n) => (
-            <button
-              key={n.id}
-              type="button"
-              onClick={() => onNavigateSection({ kind: 'note', noteId: n.id })}
-              className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-blue-400 dark:hover:border-blue-600 text-left space-y-1.5 transition-colors"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-xs font-semibold text-slate-900 dark:text-slate-100 truncate">
-                  {n.name}
-                </span>
-                <ArrowRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-              </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2">
-                {trimNotePreview(n.content, 160).preview}
-              </p>
-            </button>
-          ))}
-        </div>
-      </div>
-    )}
-
-    {/* Business Domains / TableGroup Notes Strip */}
-    {visibleGroups.length > 0 && (
-      <div className="space-y-2.5">
-        <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
-          <span className="flex items-center gap-2">
-            <Layers className="w-3.5 h-3.5 text-slate-500" />
-            <span>Table Groups &amp; Domain Notes ({visibleGroups.length})</span>
-          </span>
-          <div className="flex items-center gap-3 font-medium">
+            )}
+            <Database className="w-3.5 h-3.5" />
+            <span>{schema.project.databaseType || 'Relational Schema'}</span>
+            <span>·</span>
+            <span className="tabular-nums">{schema.tables.length} Tables</span>
+            <span>·</span>
+            <span className="tabular-nums">{totalFieldsCount} Fields</span>
+            <span>·</span>
             <button
               type="button"
               onClick={() => onNavigateSection({ kind: 'groups' })}
-              className="text-blue-600 dark:text-blue-400 hover:underline"
+              className="tabular-nums hover:underline"
             >
-              View all TableGroup notes →
+              {schema.tableGroups.length} Table Groups
             </button>
-            {allNotesCount > 0 && (
+            <span>·</span>
+            <button
+              type="button"
+              onClick={() => onNavigateSection({ kind: 'enums' })}
+              className="tabular-nums hover:underline"
+            >
+              {schema.enums.length} Enums
+            </button>
+            {schema.tablePartials.length > 0 && (
+              <>
+                <span>·</span>
+                <button
+                  type="button"
+                  onClick={() => onNavigateSection({ kind: 'partials' })}
+                  className="tabular-nums hover:underline"
+                >
+                  {schema.tablePartials.length} Partials
+                </button>
+              </>
+            )}
+            <span>·</span>
+            <button
+              type="button"
+              onClick={() => onNavigateSection({ kind: 'relationships' })}
+              className="tabular-nums hover:underline"
+            >
+              {schema.refs.length} Relationships
+            </button>
+            <span>·</span>
+            <button
+              type="button"
+              onClick={() => onNavigateSection({ kind: 'notes' })}
+              className="tabular-nums hover:underline"
+            >
+              {allNotesCount} Notes
+            </button>
+          </div>
+          <h1 className="text-2xl font-bold tracking-tight text-slate-900 dark:text-slate-50">
+            {schema.project.name || 'Database Schema Documentation'}
+          </h1>
+          {schema.project.note && !isRichMarkdownNote(schema.project.note) && (
+            <div className="text-sm text-slate-600 dark:text-slate-300 max-w-3xl">
+              <TrimmableNote
+                key={`ov-proj-short-${schema.project.name || 'default'}`}
+                content={schema.project.note}
+                compact
+                maxChars={120}
+                defaultExpanded={false}
+              />
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2.5 w-full md:w-auto shrink-0">
+          <div className="relative flex-1 md:w-72">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={search}
+              onChange={(e) => onSetSearch(e.target.value)}
+              placeholder="Search tables, columns, notes..."
+              className="w-full pl-9 pr-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 focus:outline-none focus:ring-2 focus:ring-blue-500/40"
+            />
+          </div>
+          {allowExport && (
+            <DocsExportMenu
+              schema={schema}
+              stickyNotes={stickyNotes}
+              projectName={projectName}
+              selectedDomains={selectedDomains}
+              positions={positions}
+              collapsedGroups={collapsedGroups}
+              darkMode={darkMode}
+            />
+          )}
+        </div>
+      </div>
+
+      {/* Documentation Coverage & Metadata Tag Catalog */}
+      {schema.tables.length > 0 && (
+        <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-xs font-semibold text-slate-800 dark:text-slate-100">
+              <CheckCircle2
+                className={`w-4 h-4 ${
+                  coverage.overallPct >= 80
+                    ? 'text-emerald-600 dark:text-emerald-400'
+                    : coverage.overallPct >= 40
+                    ? 'text-blue-600 dark:text-blue-400'
+                    : 'text-amber-600 dark:text-amber-400'
+                }`}
+              />
+              <span>Documentation Coverage</span>
+              <span className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 tabular-nums">
+                {coverage.overallPct}% overall
+              </span>
+            </div>
+
+            {coverage.undocumentedTables.length > 0 && (
               <button
                 type="button"
-                onClick={() => onNavigateSection({ kind: 'notes' })}
-                className="text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:underline"
+                onClick={() => setOnlyUndocumented((prev) => !prev)}
+                className={`px-2.5 py-1 rounded-md text-[11px] font-medium border transition-colors ${
+                  onlyUndocumented
+                    ? 'border-amber-400 bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-200'
+                    : 'border-slate-200 dark:border-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800'
+                }`}
               >
-                All Notes ({allNotesCount}) →
+                {onlyUndocumented
+                  ? 'Showing undocumented tables (reset)'
+                  : `Find ${coverage.undocumentedTables.length} undocumented table${
+                      coverage.undocumentedTables.length === 1 ? '' : 's'
+                    }`}
               </button>
             )}
           </div>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
-          {visibleGroups.map((g) => (
-            <div
-              key={g.name}
-              role="button"
-              tabIndex={0}
-              onClick={() =>
-                onNavigateSection({ kind: 'group', groupName: g.name })
-              }
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  onNavigateSection({ kind: 'group', groupName: g.name });
-                }
-              }}
-              className="cursor-pointer p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-blue-400 dark:hover:border-blue-600 text-left space-y-2 transition-colors flex flex-col justify-between"
-            >
-              <div className="space-y-1.5 w-full">
-                <div className="flex items-center justify-between gap-2">
-                  <span className="inline-flex items-center gap-2 min-w-0">
-                    <span
-                      className="w-2.5 h-2.5 rounded-xs shrink-0"
-                      style={{ backgroundColor: g.color || '#2563EB' }}
-                    />
-                    <span className="text-xs font-semibold text-slate-900 dark:text-slate-100 truncate">
-                      {g.name}
-                    </span>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            {[
+              {
+                label: 'Tables',
+                metric: coverage.tables,
+                barColor: 'bg-blue-600',
+              },
+              {
+                label: 'Columns',
+                metric: coverage.columns,
+                barColor: 'bg-emerald-600',
+              },
+              {
+                label: 'Table Groups',
+                metric: coverage.groups,
+                barColor: 'bg-violet-600',
+              },
+            ].map((item) => (
+              <div
+                key={item.label}
+                className="p-2.5 rounded-lg bg-slate-50/80 dark:bg-slate-800/40 border border-slate-200/70 dark:border-slate-800 space-y-1.5"
+              >
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="font-medium text-slate-600 dark:text-slate-300">
+                    {item.label}
                   </span>
-                  <span className="text-[10px] text-slate-400 tabular-nums shrink-0">
-                    {g.tables.length}t
+                  <span className="font-mono text-slate-700 dark:text-slate-200 tabular-nums">
+                    {item.metric.documented}/{item.metric.total} ({item.metric.pct}%)
                   </span>
                 </div>
-                {g.note ? (
-                  <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">
-                    {trimNotePreview(g.note, 160).preview}
-                  </p>
-                ) : (
-                  <p className="text-[11.5px] text-slate-400 italic">
-                    No TableGroup note defined
-                  </p>
-                )}
+                <div className="h-1.5 w-full rounded-full bg-slate-200 dark:bg-slate-700 overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all ${item.barColor}`}
+                    style={{ width: `${item.metric.pct}%` }}
+                  />
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    )}
-
-    {isFilteringDomains && (
-      <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 text-xs">
-        <span className="text-blue-900 dark:text-blue-100 font-medium">
-          Showing tables in selected domain
-          {selectedDomains.length > 1 ? 's' : ''}:{' '}
-          {selectedDomains.map(formatDomainLabel).join(', ')}
-        </span>
-        {onClearDomainFilter && (
-          <button
-            type="button"
-            onClick={onClearDomainFilter}
-            className="font-semibold text-blue-600 dark:text-blue-300 hover:underline shrink-0"
-          >
-            Show All Tables
-          </button>
-        )}
-      </div>
-    )}
-
-    {/* Thin Flat Paginated Table Directory */}
-    <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
-      <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
-        <span>All Tables ({overviewTables.length})</span>
-        <div className="flex items-center gap-3 text-[11px] font-normal text-slate-400">
-          <span>Click any table to open full specification</span>
-        </div>
-      </div>
-
-      {overviewTables.length === 0 ? (
-        <div className="p-8 text-center text-xs text-slate-400">
-          No tables matching &ldquo;{search}&rdquo;
-        </div>
-      ) : (
-        <>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-slate-200 dark:border-slate-800 text-[11px] font-semibold text-slate-500 dark:text-slate-400 bg-slate-50/60 dark:bg-slate-900">
-                  <th className="py-2.5 px-5">Table Name</th>
-                  <th className="py-2.5 px-4">Domains</th>
-                  <th className="py-2.5 px-4">Table Notes</th>
-                  <th className="py-2.5 px-4 text-right">Fields</th>
-                  <th className="py-2.5 px-5 text-right">Action</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-slate-800/70 text-xs">
-                {pagedOverviewTables.map((t) => {
-                  const domains = domainsByTable.get(t.id) || [];
-                  return (
-                    <tr
-                      key={t.id}
-                      onClick={() => onOpenTableDetail(t.id)}
-                      className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors"
-                    >
-                      <td className="py-2.5 px-5 font-mono font-semibold text-slate-900 dark:text-slate-100 whitespace-nowrap">
-                        <span className="inline-flex items-center gap-2.5">
-                          <Table2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                          <span
-                            className="w-2 h-2 rounded-xs shrink-0"
-                            style={{
-                              backgroundColor: t.headerColor || '#0f172a',
-                            }}
-                          />
-                          <span className="hover:text-blue-600 dark:hover:text-blue-400">
-                            {t.id}
-                          </span>
-                        </span>
-                      </td>
-                      <td className="py-2.5 px-4 text-slate-500 dark:text-slate-400 whitespace-nowrap">
-                        {domains.length > 0 ? domains.join(', ') : '—'}
-                      </td>
-                      <td className="py-2.5 px-4 text-slate-600 dark:text-slate-300 max-w-md truncate">
-                        {t.note ? (
-                          stripMarkdownToPlainText(t.note)
-                        ) : (
-                          <span className="text-slate-400">—</span>
-                        )}
-                      </td>
-                      <td className="py-2.5 px-4 text-right font-mono text-slate-500 dark:text-slate-400 tabular-nums whitespace-nowrap">
-                        {t.columns.length}
-                      </td>
-                      <td className="py-2.5 px-5 text-right whitespace-nowrap">
-                        <span className="text-blue-600 dark:text-blue-400 font-medium">
-                          View →
-                        </span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            ))}
           </div>
 
-          <PaginationBar
-            page={overviewPage}
-            pageSize={overviewPageSize}
-            totalItems={overviewTables.length}
-            itemLabel="tables"
-            onPageChange={onSetOverviewPage}
-            onPageSizeChange={onSetOverviewPageSize}
-          />
-        </>
+          {(coverage.undocumentedTables.length > 0 ||
+            coverage.undocumentedGroups.length > 0) && (
+            <div className="flex flex-wrap items-center gap-1.5 text-[11px] pt-1">
+              <span className="text-slate-400 font-medium">Needs docs:</span>
+              {coverage.undocumentedTables.slice(0, 5).map((t) => (
+                <button
+                  key={`undoc-t-${t.id}`}
+                  type="button"
+                  onClick={() => onOpenTableDetail(t.id)}
+                  className="px-2 py-0.5 rounded border border-dashed border-slate-300 dark:border-slate-700 font-mono text-slate-600 dark:text-slate-300 hover:border-blue-400 hover:text-blue-600 dark:hover:text-blue-400"
+                >
+                  {t.id}
+                </button>
+              ))}
+              {coverage.undocumentedGroups.slice(0, 3).map((g) => (
+                <button
+                  key={`undoc-g-${g.name}`}
+                  type="button"
+                  onClick={() =>
+                    onNavigateSection({ kind: 'group', groupName: g.name })
+                  }
+                  className="px-2 py-0.5 rounded border border-dashed border-amber-300 dark:border-amber-800 text-amber-700 dark:text-amber-300 hover:border-amber-500"
+                >
+                  Domain: {g.name}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {tagCatalog.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5 pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px]">
+              <span className="inline-flex items-center gap-1 text-slate-400 font-medium mr-1">
+                <Tag className="w-3 h-3" />
+                <span>Metadata Tags:</span>
+              </span>
+              {tagCatalog.map((item) => {
+                const active = selectedTagLabel === item.label;
+                return (
+                  <button
+                    key={item.label}
+                    type="button"
+                    onClick={() =>
+                      setSelectedTagLabel((prev) =>
+                        prev === item.label ? null : item.label
+                      )
+                    }
+                    className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border font-semibold transition-all ${getTagToneBadgeClass(
+                      item.tone
+                    )} ${
+                      active ? 'ring-2 ring-blue-500/60' : 'opacity-85 hover:opacity-100'
+                    }`}
+                  >
+                    <span>{item.label}</span>
+                    <span className="font-mono text-[10px] opacity-75">
+                      {item.count}
+                    </span>
+                  </button>
+                );
+              })}
+              {selectedTagLabel && (
+                <button
+                  type="button"
+                  onClick={() => setSelectedTagLabel(null)}
+                  className="ml-1 text-[11px] font-medium text-blue-600 dark:text-blue-400 hover:underline"
+                >
+                  Clear tag filter
+                </button>
+              )}
+            </div>
+          )}
+        </div>
       )}
+
+      {/* Project README Card */}
+      {schema.project.note && isRichMarkdownNote(schema.project.note) && (
+        <ReadmeNoteCard
+          key={`ov-readme-${schema.project.name || 'default'}`}
+          title="README"
+          subtitle={schema.project.name || 'Project Documentation'}
+          content={schema.project.note}
+          defaultExpanded={false}
+          scrollContainerRef={mainPaneRef}
+        />
+      )}
+
+      {/* Standalone Project Notes Directory */}
+      {schema.notes.length > 0 && (
+        <div className="space-y-2.5">
+          <div className="flex items-center justify-between text-xs font-semibold text-slate-700 dark:text-slate-200">
+            <span className="flex items-center gap-2">
+              <FileText className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+              <span>Documentation Notes ({schema.notes.length})</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => onNavigateSection({ kind: 'notes' })}
+              className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
+            >
+              View all {allNotesCount} notes →
+            </button>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {schema.notes.map((n) => (
+              <button
+                key={n.id}
+                type="button"
+                onClick={() => onNavigateSection({ kind: 'note', noteId: n.id })}
+                className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-blue-400 dark:hover:border-blue-600 text-left space-y-1.5 transition-colors"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold text-slate-900 dark:text-slate-100 truncate">
+                    {n.name}
+                  </span>
+                  <ArrowRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2">
+                  {trimNotePreview(n.content, 160).preview}
+                </p>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Business Domains / TableGroup Notes Strip */}
+      {visibleGroups.length > 0 && (
+        <div className="space-y-2.5">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
+            <span className="flex items-center gap-2">
+              <Layers className="w-3.5 h-3.5 text-slate-500" />
+              <span>Table Groups &amp; Domain Notes ({visibleGroups.length})</span>
+            </span>
+            <div className="flex items-center gap-3 font-medium">
+              <button
+                type="button"
+                onClick={() => onNavigateSection({ kind: 'groups' })}
+                className="text-blue-600 dark:text-blue-400 hover:underline"
+              >
+                View all TableGroup notes →
+              </button>
+              {allNotesCount > 0 && (
+                <button
+                  type="button"
+                  onClick={() => onNavigateSection({ kind: 'notes' })}
+                  className="text-slate-500 dark:text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:underline"
+                >
+                  All Notes ({allNotesCount}) →
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {visibleGroups.map((g) => (
+              <div
+                key={g.name}
+                role="button"
+                tabIndex={0}
+                onClick={() =>
+                  onNavigateSection({ kind: 'group', groupName: g.name })
+                }
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onNavigateSection({ kind: 'group', groupName: g.name });
+                  }
+                }}
+                className="cursor-pointer p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 hover:border-blue-400 dark:hover:border-blue-600 text-left space-y-2 transition-colors flex flex-col justify-between"
+              >
+                <div className="space-y-1.5 w-full">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="inline-flex items-center gap-2 min-w-0">
+                      <span
+                        className="w-2.5 h-2.5 rounded-xs shrink-0"
+                        style={{ backgroundColor: g.color || '#2563EB' }}
+                      />
+                      <span className="text-xs font-semibold text-slate-900 dark:text-slate-100 truncate">
+                        {g.name}
+                      </span>
+                    </span>
+                    <span className="text-[10px] text-slate-400 tabular-nums shrink-0">
+                      {g.tables.length}t
+                    </span>
+                  </div>
+                  {g.note ? (
+                    <p className="text-xs text-slate-500 dark:text-slate-400 line-clamp-2 leading-relaxed">
+                      {trimNotePreview(g.note, 160).preview}
+                    </p>
+                  ) : (
+                    <p className="text-[11.5px] text-slate-400 italic">
+                      No TableGroup note defined
+                    </p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {isFilteringDomains && (
+        <div className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-xl border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/40 text-xs">
+          <span className="text-blue-900 dark:text-blue-100 font-medium">
+            Showing tables in selected domain
+            {selectedDomains.length > 1 ? 's' : ''}:{' '}
+            {selectedDomains.map(formatDomainLabel).join(', ')}
+          </span>
+          {onClearDomainFilter && (
+            <button
+              type="button"
+              onClick={onClearDomainFilter}
+              className="font-semibold text-blue-600 dark:text-blue-300 hover:underline shrink-0"
+            >
+              Show All Tables
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Thin Flat Paginated Table Directory */}
+      <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 overflow-hidden">
+        <div className="px-5 py-3 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2 text-xs font-semibold text-slate-700 dark:text-slate-200">
+          <span>
+            {isLocalTableFilterActive
+              ? `Filtered Tables (${filteredLocalTables.length})`
+              : `All Tables (${overviewTables.length})`}
+          </span>
+          <div className="flex items-center gap-3 text-[11px] font-normal text-slate-400">
+            <span>Click any table to open full specification</span>
+          </div>
+        </div>
+
+        {displayedTables.length === 0 ? (
+          <div className="p-8 text-center text-xs text-slate-400">
+            No tables matching current filter criteria.
+          </div>
+        ) : (
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="border-b border-slate-200 dark:border-slate-800 text-[11px] font-semibold text-slate-500 dark:text-slate-400 bg-slate-50/60 dark:bg-slate-900">
+                    <th className="py-2.5 px-5">Table Name</th>
+                    <th className="py-2.5 px-4">Domains</th>
+                    <th className="py-2.5 px-4">Table Notes &amp; Tags</th>
+                    <th className="py-2.5 px-4 text-right">Fields</th>
+                    <th className="py-2.5 px-5 text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 dark:divide-slate-800/70 text-xs">
+                  {displayedTables.map((t) => {
+                    const domains = domainsByTable.get(t.id) || [];
+                    const tags = tableTagsMap.get(t.id) || [];
+                    return (
+                      <tr
+                        key={t.id}
+                        onClick={() => onOpenTableDetail(t.id)}
+                        className="cursor-pointer hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors"
+                      >
+                        <td className="py-2.5 px-5 font-mono font-semibold text-slate-900 dark:text-slate-100 whitespace-nowrap">
+                          <span className="inline-flex items-center gap-2.5">
+                            <Table2 className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                            <span
+                              className="w-2 h-2 rounded-xs shrink-0"
+                              style={{
+                                backgroundColor: t.headerColor || '#0f172a',
+                              }}
+                            />
+                            <span className="hover:text-blue-600 dark:hover:text-blue-400">
+                              {t.id}
+                            </span>
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-4 text-slate-500 dark:text-slate-400 whitespace-nowrap">
+                          {domains.length > 0 ? domains.join(', ') : '—'}
+                        </td>
+                        <td className="py-2.5 px-4 text-slate-600 dark:text-slate-300 max-w-md">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {tags.length > 0 && (
+                              <MetadataTagPills tags={tags.slice(0, 3)} />
+                            )}
+                            <span className="truncate">
+                              {t.note ? (
+                                stripMarkdownToPlainText(t.note)
+                              ) : tags.length === 0 ? (
+                                <span className="text-slate-400">—</span>
+                              ) : null}
+                            </span>
+                          </div>
+                        </td>
+                        <td className="py-2.5 px-4 text-right font-mono text-slate-500 dark:text-slate-400 tabular-nums whitespace-nowrap">
+                          {t.columns.length}
+                        </td>
+                        <td className="py-2.5 px-5 text-right whitespace-nowrap">
+                          <span className="text-blue-600 dark:text-blue-400 font-medium">
+                            View →
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            {!isLocalTableFilterActive && (
+              <PaginationBar
+                page={overviewPage}
+                pageSize={overviewPageSize}
+                totalItems={overviewTables.length}
+                itemLabel="tables"
+                onPageChange={onSetOverviewPage}
+                onPageSizeChange={onSetOverviewPageSize}
+              />
+            )}
+          </>
+        )}
+      </div>
     </div>
-  </div>
-);
+  );
+};

@@ -1,6 +1,16 @@
 import React, { useState } from 'react';
-import { Edit3, Plus } from 'lucide-react';
-import { StickyNote, TableDef, TableGroupDef } from '@shared/domain/schemaTypes';
+import { Check, Copy, Edit3, GitBranch, Plus } from 'lucide-react';
+import {
+  ParsedSchema,
+  StickyNote,
+  TableDef,
+  TableGroupDef,
+} from '@shared/domain/schemaTypes';
+import {
+  exportGroupSummaryMarkdown,
+  exportSchemaToMermaid,
+  filterSchemaByDomains,
+} from '../../../utils/importExport';
 import { stripMarkdownToPlainText } from '../../markdown/markdownUtils';
 import { DocsBreadcrumb } from '../components/DocsBreadcrumb';
 import { InlineNoteEditor } from '../components/InlineNoteEditor';
@@ -9,6 +19,7 @@ import { TrimmableNote } from '../components/TrimmableNote';
 import type { DocsSection } from '../types';
 
 export interface GroupDetailPageProps {
+  schema: ParsedSchema;
   activeGroup: TableGroupDef;
   stickyNotes: StickyNote[];
   tableMap: Map<string, TableDef>;
@@ -22,6 +33,7 @@ export interface GroupDetailPageProps {
 }
 
 export const GroupDetailPage: React.FC<GroupDetailPageProps> = ({
+  schema,
   activeGroup,
   stickyNotes,
   tableMap,
@@ -34,8 +46,34 @@ export const GroupDetailPage: React.FC<GroupDetailPageProps> = ({
   onUpdateGroupNote,
 }) => {
   const [editingGroupName, setEditingGroupName] = useState<string | null>(null);
+  const [copiedMode, setCopiedMode] = useState<'notion' | 'mermaid' | null>(
+    null
+  );
   const isEditingNote =
     Boolean(onUpdateGroupNote) && editingGroupName === activeGroup.name;
+
+  const handleCopyMarkdown = async () => {
+    const md = exportGroupSummaryMarkdown(schema, activeGroup.name);
+    try {
+      await navigator.clipboard.writeText(md);
+      setCopiedMode('notion');
+      setTimeout(() => setCopiedMode(null), 1800);
+    } catch {
+      // clipboard unavailable
+    }
+  };
+
+  const handleCopyMermaid = async () => {
+    const scoped = filterSchemaByDomains(schema, [activeGroup.name]);
+    const mmd = exportSchemaToMermaid(scoped, { title: activeGroup.name });
+    try {
+      await navigator.clipboard.writeText(mmd);
+      setCopiedMode('mermaid');
+      setTimeout(() => setCopiedMode(null), 1800);
+    } catch {
+      // clipboard unavailable
+    }
+  };
 
   return (
     <div className="w-full px-6 lg:px-10 py-6 space-y-6">
@@ -51,25 +89,61 @@ export const GroupDetailPage: React.FC<GroupDetailPageProps> = ({
           ]}
         />
 
-        {onUpdateGroupNote && !isEditingNote && (
+        <div className="flex flex-wrap items-center gap-2">
           <button
             type="button"
-            onClick={() => setEditingGroupName(activeGroup.name)}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+            onClick={handleCopyMarkdown}
+            title="Copy Notion / Confluence Markdown summary + embedded Mermaid diagram"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
           >
-            {activeGroup.note ? (
-              <>
-                <Edit3 className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                <span>Edit Domain Note</span>
-              </>
+            {copiedMode === 'notion' ? (
+              <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
             ) : (
-              <>
-                <Plus className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
-                <span>Add Domain Note</span>
-              </>
+              <Copy className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
             )}
+            <span>
+              {copiedMode === 'notion'
+                ? 'Copied Markdown!'
+                : 'Copy Notion / Confluence'}
+            </span>
           </button>
-        )}
+
+          <button
+            type="button"
+            onClick={handleCopyMermaid}
+            title="Copy Mermaid erDiagram snippet for this TableGroup"
+            className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+          >
+            {copiedMode === 'mermaid' ? (
+              <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+            ) : (
+              <GitBranch className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400" />
+            )}
+            <span>
+              {copiedMode === 'mermaid' ? 'Copied Mermaid!' : 'Copy Mermaid'}
+            </span>
+          </button>
+
+          {onUpdateGroupNote && !isEditingNote && (
+            <button
+              type="button"
+              onClick={() => setEditingGroupName(activeGroup.name)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors"
+            >
+              {activeGroup.note ? (
+                <>
+                  <Edit3 className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                  <span>Edit Domain Note</span>
+                </>
+              ) : (
+                <>
+                  <Plus className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                  <span>Add Domain Note</span>
+                </>
+              )}
+            </button>
+          )}
+        </div>
       </div>
 
       <div className="flex items-center gap-3">

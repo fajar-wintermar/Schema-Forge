@@ -238,6 +238,7 @@ export function buildDiagramSvg(
   // 1. TableGroup containers (expanded dashed boxes or collapsed summary cards)
   for (const gb of groupBoxes) {
     const gColor = sanitizeSvgColor(gb.color, '#2563eb');
+    parts.push(`<g class="svg-group" data-group-name="${escapeXml(gb.name)}">`);
     if (gb.collapsed) {
       parts.push(
         `<rect x="${gb.x}" y="${gb.y}" width="${gb.width}" height="${gb.height}" rx="12" fill="${cardBg}" stroke="${gColor}" stroke-width="2" />`
@@ -271,6 +272,7 @@ export function buildDiagramSvg(
       parts.push(
         `<text x="${gb.x + 14}" y="${gb.y + 74}" class="mono" font-size="10" fill="${gColor}">Collapsed TableGroup</text>`
       );
+      parts.push('</g>');
       continue;
     }
 
@@ -294,6 +296,7 @@ export function buildDiagramSvg(
         )}</text>`
       );
     }
+    parts.push('</g>');
   }
 
   // 2a. Cross-domain & collapsed-group relationship bundles
@@ -376,6 +379,11 @@ export function buildDiagramSvg(
     const safeRefColor = r.color ? sanitizeSvgColor(r.color, '') : '';
     const edgeColor = safeRefColor || edgeStroke;
     parts.push(
+      `<g class="svg-edge" data-edge-from="${escapeXml(
+        fromInst.table.id
+      )}" data-edge-to="${escapeXml(toInst.table.id)}">`
+    );
+    parts.push(
       `<path d="${pathD}" fill="none" stroke="${edgeColor}" stroke-width="1.6" />`
     );
     parts.push(`<circle cx="${anchors.x1}" cy="${anchors.y1}" r="3.5" fill="${edgeColor}" />`);
@@ -396,6 +404,7 @@ export function buildDiagramSvg(
         }" text-anchor="middle" class="mono" font-size="10" font-weight="700" fill="${labelFill}" stroke="${bg}" stroke-width="3" paint-order="stroke">${toCard}</text>`
       );
     }
+    parts.push('</g>');
   });
 
   // 3. Table cards
@@ -411,6 +420,7 @@ export function buildDiagramSvg(
     const headerText = getContrastTextColor(headerBg);
     const fkSet = fkColsByTable.get(table.id);
 
+    parts.push(`<g class="svg-table" data-table-id="${escapeXml(table.id)}">`);
     parts.push(
       `<rect x="${pos.x}" y="${pos.y}" width="${TABLE_WIDTH}" height="${h}" rx="8" fill="${cardBg}" stroke="${cardBorder}" stroke-width="1.2" />`
     );
@@ -470,6 +480,7 @@ export function buildDiagramSvg(
         `<text x="${pos.x + 12}" y="${pos.y + h - 8}" class="sans" font-size="10" fill="#2563eb">Shared across ${inst.sharedGroups.length} domains</text>`
       );
     }
+    parts.push('</g>');
   }
 
   parts.push('</g></svg>');

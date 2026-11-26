@@ -21,6 +21,7 @@ import {
   mergeSchemaFiles,
   splitDbmlIntoModuleFiles,
 } from '../../../utils/schemaModules';
+import { parseWorkspaceLayoutJson } from '../../../utils/layoutSync';
 
 interface UseRemoteWorkspaceSyncOptions {
   activeWorkspace: WorkspaceProject | null;
@@ -150,11 +151,19 @@ export function useRemoteWorkspaceSync({
 
   const handleLoadGithubFile = async (
     file: GithubFileResult,
-    openInNewWorkspace: boolean
+    openInNewWorkspace: boolean,
+    layoutJson?: string
   ) => {
     if (!activeWorkspace) return;
+    const parsedLayout = layoutJson ? parseWorkspaceLayoutJson(layoutJson) : null;
+    const effectiveDetailLevel =
+      parsedLayout?.detailLevel || activeWorkspace.detailLevel;
     const nextParsed = parseDbml(file.content);
-    const nextPos = computeAutoLayout(nextParsed, activeWorkspace.detailLevel);
+    const autoPos = computeAutoLayout(nextParsed, effectiveDetailLevel);
+    const nextPos = parsedLayout
+      ? { ...autoPos, ...parsedLayout.tablePositions }
+      : autoPos;
+    const nextGroupMeta = parsedLayout ? parsedLayout.groupMeta : {};
     const now = new Date().toISOString();
     const githubLink: GithubFileLink = {
       owner: file.owner,
@@ -176,9 +185,9 @@ export function useRemoteWorkspaceSync({
         description: `GitHub: ${file.owner}/${file.repo} (${file.branch})`,
         dbml: file.content,
         tablePositions: nextPos,
-        groupMeta: {},
+        groupMeta: nextGroupMeta,
         stickyNotes: [],
-        detailLevel: activeWorkspace.detailLevel,
+        detailLevel: effectiveDetailLevel,
         versions: [
           {
             id: `ver_${Date.now()}`,
@@ -204,25 +213,39 @@ export function useRemoteWorkspaceSync({
         schemaFiles: undefined,
         activeSchemaFile: undefined,
         githubRepoLink: undefined,
+        detailLevel: parsedLayout?.detailLevel || ws.detailLevel,
         tablePositions: nextPos,
+        groupMeta: parsedLayout ? nextGroupMeta : ws.groupMeta,
         githubLink,
       }));
       setFocusFit();
     }
-    showToast(`Loaded ${file.path} from ${file.owner}/${file.repo}`);
+    showToast(
+      `Loaded ${file.path} from ${file.owner}/${file.repo}${
+        parsedLayout ? ' (with layout.json)' : ''
+      }`
+    );
   };
 
   const handleSyncedGithubFile = (
     link: GithubFileLink,
-    updatedDbml?: string
+    updatedDbml?: string,
+    layoutJson?: string
   ) => {
+    const parsedLayout = layoutJson ? parseWorkspaceLayoutJson(layoutJson) : null;
     updateActiveWorkspace((ws) => {
       if (typeof updatedDbml === 'string') {
+        const effectiveDetailLevel = parsedLayout?.detailLevel || ws.detailLevel;
         const nextParsed = parseDbml(updatedDbml);
+        const autoPos = computeAutoLayout(nextParsed, effectiveDetailLevel);
         return {
           ...ws,
           dbml: updatedDbml,
-          tablePositions: computeAutoLayout(nextParsed, ws.detailLevel),
+          detailLevel: effectiveDetailLevel,
+          tablePositions: parsedLayout
+            ? { ...autoPos, ...parsedLayout.tablePositions }
+            : autoPos,
+          groupMeta: parsedLayout ? parsedLayout.groupMeta : ws.groupMeta,
           githubLink: link,
         };
       }
@@ -233,7 +256,11 @@ export function useRemoteWorkspaceSync({
     });
     if (typeof updatedDbml === 'string') {
       setFocusFit();
-      showToast(`Pulled latest ${link.path} from ${link.branch}`);
+      showToast(
+        `Pulled latest ${link.path} from ${link.branch}${
+          parsedLayout ? ' + layout.json' : ''
+        }`
+      );
     } else {
       showToast(
         `Pushed ${link.path} to ${link.owner}/${link.repo} (${link.branch})`
@@ -243,9 +270,13 @@ export function useRemoteWorkspaceSync({
 
   const handleLoadGithubFolder = async (
     result: GithubFolderResult,
-    openInNewWorkspace: boolean
+    openInNewWorkspace: boolean,
+    layoutJson?: string
   ) => {
     if (!activeWorkspace) return;
+    const parsedLayout = layoutJson ? parseWorkspaceLayoutJson(layoutJson) : null;
+    const effectiveDetailLevel =
+      parsedLayout?.detailLevel || activeWorkspace.detailLevel;
     const now = new Date().toISOString();
     const schemaFiles: SchemaModuleFile[] = result.files.map((f, idx) => ({
       id: `mod_gh_${Date.now()}_${idx}`,
@@ -259,7 +290,11 @@ export function useRemoteWorkspaceSync({
       schemaFolder: result.folder,
     });
     const nextParsed = parseDbml(merged.mergedDbml);
-    const nextPos = computeAutoLayout(nextParsed, activeWorkspace.detailLevel);
+    const autoPos = computeAutoLayout(nextParsed, effectiveDetailLevel);
+    const nextPos = parsedLayout
+      ? { ...autoPos, ...parsedLayout.tablePositions }
+      : autoPos;
+    const nextGroupMeta = parsedLayout ? parsedLayout.groupMeta : {};
     const repoLink: GithubRepoLink = {
       owner: result.owner,
       repo: result.repo,
@@ -281,9 +316,9 @@ export function useRemoteWorkspaceSync({
         activeSchemaFile: defaultActive,
         schemaFolder: result.folder,
         tablePositions: nextPos,
-        groupMeta: {},
+        groupMeta: nextGroupMeta,
         stickyNotes: [],
-        detailLevel: activeWorkspace.detailLevel,
+        detailLevel: effectiveDetailLevel,
         versions: [
           {
             id: `ver_${Date.now()}`,
@@ -309,32 +344,47 @@ export function useRemoteWorkspaceSync({
         schemaFiles,
         activeSchemaFile: defaultActive,
         schemaFolder: result.folder,
+        detailLevel: parsedLayout?.detailLevel || ws.detailLevel,
         tablePositions: nextPos,
+        groupMeta: parsedLayout ? nextGroupMeta : ws.groupMeta,
         githubLink: undefined,
         githubRepoLink: repoLink,
       }));
       setFocusFit();
     }
     showToast(
-      `Loaded ${schemaFiles.length} modular files from ${result.owner}/${result.repo}/${result.folder}/`
+      `Loaded ${schemaFiles.length} modular files from ${result.owner}/${result.repo}/${result.folder}/${
+        parsedLayout ? ' (with layout.json)' : ''
+      }`
     );
   };
 
   const handleSyncedGithubFolder = (
     repoLink: GithubRepoLink,
     updatedFiles: SchemaModuleFile[],
-    replaceAll = false
+    replaceAll = false,
+    layoutJson?: string
   ) => {
+    const parsedLayout = layoutJson ? parseWorkspaceLayoutJson(layoutJson) : null;
     const merged = mergeSchemaFiles(updatedFiles, {
       schemaFolder: repoLink.schemaFolder,
     });
     updateActiveWorkspace((ws) => {
+      const effectiveDetailLevel = parsedLayout?.detailLevel || ws.detailLevel;
       const nextParsed = parseDbml(merged.mergedDbml);
       const nextActive =
         ws.activeSchemaFile === MERGED_SCHEMA_VIEW_ID ||
         updatedFiles.some((f) => f.path === ws.activeSchemaFile)
           ? ws.activeSchemaFile
           : updatedFiles[0]?.path;
+      const computedPositions = replaceAll
+        ? parsedLayout
+          ? {
+              ...computeAutoLayout(nextParsed, effectiveDetailLevel),
+              ...parsedLayout.tablePositions,
+            }
+          : computeAutoLayout(nextParsed, effectiveDetailLevel)
+        : ws.tablePositions;
       return {
         ...ws,
         schemaFiles: updatedFiles,
@@ -343,15 +393,18 @@ export function useRemoteWorkspaceSync({
         dbml: merged.mergedDbml,
         githubLink: undefined,
         githubRepoLink: repoLink,
-        tablePositions: replaceAll
-          ? computeAutoLayout(nextParsed, ws.detailLevel)
-          : ws.tablePositions,
+        detailLevel: replaceAll ? effectiveDetailLevel : ws.detailLevel,
+        groupMeta:
+          replaceAll && parsedLayout ? parsedLayout.groupMeta : ws.groupMeta,
+        tablePositions: computedPositions,
       };
     });
     if (replaceAll) {
       setFocusFit();
       showToast(
-        `Pulled ${updatedFiles.length} latest files from ${repoLink.schemaFolder}/ (${repoLink.branch})`
+        `Pulled ${updatedFiles.length} latest files from ${repoLink.schemaFolder}/ (${repoLink.branch})${
+          parsedLayout ? ' + layout.json' : ''
+        }`
       );
     } else {
       showToast(

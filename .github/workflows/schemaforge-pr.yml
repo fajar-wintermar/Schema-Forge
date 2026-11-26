@@ -1,0 +1,50 @@
+name: SchemaForge Schema Check & PR Diff
+
+on:
+  pull_request:
+    paths:
+      - '**.dbml'
+      - '.schemaforge/layout.json'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  schema-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR head
+        uses: actions/checkout@v4
+        with:
+          path: head
+
+      - name: Checkout PR base
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+          path: base
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: head/package-lock.json
+
+      - name: Install dependencies
+        working-directory: head
+        run: npm ci
+
+      - name: Run SchemaForge check & comment on PR
+        working-directory: head
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ -d "schema" ] && [ -d "../base/schema" ]; then
+            npx tsx cli/schemaforge.ts check schema --base ../base/schema --markdown --pr-comment --repo "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}"
+          elif [ -f "schema.dbml" ] && [ -f "../base/schema.dbml" ]; then
+            npx tsx cli/schemaforge.ts check schema.dbml --base ../base/schema.dbml --markdown --pr-comment --repo "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}"
+          elif [ -d "schema" ]; then
+            npx tsx cli/schemaforge.ts check schema --markdown --pr-comment --repo "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}"
+          fi

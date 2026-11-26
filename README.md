@@ -21,9 +21,10 @@
 - **Lossless Modular `.dbml` Workspace**: Organize large schemas across `schema/*.dbml` modules and custom nested subfolders with a toggleable **Explorer**, lossless Flatten/Split round-tripping that preserves folder paths, cross-file error jumping, and merged read-only preview support.
 
 ### Interactive ER Diagram, Visual Authoring & 150+ Table Virtualization
-- **150+ Table Canvas Virtualization**: Engineered for massive enterprise schemas with tile-quantized spatial viewport culling, 3-tier automatic Level-of-Detail (**Full / Compact / Minimal** LOD with an **Auto LOD** toggle), `requestAnimationFrame`-coalesced 60fps panning/zooming, `8%–200%` zoom range, and a minimap with a live camera viewport frame.
+- **150+ Table Canvas Virtualization**: Engineered for massive enterprise schemas with tile-quantized spatial viewport culling, 3-tier automatic Level-of-Detail (**Full / Compact / Minimal** LOD with an **Auto LOD** toggle), `requestAnimationFrame`-coalesced 60fps panning/zooming, `8%–200%` zoom range, and an **interactive click/drag Minimap** with distinct dashed collapsed `TableGroup` markers.
+- **Locked/Pinned Canvas Layouts & `.schemaforge/layout.json` Sync**: Toggle **Lock / Unlock Layout** in the canvas toolbar to freeze table/group/sticky coordinates against accidental drags (disabling auto-layout/reset while still allowing panning and table selection), and optionally sync pinned coordinates and collapsed group metadata in `.schemaforge/layout.json` during GitHub pulls and commits.
 - **Interactive Multi-Select, Alignment & Drag-to-Connect FKs**: Use **Box (`M`)** marquee selection or `Shift+Click` / `Shift+Drag` to select multiple tables, drag groups together with real-time **Snap Alignment Guides**, align/distribute via the floating **Multi-Select Alignment Bar**, and drag from any column row port handle to another column to insert a DBML `Ref:` automatically.
-- **Business-Domain Table Groups (`TableGroup`), Collapsible Containers & Ungrouped Filtering**: Cluster tables into functional domains, collapse any `TableGroup` into a compact summary card (persisted in workspace `groupMeta`, or toggled ephemerally in read-only share links) to hide internal clutter and bundle cross-group references, assign shared core tables (e.g., `users`, `organizations`, `audit_logs`) to multiple domains simultaneously, reorder columns/tables, and filter visibility on the diagram canvas (`All Domains` vs. `Only Selected`, including dedicated filtering and visibility toggles for **Ungrouped** tables without affecting Docs).
+- **Business-Domain Table Groups (`TableGroup`), Collapsible Containers & Ungrouped Filtering**: Cluster tables into functional domains, collapse/expand all or individual `TableGroup` containers (persisted in workspace `groupMeta`, or toggled ephemerally in read-only share links) to hide internal clutter and bundle cross-group references, assign shared core tables (e.g., `users`, `organizations`, `audit_logs`) to multiple domains simultaneously, reorder columns/tables, and filter visibility on the diagram canvas (`All Domains` vs. `Only Selected`, including dedicated filtering and visibility toggles for **Ungrouped** tables without affecting Docs).
 - **Focus Neighborhood Mode (`F`)**: Click any table to isolate its 1-hop upstream and downstream relationships while dimming unrelated tables, edges, groups, and sticky notes.
 - **Orthogonal & Curved Edge Routing**: Switch between curved Bézier connectors (`Curved`) and right-angle orthogonal routing (`Ortho`) on the canvas toolbar.
 - **Cross-Domain Edge Toggles & Cardinality Visibility**: Choose **Show**, **Bundle** (collapses edges between domain pairs into labeled summary trunks), or **Hide** on crowded multi-domain canvases, and use the **Foreign Key Cardinality** checkbox in Table Detail Visibility to show or hide `1` / `N` relationship labels.
@@ -33,11 +34,12 @@
 - Instant fuzzy search across tables, columns, business domains (`TableGroup`), `TablePartial` mixins, Markdown & sticky notes, `.dbml` modules, and quick actions.
 - Jump straight to the selected item in **Diagram** (`Enter`), **Editor** (`⇧Enter`), or **Docs** (`Alt+Enter`).
 
-### Engineering Docs, Inline Editing & Export Portal
-- **dbdocs-Style Documentation**: Collapsible left navigation tree (`⌘J` / `Ctrl+J` for `All Tables` or `By Domain`), paginated **Schema Overview**, **Table** and **Domain** detail pages, **Partials** explorer, **Enumerated Types** usage matrix, **Foreign Key Relationships** matrix, and **All Notes** hub.
-- **Inline Documentation Editing**: Edit `TableGroup`, `Table`, and non-partial `Column` notes directly inside Docs View (`InlineNoteEditor`) with live DBML synchronization—automatically locked in read-only `/share/:token` links.
+### Engineering Docs, Inline Editing, Coverage & Export Portal
+- **dbdocs-Style Documentation & Documentation Coverage Meter**: Collapsible left navigation tree (`⌘J` / `Ctrl+J` for `All Tables` or `By Domain`), paginated **Schema Overview** with live **Table / Column / Domain Documentation Coverage** progress bars, undocumented quick-jump filters, **Table** and **Domain** detail pages, **Partials** explorer, **Enumerated Types** usage matrix, **Foreign Key Relationships** matrix, and **All Notes** hub.
+- **Custom Column & Table Metadata Tags**: Extract structured tags cleanly from notes (`@pii`, `@owner(Team)`, `@sla(99.9%)`, `[Deprecated]`, `Tags: Core, Audit`) without colliding with Markdown headings or email addresses—rendered as filterable pills across Docs UI and HTML exports.
+- **Inline Documentation Editing with Live Split Preview**: Edit `TableGroup`, `Table`, and non-partial `Column` notes directly inside Docs View (`InlineNoteEditor`) with a **Write | Split | Preview** toggle using SchemaForge's GFM renderer and live DBML synchronization—automatically locked in read-only `/share/:token` links.
 - **GitHub-Flavored Markdown**: Supports tables, dark syntax-highlighted fenced code blocks with line numbers, diff row highlights, and copy buttons, `[!NOTE|TIP|IMPORTANT|WARNING|CAUTION]` callout alerts, task lists, read-time estimates, and README table-of-contents outlines.
-- **Exportable Documentation (Markdown / Static HTML / Print-to-PDF)**: Export scoped or full documentation via **Export Docs** (`DocsExportMenu`) or the **Import / Export Studio** to `.docs.md`, self-contained `.docs.html`, or clean **Print / Save as PDF**. Static HTML bundles match SchemaForge Docs CSS & syntax highlighting and embed an **interactive ER diagram SVG viewport** (`+` / `−` / `Fit` / `100%`, `Ctrl`/`⌘` + scroll cursor-anchored zoom, click-and-drag panning, and clean full-width `@media print` output).
+- **Interactive HTML Atlas, Mermaid & Wiki Exports**: Export scoped or full documentation via **Export Docs** (`DocsExportMenu`) or the **Import / Export Studio** to `.docs.md`, **Mermaid ERD (`.mmd`)**, one-click **Copy Notion / Confluence Markdown** domain summaries, self-contained `.docs.html`, or clean **Print / Save as PDF**. Static HTML bundles match SchemaForge Docs CSS & syntax highlighting, include a **multi-domain SVG atlas switcher**, **click-to-navigate SVG** tables/groups (scrolls straight to `#table-...` or `#group-...` and highlights connected FK edges on hover), and full zoom/pan controls (`+` / `−` / `Fit` / `100%`, `Ctrl`/`⌘` + scroll, drag pan).
 
 ### Local-First Persistence, Offline PWA, Cloud Sync & Shareable Links
 - **Installable Offline PWA**: Includes Web App Manifest, Service Worker app-shell precaching (`vite-plugin-pwa`), desktop/mobile **Install App** prompt (plus iOS Safari Add to Home Screen guide), and live offline connectivity indicator—so you can install SchemaForge to your computer and keep editing, diagramming, and exporting even without internet.
@@ -46,12 +48,13 @@
 - **Shareable View-Only Links (`/share/:token` & `/share/:token/:versionTag`)**: Generate and edit clean view-only Docs and ER Diagram URLs pointing either to the live workspace or pinned to a published version (e.g., `v1.2.0`), with preset or custom date/time expiration, one-click revocation, and a per-link toggle to enable or disable **PNG / SVG** diagram exports. Viewers can inspect docs, browse and temporarily rearrange the diagram layout, and export PNG/SVG snapshots (when enabled) without copying or accessing the underlying DBML source.
 - **Version History, Changelog & Incremental SQL Migrations (`ALTER`)**: Save draft or published snapshots (`⌘S` / `Ctrl+S`), revert with automatic pre-revert checkpoints, inspect semantic or raw line-by-line diffs between any two snapshots, and generate syntax-highlighted **Incremental SQL Migrations** (`ALTER TABLE ... ADD/DROP/ALTER COLUMN`, `CREATE/DROP INDEX`, enum updates, and `ALTER TABLE ... FOREIGN KEY` statements) for **PostgreSQL** and **MySQL** with one-click copy and `.sql` download.
 
-### GitHub Sync, Commit Migrations, URL Loader & Scoped Export
-- **Two-Way GitHub Repository Sync & Git Commit Migrations**: Sign in via GitHub OAuth, browse repositories/branches/files, load single `.dbml` files or multi-file `schema/*.dbml` folders, preview schema diffs & incremental SQL migrations before committing, compare **any two Git commits** (or a commit vs. Working Draft) to emit PostgreSQL/MySQL `ALTER` migrations, reconcile remote SHA updates, and commit/push to existing or new branches.
+### GitHub Sync, Pull Requests, CLI, ORM Converters & Scoped Export
+- **Two-Way GitHub Repository Sync, Pull Requests & Git Layout Metadata**: Sign in via GitHub OAuth, browse repositories/branches/files, load single `.dbml` files or multi-file `schema/*.dbml` folders (with optional `.schemaforge/layout.json` layout restoration), preview schema diffs & incremental SQL migrations before committing, compare **any two Git commits** (or a commit vs. Working Draft) to emit PostgreSQL/MySQL `ALTER` migrations, commit/push atomically with optional layout JSON, and **Open Pull Requests** with auto-generated semantic diff & breaking-change Markdown summaries.
+- **SchemaForge CLI & GitHub PR Action (`.github/workflows/schemaforge-pr.yml`)**: Run `npm run cli -- check`, `pull`, or `export` locally or in CI pipelines to validate modular `schema/**/*.dbml`, lint schema quality rules, compute docs coverage, flag breaking column/table drops against `--base`, introspect live SQLite databases via Node 22 `node:sqlite`, export HTML/Markdown/SVG/Mermaid/ORM bundles, and post/update automated PR diff comments.
 - **View DBML from URL**: Load public `.dbml` files from raw URLs, GitHub `blob` URLs, or GitHub Gists via **Open URL** or `?url=<encoded_url>`.
-- **Import & Scoped Domain Export**:
-  - **Import**: DBML, PostgreSQL/MySQL/SQL DDL (`CREATE TABLE`, `ALTER TABLE ... FOREIGN KEY`), CSV column definitions, and remote `.dbml` URLs.
-  - **Export**: DBML, PostgreSQL/MySQL DDL, CSV data dictionary, **Markdown (`.docs.md`)**, **Static HTML (`.docs.html`)**, **Print / Save PDF**, **SVG**, and **high-resolution PNG** — export the **All Domains & Tables** workspace or scope any export strictly to **Selected Domains** (including **Ungrouped** tables). SVG and PNG exports preserve active canvas preferences (cardinality visibility, edge routing, cross-domain bundling, and collapsed `TableGroup` containers), while canvas sticky notes are automatically excluded from exported diagrams and docs so tables remain unobstructed.
+- **Multi-Format ORM / API Import & Scoped Domain Export**:
+  - **Import**: DBML, PostgreSQL/MySQL/SQL DDL (`CREATE TABLE`, `ALTER TABLE ... FOREIGN KEY`), CSV column definitions, **Prisma (`schema.prisma`)**, **Drizzle TypeScript**, **OpenAPI 3.1 / JSON Schema**, and remote `.dbml` URLs.
+  - **Export**: DBML, PostgreSQL/MySQL DDL, CSV data dictionary, **Prisma**, **Drizzle TypeScript**, **SQLAlchemy 2.0**, **OpenAPI 3.1 JSON**, **Mermaid ERD (`.mmd`)**, **Markdown (`.docs.md`)**, **Static HTML (`.docs.html`)**, **Print / Save PDF**, **SVG**, and **high-resolution PNG** — export the **All Domains & Tables** workspace or scope any export strictly to **Selected Domains** (including **Ungrouped** tables). SVG and PNG exports preserve active canvas preferences (cardinality visibility, edge routing, cross-domain bundling, and collapsed `TableGroup` containers), while canvas sticky notes are automatically excluded from exported diagrams and docs so tables remain unobstructed.
 
 ### Architecture, Security & Production Hardening
 - **Clean Architecture & Shared Domain Kernel**: Framework-free `@shared/domain/*` kernel (DBML lexer/parser/mutators, GitHub target parser, share expiration rules, core schema types) consumed across both backend (`server/domain/`, `server/application/`, `server/infrastructure/`, `server/presentation/`) and frontend (`src/services/`, `src/hooks/`, `src/features/`, `src/components/`).
@@ -59,7 +62,7 @@
 - **Hardened HTTP & Runtime Guarantees**: Startup Zod environment validation (`server/infrastructure/config/serverEnv.ts`), `@hono/zod-validator` request/header validation, `secureHeaders()`, explicit origin `cors()`, `hono-rate-limiter` + `bodyLimit()` (256 KB on auth/URL/AI routes; 10 MB on workspace routes), sanitized `app.onError`, SSRF-safe remote URL fetching, parameterized SQL queries, `/healthz` DB connectivity check, and graceful `SIGTERM`/`SIGINT` HTTP + DB shutdown.
 
 ### Product Tiering & Roadmap
-- See [`ROADMAP.md`](./ROADMAP.md) for current product pros & cons, **Essential** (local-first solo studio) vs. **Premium** (team, CI/CD & cloud platform) feature separation, and upcoming engineering milestones.
+- See [`ROADMAP.md`](./ROADMAP.md) for current product assessment, **Essential** (local-first solo studio) vs. **Premium** (team, CI/CD & cloud platform) feature matrix, and upcoming engineering milestones.
 
 ---
 
@@ -96,6 +99,11 @@
 ├── worker.ts                         # Cloudflare Worker entry point (/api/*, /healthz & ASSETS)
 ├── server.ts                         # Node.js launcher calling server/bootstrap/nodeServer.ts
 ├── .env.example                      # Environment variable template
+├── .github/workflows/
+│   └── schemaforge-pr.yml            # CI workflow running schemaforge check on DBML pull requests
+├── cli/
+│   ├── cliCore.ts                    # Pure CLI engine (check, breaking diff, node:sqlite pull, export, PR comments)
+│   └── schemaforge.ts                # CLI binary entrypoint (`npm run cli -- ...`)
 ├── migrations/
 │   ├── 0001_init.sql                 # Initial D1 schema (users, workspaces, versions, share_links)
 │   └── 0002_share_export_toggle.sql  # Per-share PNG/SVG diagram export toggle column
@@ -378,6 +386,23 @@ CMD ["node", "server.ts"]
 
 ---
 
+## CLI Quick Reference
+
+```bash
+# Validate modular schema directory, compute docs coverage, and check for breaking changes vs base
+npm run cli -- check schema --base ./base-schema --strict --markdown
+
+# Introspect a live SQLite database into DBML and check drift against existing DBML
+npm run cli -- pull ./app.sqlite --out schema.dbml --against ./schema.dbml
+
+# Export static HTML docs atlas, Markdown, Mermaid ERD, SQL, Prisma, Drizzle, SQLAlchemy, or OpenAPI
+npm run cli -- export schema --format html --out docs/schema.docs.html
+npm run cli -- export schema --format mermaid --out docs/erd.mmd
+npm run cli -- export schema --format prisma --out prisma/schema.prisma
+```
+
+---
+
 ## Scripts Reference
 
 | Script | Command | Description |
@@ -386,6 +411,7 @@ CMD ["node", "server.ts"]
 | `dev` | `node scripts/sync-migrations.mjs && tsx server.ts` | Starts Hono + Vite dev server on port `3000` |
 | `start` | `node server.ts` | Runs production Node.js server (`dist/` + `/api/*` + `/healthz`) |
 | `build` | `node scripts/sync-migrations.mjs && vite build` | Syncs SQL migrations and builds static + PWA bundle into `dist/` |
+| `cli` | `tsx cli/schemaforge.ts` | Runs the SchemaForge CLI (`check`, `pull`, `export`) |
 | `lint` | `node scripts/sync-migrations.mjs && tsc --noEmit` | Runs full-project TypeScript type checking |
 | `test` | `vitest run` | Runs unit test suite |
 | `test:watch` | `vitest` | Runs unit tests in watch mode |

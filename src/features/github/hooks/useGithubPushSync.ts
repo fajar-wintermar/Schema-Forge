@@ -7,15 +7,24 @@ import {
 } from '@shared/domain/schemaTypes';
 import { ApiClientError } from '../../../services/api/apiClient';
 import {
+  createGithubPullRequest,
   getGithubFile,
   getGithubFolderFiles,
+  GithubPullRequestResult,
   GithubPushResult,
   GithubRepoInfo,
   GithubTreeFile,
   pushGithubBatch,
   pushGithubFile,
 } from '../../../services/api/remoteService';
-import { computeSchemaDiff } from '../../../utils/schemaDiff';
+import {
+  buildSchemaDiffMarkdownSummary,
+  computeSchemaDiff,
+} from '../../../utils/schemaDiff';
+import {
+  SCHEMAFORGE_LAYOUT_PATH,
+  serializeWorkspaceLayoutJson,
+} from '../../../utils/layoutSync';
 import { cleanFolderPrefix, mergeSchemaFiles } from '../../../utils/schemaModules';
 import { BatchPushSummary } from '../types';
 
@@ -31,11 +40,16 @@ export interface UseGithubPushSyncParams {
     preferredBranch?: string,
     preferredPath?: string
   ) => Promise<void>;
-  onSyncedGithubFile: (meta: GithubFileLink, dbml?: string) => void;
+  onSyncedGithubFile: (
+    meta: GithubFileLink,
+    dbml?: string,
+    layoutJson?: string
+  ) => void;
   onSyncedGithubFolder?: (
     repoLink: GithubRepoLink,
     files: SchemaModuleFile[],
-    replaceWorkspaceContent?: boolean
+    replaceWorkspaceContent?: boolean,
+    layoutJson?: string
   ) => void;
   onError: (msg: string | null) => void;
 }
@@ -92,6 +106,7 @@ export function useGithubPushSync({
       ? `Update ${linked.path.split('/').pop() || 'schema.dbml'}`
       : 'Add DBML schema via SchemaForge'
   );
+  const [syncLayoutJson, setSyncLayoutJson] = useState(true);
   const [createNewBranch, setCreateNewBranch] = useState(false);
   const [newBranchName, setNewBranchName] = useState('');
   const [pushing, setPushing] = useState(false);
@@ -102,10 +117,20 @@ export function useGithubPushSync({
     null
   );
 
+  // Pull request creation state
+  const [prTitle, setPrTitle] = useState('');
+  const [prBaseBranch, setPrBaseBranch] = useState('');
+  const [prHeadBranch, setPrHeadBranch] = useState('');
+  const [prBody, setPrBody] = useState('');
+  const [prPanelOpen, setPrPanelOpen] = useState(false);
+  const [creatingPr, setCreatingPr] = useState(false);
+  const [prResult, setPrResult] = useState<GithubPullRequestResult | null>(null);
+
   const clearPushFeedback = useCallback(() => {
     setPushSuccess(null);
     setBatchPushSummary(null);
     setShaConflict(false);
+    setPrResult(null);
   }, []);
 
   const resolveModularPushPath = useCallback(
@@ -123,18 +148,113 @@ export function useGithubPushSync({
     [repoLinked?.schemaFolder, workspace.schemaFolder]
   );
 
+  const tryFetchLayoutJson = async (
+    owner: string,
+    repo: string,
+    branch: string
+  ): Promise<string | undefined> => {
+    try {
+      const file = await getGithubFile(
+        owner,
+        repo,
+        SCHEMAFORGE_LAYOUT_PATH,
+        branch
+      );
+      return file.content;
+    } catch {
+      return undefined;
+    }
+  };
+
+  const diffPreview = useMemo(() => {
+    if (isModularWorkspace) {
+      const file = workspace.schemaFiles?.find((f) => f.path === previewDiffPath);
+      if (!file) return null;
+      return computeSchemaDiff(file.lastSyncedContent || '', file.content);
+    }
+    if (!linked || pushMode !== 'linked') return null;
+    return computeSchemaDiff(linked.lastSyncedDbml, workspace.dbml);
+  }, [
+    isModularWorkspace,
+    workspace.schemaFiles,
+    previewDiffPath,
+    linked,
+    pushMode,
+    workspace.dbml,
+  ]);
+
+  const fullSchemaDiff = useMemo(() => {
+    if (isModularWorkspace) {
+      const files = workspace.schemaFiles || [];
+      if (files.length === 0) return null;
+      const folder = repoLinked?.schemaFolder || workspace.schemaFolder || 'schema';
+      const baseFiles = files
+        .filter((f) => f.lastSyncedContent !== undefined)
+        .map((f) => ({ ...f, content: f.lastSyncedContent || '' }));
+      const baseDbml =
+        baseFiles.length > 0
+          ? mergeSchemaFiles(baseFiles, { schemaFolder: folder }).mergedDbml
+          : '';
+      const targetDbml = mergeSchemaFiles(files, {
+        schemaFolder: folder,
+      }).mergedDbml;
+      return computeSchemaDiff(baseDbml, targetDbml);
+    }
+    if (!linked || pushMode !== 'linked') return null;
+    return computeSchemaDiff(linked.lastSyncedDbml, workspace.dbml);
+  }, [
+    isModularWorkspace,
+    workspace.schemaFiles,
+    workspace.schemaFolder,
+    repoLinked?.schemaFolder,
+    linked,
+    pushMode,
+    workspace.dbml,
+  ]);
+
+  const seedPullRequestForm = useCallback(
+    (pushedBranch: string, baseDefault: string, message: string) => {
+      setPrHeadBranch(pushedBranch);
+      setPrBaseBranch(baseDefault);
+      setPrTitle(message);
+      const summaryMarkdown = fullSchemaDiff
+        ? buildSchemaDiffMarkdownSummary(fullSchemaDiff, {
+            title: 'Database Schema Changes',
+            includeSql: true,
+            dialect:
+              workspace.dbml.toLowerCase().includes('mysql') ? 'mysql' : 'postgres',
+            baseLabel: baseDefault,
+            targetLabel: pushedBranch,
+          })
+        : `Updated database schema via SchemaForge (${pushedBranch} → ${baseDefault}).`;
+      setPrBody(summaryMarkdown);
+      setPrResult(null);
+      if (pushedBranch !== baseDefault) {
+        setPrPanelOpen(true);
+      }
+    },
+    [fullSchemaDiff, workspace.dbml]
+  );
+
   const handlePullLatest = async () => {
     if (isModularWorkspace && repoLinked && onSyncedGithubFolder) {
       setPullingLatest(true);
       onError(null);
       setShaConflict(false);
       try {
-        const res = await getGithubFolderFiles(
-          repoLinked.owner,
-          repoLinked.repo,
-          repoLinked.branch,
-          repoLinked.schemaFolder
-        );
+        const [res, layoutJson] = await Promise.all([
+          getGithubFolderFiles(
+            repoLinked.owner,
+            repoLinked.repo,
+            repoLinked.branch,
+            repoLinked.schemaFolder
+          ),
+          tryFetchLayoutJson(
+            repoLinked.owner,
+            repoLinked.repo,
+            repoLinked.branch
+          ),
+        ]);
         const now = new Date().toISOString();
         const nextFiles: SchemaModuleFile[] = res.files.map((f, idx) => ({
           id: `mod_gh_${Date.now()}_${idx}`,
@@ -153,7 +273,8 @@ export function useGithubPushSync({
             lastSyncedAt: now,
           },
           nextFiles,
-          true
+          true,
+          layoutJson
         );
         setSelectedPushPaths([]);
       } catch (err) {
@@ -173,12 +294,10 @@ export function useGithubPushSync({
     onError(null);
     setShaConflict(false);
     try {
-      const remote = await getGithubFile(
-        linked.owner,
-        linked.repo,
-        linked.path,
-        linked.branch
-      );
+      const [remote, layoutJson] = await Promise.all([
+        getGithubFile(linked.owner, linked.repo, linked.path, linked.branch),
+        tryFetchLayoutJson(linked.owner, linked.repo, linked.branch),
+      ]);
       onSyncedGithubFile(
         {
           owner: linked.owner,
@@ -190,7 +309,8 @@ export function useGithubPushSync({
           lastSyncedDbml: remote.content,
           lastSyncedAt: new Date().toISOString(),
         },
-        remote.content
+        remote.content,
+        layoutJson
       );
     } catch (err) {
       onError(
@@ -236,7 +356,7 @@ export function useGithubPushSync({
 
     const allFiles = workspace.schemaFiles || [];
     const chosenFiles = allFiles.filter((f) => selectedPushPaths.includes(f.path));
-    if (chosenFiles.length === 0) {
+    if (chosenFiles.length === 0 && !syncLayoutJson) {
       onError('Select at least one modular .dbml file to push.');
       return;
     }
@@ -258,6 +378,21 @@ export function useGithubPushSync({
       };
     });
 
+    const batchPayloadFiles = payloadFiles.map(({ path, content, expectedSha }) => ({
+      path,
+      content,
+      expectedSha,
+    }));
+
+    if (syncLayoutJson) {
+      batchPayloadFiles.push({
+        path: SCHEMAFORGE_LAYOUT_PATH,
+        content: serializeWorkspaceLayoutJson(workspace),
+        expectedSha: treeFiles.find((tf) => tf.path === SCHEMAFORGE_LAYOUT_PATH)
+          ?.sha,
+      });
+    }
+
     setPushing(true);
     try {
       const result = await pushGithubBatch({
@@ -265,11 +400,7 @@ export function useGithubPushSync({
         repo: targetRepo,
         branch: targetBranch,
         message: commitMessage.trim(),
-        files: payloadFiles.map(({ path, content, expectedSha }) => ({
-          path,
-          content,
-          expectedSha,
-        })),
+        files: batchPayloadFiles,
         createNewBranch,
         newBranchName: createNewBranch ? newBranchName.trim() : undefined,
         forceWithLatestSha,
@@ -305,6 +436,10 @@ export function useGithubPushSync({
         updatedModules,
         false
       );
+
+      const defaultBase =
+        selectedRepo?.default_branch || (result.branch === 'main' ? 'main' : 'main');
+      seedPullRequestForm(result.branch, defaultBase, commitMessage.trim());
 
       setPushMode('linked');
       setCreateNewBranch(false);
@@ -375,35 +510,82 @@ export function useGithubPushSync({
 
     setPushing(true);
     try {
-      const result = await pushGithubFile({
-        owner: targetOwner,
-        repo: targetRepo,
-        path: targetPath,
-        branch: targetBranch,
-        message: commitMessage.trim(),
-        content: workspace.dbml,
-        expectedSha,
-        createNewBranch,
-        newBranchName: createNewBranch ? newBranchName.trim() : undefined,
-        forceWithLatestSha,
-      });
+      let pushOutcome: GithubPushResult;
+
+      if (syncLayoutJson) {
+        const batchResult = await pushGithubBatch({
+          owner: targetOwner,
+          repo: targetRepo,
+          branch: targetBranch,
+          message: commitMessage.trim(),
+          files: [
+            {
+              path: targetPath,
+              content: workspace.dbml,
+              expectedSha,
+            },
+            {
+              path: SCHEMAFORGE_LAYOUT_PATH,
+              content: serializeWorkspaceLayoutJson(workspace),
+              expectedSha: treeFiles.find(
+                (f) => f.path === SCHEMAFORGE_LAYOUT_PATH
+              )?.sha,
+            },
+          ],
+          createNewBranch,
+          newBranchName: createNewBranch ? newBranchName.trim() : undefined,
+          forceWithLatestSha,
+        });
+        const primary =
+          batchResult.files.find((f) => f.path === targetPath) ||
+          batchResult.files[0];
+        pushOutcome = {
+          sha: primary?.sha || '',
+          path: primary?.path || targetPath,
+          branch: batchResult.branch,
+          htmlUrl:
+            primary?.htmlUrl ||
+            `https://github.com/${targetOwner}/${targetRepo}/blob/${encodeURIComponent(
+              batchResult.branch
+            )}/${targetPath}`,
+          commitSha: batchResult.commitSha,
+          commitUrl: batchResult.commitUrl,
+        };
+      } else {
+        pushOutcome = await pushGithubFile({
+          owner: targetOwner,
+          repo: targetRepo,
+          path: targetPath,
+          branch: targetBranch,
+          message: commitMessage.trim(),
+          content: workspace.dbml,
+          expectedSha,
+          createNewBranch,
+          newBranchName: createNewBranch ? newBranchName.trim() : undefined,
+          forceWithLatestSha,
+        });
+      }
 
       onSyncedGithubFile({
         owner: targetOwner,
         repo: targetRepo,
-        branch: result.branch,
-        path: result.path,
-        sha: result.sha,
-        htmlUrl: result.htmlUrl,
+        branch: pushOutcome.branch,
+        path: pushOutcome.path,
+        sha: pushOutcome.sha,
+        htmlUrl: pushOutcome.htmlUrl,
         lastSyncedDbml: workspace.dbml,
         lastSyncedAt: new Date().toISOString(),
       });
+
+      const defaultBase = selectedRepo?.default_branch || 'main';
+      seedPullRequestForm(pushOutcome.branch, defaultBase, commitMessage.trim());
+
       setPushMode('linked');
       setCreateNewBranch(false);
       setNewBranchName('');
-      setPushSuccess(result);
+      setPushSuccess(pushOutcome);
 
-      loadRepoDetails(targetOwner, targetRepo, result.branch, result.path);
+      loadRepoDetails(targetOwner, targetRepo, pushOutcome.branch, pushOutcome.path);
     } catch (err) {
       if (
         err instanceof ApiClientError &&
@@ -421,51 +603,58 @@ export function useGithubPushSync({
     }
   };
 
-  const diffPreview = useMemo(() => {
-    if (isModularWorkspace) {
-      const file = workspace.schemaFiles?.find((f) => f.path === previewDiffPath);
-      if (!file) return null;
-      return computeSchemaDiff(file.lastSyncedContent || '', file.content);
-    }
-    if (!linked || pushMode !== 'linked') return null;
-    return computeSchemaDiff(linked.lastSyncedDbml, workspace.dbml);
-  }, [
-    isModularWorkspace,
-    workspace.schemaFiles,
-    previewDiffPath,
-    linked,
-    pushMode,
-    workspace.dbml,
-  ]);
+  const handleOpenPullRequestPanel = () => {
+    const activeHead =
+      pushSuccess?.branch ||
+      batchPushSummary?.branch ||
+      (pushMode === 'linked' && (repoLinked || linked)
+        ? (repoLinked || linked)!.branch
+        : selectedBranch) ||
+      '';
+    const baseBranch = selectedRepo?.default_branch || 'main';
+    seedPullRequestForm(activeHead, baseBranch, commitMessage.trim() || 'Update database schema');
+    setPrPanelOpen(true);
+  };
 
-  const fullSchemaDiff = useMemo(() => {
-    if (isModularWorkspace) {
-      const files = workspace.schemaFiles || [];
-      if (files.length === 0) return null;
-      const folder = repoLinked?.schemaFolder || workspace.schemaFolder || 'schema';
-      const baseFiles = files
-        .filter((f) => f.lastSyncedContent !== undefined)
-        .map((f) => ({ ...f, content: f.lastSyncedContent || '' }));
-      const baseDbml =
-        baseFiles.length > 0
-          ? mergeSchemaFiles(baseFiles, { schemaFolder: folder }).mergedDbml
-          : '';
-      const targetDbml = mergeSchemaFiles(files, {
-        schemaFolder: folder,
-      }).mergedDbml;
-      return computeSchemaDiff(baseDbml, targetDbml);
+  const handleCreatePullRequest = async () => {
+    onError(null);
+    const targetOwner =
+      pushMode === 'linked' && (repoLinked || linked)
+        ? (repoLinked || linked)!.owner
+        : selectedRepo?.owner;
+    const targetRepo =
+      pushMode === 'linked' && (repoLinked || linked)
+        ? (repoLinked || linked)!.repo
+        : selectedRepo?.repo;
+
+    if (!targetOwner || !targetRepo) {
+      onError('Select a GitHub repository first.');
+      return;
     }
-    if (!linked || pushMode !== 'linked') return null;
-    return computeSchemaDiff(linked.lastSyncedDbml, workspace.dbml);
-  }, [
-    isModularWorkspace,
-    workspace.schemaFiles,
-    workspace.schemaFolder,
-    repoLinked?.schemaFolder,
-    linked,
-    pushMode,
-    workspace.dbml,
-  ]);
+    if (!prTitle.trim() || !prHeadBranch.trim() || !prBaseBranch.trim()) {
+      onError('Provide PR title, head branch, and base branch.');
+      return;
+    }
+
+    setCreatingPr(true);
+    try {
+      const pr = await createGithubPullRequest({
+        owner: targetOwner,
+        repo: targetRepo,
+        title: prTitle.trim(),
+        body: prBody.trim(),
+        head: prHeadBranch.trim(),
+        base: prBaseBranch.trim(),
+      });
+      setPrResult(pr);
+    } catch (err) {
+      onError(
+        err instanceof Error ? err.message : 'Failed to create Pull Request.'
+      );
+    } finally {
+      setCreatingPr(false);
+    }
+  };
 
   const changedDiffLines = useMemo(() => {
     if (!diffPreview) return [];
@@ -490,6 +679,8 @@ export function useGithubPushSync({
     setPreviewDiffPath,
     commitMessage,
     setCommitMessage,
+    syncLayoutJson,
+    setSyncLayoutJson,
     createNewBranch,
     setCreateNewBranch,
     newBranchName,
@@ -503,9 +694,23 @@ export function useGithubPushSync({
     fullSchemaDiff,
     changedDiffLines,
     hasVerifiedPushTarget,
+    prPanelOpen,
+    setPrPanelOpen,
+    prTitle,
+    setPrTitle,
+    prHeadBranch,
+    setPrHeadBranch,
+    prBaseBranch,
+    setPrBaseBranch,
+    prBody,
+    setPrBody,
+    creatingPr,
+    prResult,
     resolveModularPushPath,
     clearPushFeedback,
     handlePullLatest,
     handlePush,
+    handleOpenPullRequestPanel,
+    handleCreatePullRequest,
   };
 }

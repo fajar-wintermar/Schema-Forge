@@ -19,14 +19,20 @@ import {
 import { parseGithubTargetInput } from '@shared/domain/github/githubTargetParser';
 import { isTrustedOAuthMessageOrigin } from '../../../utils/urlSafety';
 import { WorkspaceProject } from '@shared/domain/schemaTypes';
+import { SCHEMAFORGE_LAYOUT_PATH } from '../../../utils/layoutSync';
 
 export interface UseGithubAuthAndRepoParams {
   workspace: WorkspaceProject;
   tab: 'browse' | 'push' | 'migrations';
-  onLoadGithubFile: (file: GithubFileResult, openInNewWorkspace: boolean) => void;
+  onLoadGithubFile: (
+    file: GithubFileResult,
+    openInNewWorkspace: boolean,
+    layoutJson?: string
+  ) => void;
   onLoadGithubFolder?: (
     folderResult: GithubFolderResult,
-    openInNewWorkspace: boolean
+    openInNewWorkspace: boolean,
+    layoutJson?: string
   ) => void;
   onClose: () => void;
   onError: (msg: string | null) => void;
@@ -394,6 +400,24 @@ export function useGithubAuthAndRepo({
     }
   };
 
+  const tryFetchOptionalLayoutJson = async (
+    owner: string,
+    repo: string,
+    branch: string
+  ): Promise<string | undefined> => {
+    try {
+      const layoutFile = await getGithubFile(
+        owner,
+        repo,
+        SCHEMAFORGE_LAYOUT_PATH,
+        branch
+      );
+      return layoutFile.content;
+    } catch {
+      return undefined;
+    }
+  };
+
   const handleLoadSelectedFile = async () => {
     if (!selectedRepo || !selectedFilePath) return;
     setLoadingFile(true);
@@ -405,7 +429,17 @@ export function useGithubAuthAndRepo({
         selectedFilePath,
         selectedBranch
       );
-      onLoadGithubFile(file, openInNewWorkspace);
+      const hasLayoutFile = treeFiles.some(
+        (f) => f.path === SCHEMAFORGE_LAYOUT_PATH
+      );
+      const layoutJson = hasLayoutFile
+        ? await tryFetchOptionalLayoutJson(
+            selectedRepo.owner,
+            selectedRepo.repo,
+            selectedBranch
+          )
+        : undefined;
+      onLoadGithubFile(file, openInNewWorkspace, layoutJson);
       onClose();
     } catch (err) {
       onError(
@@ -452,7 +486,17 @@ export function useGithubAuthAndRepo({
         selectedBranch,
         effectiveFolderToLoad
       );
-      onLoadGithubFolder(result, openInNewWorkspace);
+      const hasLayoutFile = treeFiles.some(
+        (f) => f.path === SCHEMAFORGE_LAYOUT_PATH
+      );
+      const layoutJson = hasLayoutFile
+        ? await tryFetchOptionalLayoutJson(
+            selectedRepo.owner,
+            selectedRepo.repo,
+            selectedBranch
+          )
+        : undefined;
+      onLoadGithubFolder(result, openInNewWorkspace, layoutJson);
       onClose();
     } catch (err) {
       onError(

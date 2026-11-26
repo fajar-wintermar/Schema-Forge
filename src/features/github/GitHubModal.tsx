@@ -356,11 +356,27 @@ export const GitHubModal: React.FC<GitHubModalProps> = ({
               onNewBranchNameChange={push.setNewBranchName}
               commitMessage={push.commitMessage}
               onCommitMessageChange={push.setCommitMessage}
+              syncLayoutJson={push.syncLayoutJson}
+              onSyncLayoutJsonChange={push.setSyncLayoutJson}
               pullingLatest={push.pullingLatest}
               onPullLatest={push.handlePullLatest}
               pushing={push.pushing}
               hasVerifiedPushTarget={push.hasVerifiedPushTarget}
               onPush={() => push.handlePush(false)}
+              prPanelOpen={push.prPanelOpen}
+              onTogglePrPanel={push.setPrPanelOpen}
+              prTitle={push.prTitle}
+              onPrTitleChange={push.setPrTitle}
+              prHeadBranch={push.prHeadBranch}
+              onPrHeadBranchChange={push.setPrHeadBranch}
+              prBaseBranch={push.prBaseBranch}
+              onPrBaseBranchChange={push.setPrBaseBranch}
+              prBody={push.prBody}
+              onPrBodyChange={push.setPrBody}
+              creatingPr={push.creatingPr}
+              prResult={push.prResult}
+              onOpenPullRequestPanel={push.handleOpenPullRequestPanel}
+              onCreatePullRequest={push.handleCreatePullRequest}
             />
           ) : (
             <GitCommitsMigrationTab

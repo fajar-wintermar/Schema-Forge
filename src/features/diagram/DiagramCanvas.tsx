@@ -85,6 +85,8 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     updateCrossDomainMode,
     showCardinality,
     toggleShowCardinality,
+    layoutLocked,
+    toggleLayoutLocked,
   } = useDiagramPreferences();
 
   const fkColsByTable = useMemo(() => {
@@ -311,6 +313,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     handleWheel,
     zoomOut,
     zoomIn,
+    panToWorldPoint,
     getCanvasCenterNoteCoords,
   } = useDiagramViewport({
     containerRef,
@@ -333,6 +336,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
     updateFocusMode,
     snapGrid,
     readOnly,
+    layoutLocked,
     viewport,
     scheduleViewportUpdate,
     clientToWorld,
@@ -557,7 +561,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
               readOnly={readOnly}
               onStartDrag={interactions.handleGroupStartDrag}
               onToggleOnlyDomain={interactions.handleToggleOnlyDomain}
-              onAutoLayoutGroup={onAutoLayoutGroup}
+              onAutoLayoutGroup={layoutLocked ? () => {} : onAutoLayoutGroup}
               onEditGroup={onEditGroup}
               onToggleCollapse={onToggleGroupCollapse}
             />
@@ -670,7 +674,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         />
       </div>
 
-      {!readOnly && (
+      {!readOnly && !layoutLocked && (
         <MultiSelectAlignBar
           selectedCount={effectiveSelectedPosKeys.length}
           onAlign={interactions.handleAlignSelected}
@@ -735,6 +739,7 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
           darkMode={darkMode}
           bounds={minimapBounds}
           viewportRect={minimapViewportRect}
+          onJumpToPoint={panToWorldPoint}
         />
       )}
 
@@ -760,7 +765,9 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         onChangeDetailLevel={onChangeDetailLevel}
         onToggleAutoLod={toggleAutoLod}
         onToggleShowCardinality={toggleShowCardinality}
-        onAutoLayout={onAutoLayout}
+        onAutoLayout={() => {
+          if (!layoutLocked) onAutoLayout();
+        }}
         onAddNoteAtCenter={handleAddNoteAtCenter}
         onToggleSnapGrid={() => setSnapGrid((s) => !s)}
         onToggleMinimap={() => setShowMinimap((m) => !m)}
@@ -770,6 +777,8 @@ export const DiagramCanvas: React.FC<DiagramCanvasProps> = ({
         readOnly={readOnly}
         onResetLayout={onResetLayout}
         hasCustomLayout={hasCustomLayout}
+        layoutLocked={layoutLocked}
+        onToggleLayoutLocked={toggleLayoutLocked}
       />
     </div>
   );

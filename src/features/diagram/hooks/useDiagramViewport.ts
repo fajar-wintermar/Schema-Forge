@@ -335,6 +335,20 @@ export function useDiagramViewport({
     return { x: Math.round(cx), y: Math.round(cy) };
   }, [containerRef, viewport.x, viewport.y, viewport.zoom]);
 
+  const panToWorldPoint = useCallback(
+    (worldX: number, worldY: number) => {
+      const el = containerRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      scheduleViewportUpdate((prev) => ({
+        ...prev,
+        x: rect.width / 2 - worldX * prev.zoom,
+        y: rect.height / 2 - worldY * prev.zoom,
+      }));
+    },
+    [containerRef, scheduleViewportUpdate]
+  );
+
   return {
     viewport,
     containerSize,
@@ -344,6 +358,7 @@ export function useDiagramViewport({
     handleWheel,
     zoomOut,
     zoomIn,
+    panToWorldPoint,
     getCanvasCenterNoteCoords,
   };
 }

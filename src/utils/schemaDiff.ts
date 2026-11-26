@@ -534,3 +534,157 @@ export function computeSchemaDiff(dbmlA: string, dbmlB: string): SchemaDiffResul
   };
 }
 
+export interface BreakingSchemaChange {
+  severity: 'breaking' | 'caution';
+  category: 'table-removed' | 'column-removed' | 'column-type-changed' | 'ref-removed' | 'enum-value-removed';
+  message: string;
+}
+
+export function detectBreakingSchemaChanges(
+  diff: SchemaDiffResult
+): BreakingSchemaChange[] {
+  const warnings: BreakingSchemaChange[] = [];
+
+  for (const t of diff.tables) {
+    if (t.status === 'removed') {
+      warnings.push({
+        severity: 'breaking',
+        category: 'table-removed',
+        message: `Dropped table \`${t.tableId}\` (${t.columnDiffs.length} columns)`,
+      });
+      continue;
+    }
+
+    for (const c of t.columnDiffs) {
+      if (c.status === 'removed') {
+        warnings.push({
+          severity: 'breaking',
+          category: 'column-removed',
+          message: `Dropped column \`${t.tableId}.${c.name}\``,
+        });
+      } else if (
+        c.status === 'modified' &&
+        c.before &&
+        c.after &&
+        c.before.type !== c.after.type
+      ) {
+        warnings.push({
+          severity: 'caution',
+          category: 'column-type-changed',
+          message: `Changed column type \`${t.tableId}.${c.name}\`: \`${c.before.type}\` → \`${c.after.type}\``,
+        });
+      }
+    }
+  }
+
+  for (const r of diff.refs) {
+    if (r.status === 'removed') {
+      warnings.push({
+        severity: 'caution',
+        category: 'ref-removed',
+        message: `Removed foreign key \`${r.label}\``,
+      });
+    }
+  }
+
+  for (const e of diff.enums) {
+    if (e.removedValues.length > 0) {
+      warnings.push({
+        severity: 'breaking',
+        category: 'enum-value-removed',
+        message: `Removed enum value(s) from \`${e.name}\`: ${e.removedValues
+          .map((v) => `\`${v}\``)
+          .join(', ')}`,
+      });
+    }
+  }
+
+  return warnings;
+}
+
+export function buildSchemaDiffMarkdownSummary(
+  diff: SchemaDiffResult,
+  options: {
+    title?: string;
+    includeSql?: boolean;
+    dialect?: SqlDialect;
+    baseLabel?: string;
+    targetLabel?: string;
+  } = {}
+): string {
+  const { summary } = diff;
+  const breaking = detectBreakingSchemaChanges(diff);
+  const lines: string[] = [];
+
+  lines.push(`## ${options.title || 'SchemaForge Schema Diff'}`);
+  lines.push('');
+  lines.push(
+    `**Summary:** +${summary.tablesAdded} added · ~${summary.tablesModified} modified · -${summary.tablesRemoved} removed tables · ${summary.columnsChanged} column edits · ${summary.indexesChanged} index updates · ${summary.refsChanged} relationship changes`
+  );
+  lines.push('');
+
+  if (breaking.length > 0) {
+    lines.push(`> [!WARNING]`);
+    lines.push(
+      `> **Potential Breaking Changes (${breaking.length})**`
+    );
+    for (const b of breaking) {
+      lines.push(`> - ${b.message}`);
+    }
+    lines.push('');
+  }
+
+  const changedTables = diff.tables;
+  if (changedTables.length > 0) {
+    lines.push('### Table Changes');
+    for (const t of changedTables) {
+      if (t.status === 'added') {
+        lines.push(
+          `- **Added** \`${t.tableId}\` (${t.after?.columns.length || 0} columns)`
+        );
+      } else if (t.status === 'removed') {
+        lines.push(`- **Removed** \`${t.tableId}\``);
+      } else {
+        const colNotes = t.columnDiffs
+          .slice(0, 8)
+          .map((c) => `${c.status === 'added' ? '+' : c.status === 'removed' ? '-' : '~'}${c.name}`)
+          .join(', ');
+        lines.push(
+          `- **Modified** \`${t.tableId}\`${colNotes ? ` (${colNotes}${t.columnDiffs.length > 8 ? ', …' : ''})` : ''}`
+        );
+      }
+    }
+    lines.push('');
+  }
+
+  if (diff.refs.length > 0) {
+    lines.push('### Relationship Changes');
+    for (const r of diff.refs.slice(0, 15)) {
+      lines.push(`- **${r.status}** \`${r.label}\`${r.detail ? ` — ${r.detail}` : ''}`);
+    }
+    if (diff.refs.length > 15) {
+      lines.push(`- …and ${diff.refs.length - 15} more`);
+    }
+    lines.push('');
+  }
+
+  if (options.includeSql !== false) {
+    const sql = generateSqlMigration(diff, options.dialect || 'postgres', {
+      baseLabel: options.baseLabel || 'Base Schema',
+      targetLabel: options.targetLabel || 'Proposed Schema',
+    }).trim();
+    if (sql && !sql.endsWith('No structural schema changes detected.')) {
+      lines.push('<details>');
+      lines.push(`<summary>Incremental SQL Migration (${options.dialect === 'mysql' ? 'MySQL' : 'PostgreSQL'})</summary>`);
+      lines.push('');
+      lines.push('```sql');
+      lines.push(sql);
+      lines.push('```');
+      lines.push('</details>');
+      lines.push('');
+    }
+  }
+
+  return lines.join('\n').trim() + '\n';
+}
+

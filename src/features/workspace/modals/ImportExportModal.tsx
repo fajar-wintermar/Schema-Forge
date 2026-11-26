@@ -33,14 +33,23 @@ import {
   exportDiagramAsPng,
   exportSchemaToCsv,
   exportSchemaToDbml,
+  exportSchemaToDrizzle,
   exportSchemaToHtml,
   exportSchemaToMarkdown,
+  exportSchemaToMermaid,
+  exportSchemaToOpenApi,
+  exportSchemaToPrisma,
   exportSchemaToSql,
+  exportSchemaToSqlAlchemy,
   filterSchemaByDomains,
   importCsvToDbml,
+  importDrizzleToDbml,
+  importOpenApiToDbml,
+  importPrismaToDbml,
   importSqlToDbml,
   printSchemaDocs,
 } from '../../../utils/importExport';
+import type { DiagramSlice } from '../../../utils/io/docsExport';
 
 interface ImportExportModalProps {
   projectName: string;
@@ -101,7 +110,9 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
     () => collapsedGroups.length > 0
   );
   const [embedSvgInDocs, setEmbedSvgInDocs] = useState<boolean>(true);
-  const [importFormat, setImportFormat] = useState<'sql' | 'csv' | 'dbml' | 'url'>('sql');
+  const [importFormat, setImportFormat] = useState<
+    'sql' | 'prisma' | 'drizzle' | 'openapi' | 'csv' | 'dbml' | 'url'
+  >('sql');
   const [importText, setImportText] = useState('');
   const [importUrl, setImportUrl] = useState('');
   const [importError, setImportError] = useState<string | null>(null);
@@ -267,13 +278,51 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
           collapsedGroups: activeCollapsedGroups,
         }).svg
       : undefined;
+
+    const groupsForSlices = isScopedExport
+      ? schema.tableGroups.filter((g) => activeExportDomains.includes(g.name))
+      : schema.tableGroups;
+    const domainDiagrams: DiagramSlice[] = [];
+    if (
+      embedSvgInDocs &&
+      svgDiagram &&
+      (groupsForSlices.length > 1 || (!isScopedExport && groupsForSlices.length > 0))
+    ) {
+      domainDiagrams.push({
+        id: 'all',
+        label: isScopedExport ? 'Filtered View' : 'All Domains',
+        svg: svgDiagram,
+      });
+      for (const g of groupsForSlices) {
+        const sliceSvg = buildDiagramSvg({
+          schema,
+          positions,
+          detailLevel,
+          stickyNotes: [],
+          darkMode,
+          title: `${exportDiagramTitle} — ${g.name}`,
+          selectedDomains: [g.name],
+          edgeRouting: exportRouting,
+          crossDomainMode: 'hide',
+          showCardinality: exportShowCardinality,
+          collapsedGroups: [],
+        }).svg;
+        domainDiagrams.push({
+          id: `domain-${slugifyPart(g.name)}`,
+          label: `${g.name} (${g.tables.length})`,
+          svg: sliceSvg,
+        });
+      }
+    }
+
     const html = exportSchemaToHtml(scopedSchema, {
       title: exportDiagramTitle,
       svgDiagram,
+      domainDiagrams,
       darkMode,
     });
     downloadTextFile(`${safeFileBase}.docs.html`, html, 'text/html;charset=utf-8');
-    setFeedback('Exported standalone HTML documentation');
+    setFeedback('Exported interactive HTML documentation atlas');
   };
 
   const handlePrintDocsPdf = () => {
@@ -306,9 +355,13 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
     const reader = new FileReader();
     reader.onload = () => {
       setImportText(String(reader.result || ''));
-      if (file.name.endsWith('.csv')) setImportFormat('csv');
-      else if (file.name.endsWith('.sql')) setImportFormat('sql');
-      else if (file.name.endsWith('.dbml')) setImportFormat('dbml');
+      const lower = file.name.toLowerCase();
+      if (lower.endsWith('.csv')) setImportFormat('csv');
+      else if (lower.endsWith('.sql')) setImportFormat('sql');
+      else if (lower.endsWith('.prisma')) setImportFormat('prisma');
+      else if (lower.endsWith('.ts') || lower.endsWith('.js')) setImportFormat('drizzle');
+      else if (lower.endsWith('.json')) setImportFormat('openapi');
+      else if (lower.endsWith('.dbml')) setImportFormat('dbml');
     };
     reader.readAsText(file);
   };
@@ -338,6 +391,12 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
         nextDbml = importSqlToDbml(importText);
       } else if (importFormat === 'csv') {
         nextDbml = importCsvToDbml(importText);
+      } else if (importFormat === 'prisma') {
+        nextDbml = importPrismaToDbml(importText);
+      } else if (importFormat === 'drizzle') {
+        nextDbml = importDrizzleToDbml(importText);
+      } else if (importFormat === 'openapi') {
+        nextDbml = importOpenApiToDbml(importText);
       }
       onImportDbml(nextDbml);
       onClose();
@@ -684,7 +743,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
                   <span>Embed ER diagram SVG in HTML / Print</span>
                 </label>
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                 <button
                   type="button"
                   disabled={!hasValidSelection}
@@ -706,11 +765,34 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
                 >
                   <FileCode2 className="w-4 h-4 text-emerald-600" />
                   <div className="text-xs font-semibold text-slate-900 dark:text-slate-100">
-                    Static HTML (.html)
+                    HTML Atlas (.html)
                   </div>
                   <div className="text-[11px] text-slate-400">
-                    Self-contained + search
+                    Domain slices + nav
                   </div>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={!hasValidSelection}
+                  onClick={() => {
+                    const mmd = exportSchemaToMermaid(scopedSchema, {
+                      title: exportDiagramTitle,
+                    });
+                    downloadTextFile(
+                      `${safeFileBase}.erd.mmd`,
+                      mmd,
+                      'text/plain;charset=utf-8'
+                    );
+                    setFeedback('Exported Mermaid ERD (.mmd)');
+                  }}
+                  className="p-3 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 text-left space-y-1"
+                >
+                  <FileCode2 className="w-4 h-4 text-cyan-600" />
+                  <div className="text-xs font-semibold text-slate-900 dark:text-slate-100">
+                    Mermaid ERD
+                  </div>
+                  <div className="text-[11px] text-slate-400">Notion / Confluence</div>
                 </button>
 
                 <button
@@ -730,7 +812,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
 
             <div className="space-y-2.5">
               <div className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Schema &amp; Data Dictionary Formats
+                Schema, DDL &amp; ORM Formats
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                 <button
@@ -799,11 +881,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
                       ? exportSchemaToDbml(scopedSchema)
                       : dbml;
                     downloadTextFile(`${safeFileBase}.dbml`, dbmlContent);
-                    setFeedback(
-                      isScopedExport
-                        ? 'Exported scoped DBML Source'
-                        : 'Exported DBML Source'
-                    );
+                    setFeedback('Exported DBML Source');
                   }}
                   className="p-3 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 text-left space-y-1"
                 >
@@ -813,14 +891,101 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
                   </div>
                   <div className="text-[11px] text-slate-400">.dbml file</div>
                 </button>
+
+                <button
+                  type="button"
+                  disabled={!hasValidSelection}
+                  onClick={() => {
+                    downloadTextFile(
+                      `${safeFileBase}.prisma`,
+                      exportSchemaToPrisma(scopedSchema)
+                    );
+                    setFeedback('Exported Prisma schema (.prisma)');
+                  }}
+                  className="p-3 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 text-left space-y-1"
+                >
+                  <FileCode2 className="w-4 h-4 text-indigo-600" />
+                  <div className="text-xs font-semibold text-slate-900 dark:text-slate-100">
+                    Prisma Schema
+                  </div>
+                  <div className="text-[11px] text-slate-400">schema.prisma</div>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={!hasValidSelection}
+                  onClick={() => {
+                    downloadTextFile(
+                      `${safeFileBase}.drizzle.ts`,
+                      exportSchemaToDrizzle(scopedSchema)
+                    );
+                    setFeedback('Exported Drizzle ORM schema (.ts)');
+                  }}
+                  className="p-3 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 text-left space-y-1"
+                >
+                  <FileCode2 className="w-4 h-4 text-lime-600" />
+                  <div className="text-xs font-semibold text-slate-900 dark:text-slate-100">
+                    Drizzle ORM
+                  </div>
+                  <div className="text-[11px] text-slate-400">pgTable (.ts)</div>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={!hasValidSelection}
+                  onClick={() => {
+                    downloadTextFile(
+                      `${safeFileBase}.models.py`,
+                      exportSchemaToSqlAlchemy(scopedSchema)
+                    );
+                    setFeedback('Exported SQLAlchemy models (.py)');
+                  }}
+                  className="p-3 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 text-left space-y-1"
+                >
+                  <FileCode2 className="w-4 h-4 text-rose-600" />
+                  <div className="text-xs font-semibold text-slate-900 dark:text-slate-100">
+                    SQLAlchemy
+                  </div>
+                  <div className="text-[11px] text-slate-400">Python ORM</div>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={!hasValidSelection}
+                  onClick={() => {
+                    downloadTextFile(
+                      `${safeFileBase}.openapi.json`,
+                      exportSchemaToOpenApi(scopedSchema),
+                      'application/json;charset=utf-8'
+                    );
+                    setFeedback('Exported OpenAPI 3.1 JSON schemas');
+                  }}
+                  className="p-3 rounded-lg border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 disabled:opacity-50 text-left space-y-1"
+                >
+                  <FileCode2 className="w-4 h-4 text-sky-600" />
+                  <div className="text-xs font-semibold text-slate-900 dark:text-slate-100">
+                    OpenAPI 3.1
+                  </div>
+                  <div className="text-[11px] text-slate-400">.openapi.json</div>
+                </button>
               </div>
             </div>
           </div>
         ) : (
           <div className="p-5 space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-1 p-1 rounded-lg bg-slate-100 dark:bg-slate-800">
-                {(['sql', 'csv', 'dbml', 'url'] as const).map((fmt) => (
+              <div className="flex flex-wrap items-center gap-1 p-1 rounded-lg bg-slate-100 dark:bg-slate-800">
+                {(
+                  [
+                    'sql',
+                    'prisma',
+                    'drizzle',
+                    'openapi',
+                    'csv',
+                    'dbml',
+                    'url',
+                  ] as const
+                ).map((fmt) => (
                   <button
                     key={fmt}
                     type="button"
@@ -829,7 +994,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
                       setImportError(null);
                       clearUrlImportError();
                     }}
-                    className={`px-3 py-1 text-xs font-medium rounded-md uppercase transition-colors ${
+                    className={`px-2.5 py-1 text-xs font-medium rounded-md uppercase transition-colors ${
                       importFormat === fmt
                         ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-50 shadow-xs'
                         : 'text-slate-600 dark:text-slate-400'
@@ -846,7 +1011,7 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
                   <span>Load File</span>
                   <input
                     type="file"
-                    accept=".sql,.csv,.dbml,.txt"
+                    accept=".sql,.csv,.dbml,.prisma,.ts,.js,.json,.txt"
                     onChange={handleFileUpload}
                     className="hidden"
                   />
@@ -857,6 +1022,12 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
             <div className="text-[11px] text-slate-500 dark:text-slate-400">
               {importFormat === 'sql' &&
                 'Supports CREATE TABLE, CREATE TYPE AS ENUM, PRIMARY KEY, UNIQUE, NOT NULL, DEFAULT, and FOREIGN KEY / ALTER TABLE references.'}
+              {importFormat === 'prisma' &&
+                'Supports Prisma schema.prisma models, enums, @id, @unique, @default, @relation, and /// doc comments.'}
+              {importFormat === 'drizzle' &&
+                'Supports Drizzle ORM pgTable / mysqlTable / sqliteTable TypeScript schema definitions, .primaryKey(), .notNull(), and .references().'}
+              {importFormat === 'openapi' &&
+                'Supports OpenAPI 3.x / JSON Schema components.schemas definitions with x-ref / $ref object links.'}
               {importFormat === 'csv' &&
                 'Expected CSV headers: table_name, table_group, column_name, data_type, primary_key, unique, not_null, default_value, reference, column_note'}
               {importFormat === 'dbml' &&
@@ -881,6 +1052,12 @@ export const ImportExportModal: React.FC<ImportExportModalProps> = ({
                 placeholder={
                   importFormat === 'sql'
                     ? 'CREATE TABLE accounts (\n  id uuid PRIMARY KEY,\n  email varchar(255) UNIQUE NOT NULL\n);'
+                    : importFormat === 'prisma'
+                    ? 'model User {\n  id Int @id @default(autoincrement())\n  email String @unique\n}'
+                    : importFormat === 'drizzle'
+                    ? "export const users = pgTable('users', {\n  id: serial('id').primaryKey(),\n  email: varchar('email').notNull(),\n});"
+                    : importFormat === 'openapi'
+                    ? '{\n  "components": {\n    "schemas": {\n      "User": { "type": "object", "required": ["id"], "properties": { "id": { "type": "string", "format": "uuid" } } }\n    }\n  }\n}'
                     : importFormat === 'csv'
                     ? 'table_name,table_group,column_name,data_type,primary_key,reference\nusers,Identity,id,uuid,true,\norders,Commerce,user_id,uuid,false,> users.id'
                     : 'Table users {\n  id uuid [pk]\n}'

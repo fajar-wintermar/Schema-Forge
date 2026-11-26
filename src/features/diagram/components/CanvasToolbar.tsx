@@ -7,6 +7,7 @@ import {
   Crosshair,
   Grid,
   Hand,
+  Lock,
   Map as MapIcon,
   Maximize2,
   Minus,
@@ -17,6 +18,7 @@ import {
   Sparkles,
   Spline,
   StickyNote as StickyNoteIcon,
+  Unlock,
 } from 'lucide-react';
 import { DetailLevel } from '@shared/domain/schemaTypes';
 import type { EdgeRoutingMode } from '../../../utils/io/edgeGeometry';
@@ -52,6 +54,8 @@ export interface CanvasToolbarProps {
   readOnly?: boolean;
   onResetLayout?: () => void;
   hasCustomLayout?: boolean;
+  layoutLocked?: boolean;
+  onToggleLayoutLocked?: () => void;
 }
 
 export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
@@ -84,6 +88,8 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
   readOnly = false,
   onResetLayout,
   hasCustomLayout = false,
+  layoutLocked = false,
+  onToggleLayoutLocked,
 }) => (
   <div
     onPointerDown={(e) => e.stopPropagation()}
@@ -317,14 +323,43 @@ export const CanvasToolbar: React.FC<CanvasToolbarProps> = ({
     <button
       type="button"
       onClick={onAutoLayout}
-      title="Auto-arrange TableGroups and tables to minimize edge overlaps"
-      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors whitespace-nowrap"
+      disabled={layoutLocked}
+      title={
+        layoutLocked
+          ? 'Layout is locked — unlock to run Auto Layout'
+          : 'Auto-arrange TableGroups and tables to minimize edge overlaps'
+      }
+      className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 disabled:opacity-45 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
     >
       <Sparkles className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
       <span>Auto Layout</span>
     </button>
 
-    {onResetLayout && hasCustomLayout && (
+    {!readOnly && onToggleLayoutLocked && (
+      <button
+        type="button"
+        onClick={onToggleLayoutLocked}
+        title={
+          layoutLocked
+            ? 'Layout Locked — click to unlock dragging & Auto Layout'
+            : 'Lock Layout — prevent accidental table, group, or note dragging'
+        }
+        className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors whitespace-nowrap ${
+          layoutLocked
+            ? 'bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-200 shadow-xs'
+            : 'text-slate-700 dark:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800'
+        }`}
+      >
+        {layoutLocked ? (
+          <Lock className="w-3.5 h-3.5 shrink-0" />
+        ) : (
+          <Unlock className="w-3.5 h-3.5 text-slate-500 shrink-0" />
+        )}
+        <span>{layoutLocked ? 'Locked' : 'Lock'}</span>
+      </button>
+    )}
+
+    {onResetLayout && hasCustomLayout && !layoutLocked && (
       <button
         type="button"
         onClick={onResetLayout}

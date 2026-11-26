@@ -7,12 +7,22 @@ import {
   extractMarkdownHeadings,
   isRichMarkdownNote,
 } from '../../features/markdown/markdownUtils';
+import { computeDocsCoverage } from '../docsCoverage';
+import { extractMetadataTags, MetadataTagTone } from '../metadataTags';
 import { escapeHtml, renderSafeMarkdownToHtml } from './docsMarkdownHtml';
+
+export interface DiagramSlice {
+  id: string;
+  label: string;
+  color?: string;
+  svg: string;
+}
 
 export interface DocsExportOptions {
   title?: string;
   stickyNotes?: StickyNote[];
   svgDiagram?: string;
+  domainDiagrams?: DiagramSlice[];
   darkMode?: boolean;
 }
 
@@ -413,6 +423,17 @@ export function exportSchemaToHtml(
     a.id.localeCompare(b.id)
   );
 
+  const coverage = computeDocsCoverage(schema);
+
+  const tagBadgeCls = (tone: MetadataTagTone): string => `meta-tag tag-${tone}`;
+
+  const tableSlugMapJson = JSON.stringify(
+    Object.fromEntries(schema.tables.map((t) => [t.id, slugAnchor(t.id)]))
+  ).replace(/</g, '\\u003c');
+  const groupSlugMapJson = JSON.stringify(
+    Object.fromEntries(schema.tableGroups.map((g) => [g.name, slugAnchor(g.name)]))
+  ).replace(/</g, '\\u003c');
+
   const navGroupsHtml = schema.tableGroups
     .map(
       (g) =>
@@ -498,10 +519,14 @@ export function exportSchemaToHtml(
       ${sortedTables
         .map((t, tIdx) => {
           const domains = domainsByTable.get(t.id) || [];
+          const tableTags = extractMetadataTags(t.note);
+          const allColumnTags = t.columns.flatMap((c) => extractMetadataTags(c.note));
           const searchHaystack = [
             t.id,
             t.note || '',
             ...domains,
+            ...tableTags.map((tg) => tg.label),
+            ...allColumnTags.map((tg) => tg.label),
             ...t.columns.map((c) => `${c.name} ${c.type} ${c.note || ''}`),
           ]
             .join(' ')
@@ -557,6 +582,14 @@ export function exportSchemaToHtml(
                 }
               </div>
               <div class="meta-badges">
+                ${tableTags
+                  .map(
+                    (tg) =>
+                      `<span class="${tagBadgeCls(tg.tone)}">${escapeHtml(
+                        tg.label
+                      )}</span>`
+                  )
+                  .join('')}
                 ${domains
                   .map((d) => `<span class="badge">${escapeHtml(d)}</span>`)
                   .join('')}
@@ -598,6 +631,7 @@ export function exportSchemaToHtml(
                       if (c.check) {
                         badges.push('<span class="tag chk">CHECK</span>');
                       }
+                      const colTags = extractMetadataTags(c.note);
                       return `<tr>
                         <td class="mono strong nowrap">${
                           c.pk ? '<span class="pk-dot" title="Primary Key">◆</span> ' : ''
@@ -618,6 +652,18 @@ export function exportSchemaToHtml(
                           c.defaultValue ? escapeHtml(c.defaultValue) : '—'
                         }</td>
                         <td>
+                          ${
+                            colTags.length > 0
+                              ? `<div class="col-tag-row">${colTags
+                                  .map(
+                                    (tg) =>
+                                      `<span class="${tagBadgeCls(
+                                        tg.tone
+                                      )}">${escapeHtml(tg.label)}</span>`
+                                  )
+                                  .join('')}</div>`
+                              : ''
+                          }
                           ${
                             fk
                               ? `<a class="mono ref-link" href="#table-${escapeHtml(
@@ -924,7 +970,19 @@ export function exportSchemaToHtml(
         </section>`
       : '';
 
-  const diagramSectionHtml = options.svgDiagram
+  const domainSlices = options.domainDiagrams || [];
+  const primaryDiagramSvg =
+    options.svgDiagram || (domainSlices.length > 0 ? domainSlices[0].svg : undefined);
+  const allDiagramSlices: DiagramSlice[] = primaryDiagramSvg
+    ? [
+        ...(options.svgDiagram
+          ? [{ id: '__all__', label: 'All Domains', svg: options.svgDiagram }]
+          : []),
+        ...domainSlices,
+      ]
+    : [];
+
+  const diagramSectionHtml = primaryDiagramSvg
     ? `<section id="diagram" class="section">
         <div class="diagram-section-head">
           <h2>ER Diagram</h2>
@@ -936,11 +994,37 @@ export function exportSchemaToHtml(
             <button type="button" class="btn btn-sm" id="svg-zoom-reset" title="Reset zoom to 100%">100%</button>
           </div>
         </div>
+        ${
+          allDiagramSlices.length > 1
+            ? `<div class="diagram-slices" id="diagram-slices" role="tablist" aria-label="Diagram domain slices">${allDiagramSlices
+                .map(
+                  (sl, idx) =>
+                    `<button type="button" class="slice-pill${
+                      idx === 0 ? ' is-active' : ''
+                    }" data-slice-btn="${escapeHtml(sl.id)}">${
+                      sl.color
+                        ? `<span class="dot" style="background:${sanitizeColorHex(
+                            sl.color
+                          )}"></span>`
+                        : ''
+                    }<span>${escapeHtml(sl.label)}</span></button>`
+                )
+                .join('')}</div>`
+            : ''
+        }
         <div class="card diagram-card">
           <div id="diagram-viewport" class="diagram-viewport" tabindex="0">
-            <div id="diagram-stage" class="diagram-stage">${options.svgDiagram}</div>
+            <div id="diagram-stage" class="diagram-stage">${primaryDiagramSvg}</div>
           </div>
-          <div class="diagram-hint">Drag to pan · Ctrl/⌘ + scroll (or use buttons) to zoom · Drag bottom edge to resize</div>
+          ${allDiagramSlices
+            .map(
+              (sl) =>
+                `<template data-diagram-slice="${escapeHtml(sl.id)}">${
+                  sl.svg
+                }</template>`
+            )
+            .join('')}
+          <div class="diagram-hint">Click any table or TableGroup to jump to its docs · Hover a table to highlight foreign keys · Drag to pan · Ctrl/⌘ + scroll to zoom</div>
         </div>
       </section>`
     : '';
@@ -1269,10 +1353,34 @@ export function exportSchemaToHtml(
     .tok-removed { color: #fda4af; }
     .tok-meta { color: #22d3ee; font-weight: 600; }
 
+    /* Metadata Tags */
+    .col-tag-row { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; }
+    .meta-tag {
+      display: inline-flex; align-items: center; padding: 1px 7px; border-radius: 5px;
+      font-size: 10.5px; font-weight: 600; border: 1px solid var(--border);
+      background: var(--surface-alt); color: var(--text-body);
+    }
+    .tag-pii { border-color: #fda4af; background: #fff1f2; color: #be123c; }
+    .tag-deprecated { border-color: #fdba74; background: #fff7ed; color: #c2410c; }
+    .tag-owner { border-color: #c7d2fe; background: #eef2ff; color: #4338ca; }
+    .tag-sla { border-color: #a5f3fc; background: #ecfeff; color: #0e7490; }
+    html.dark .tag-pii { border-color: rgba(244, 63, 94, 0.4); background: rgba(244, 63, 94, 0.14); color: #fda4af; }
+    html.dark .tag-deprecated { border-color: rgba(249, 115, 22, 0.4); background: rgba(249, 115, 22, 0.14); color: #fdba74; }
+    html.dark .tag-owner { border-color: rgba(99, 102, 241, 0.4); background: rgba(99, 102, 241, 0.14); color: #a5b4fc; }
+    html.dark .tag-sla { border-color: rgba(6, 182, 212, 0.4); background: rgba(6, 182, 212, 0.14); color: #67e8f9; }
+
     /* Interactive SVG Diagram Viewport */
     .diagram-section-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
     .diagram-section-head h2 { margin: 0; }
     .diagram-toolbar { display: inline-flex; align-items: center; gap: 6px; }
+    .diagram-slices { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+    .slice-pill {
+      display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 7px;
+      border: 1px solid var(--border); background: var(--surface); color: var(--text-body);
+      font-size: 11.5px; font-weight: 600; cursor: pointer; transition: background 0.15s, border-color 0.15s;
+    }
+    .slice-pill:hover { background: var(--surface-alt); }
+    .slice-pill.is-active { background: var(--accent); border-color: var(--accent); color: #ffffff; }
     .zoom-label { font-size: 11.5px; min-width: 46px; text-align: center; color: var(--muted); font-weight: 600; }
     .diagram-card { padding: 0; overflow: hidden; }
     .diagram-viewport {
@@ -1283,6 +1391,14 @@ export function exportSchemaToHtml(
     .diagram-viewport.is-dragging { cursor: grabbing; user-select: none; }
     .diagram-stage { display: inline-block; min-width: 100%; }
     .diagram-viewport svg { display: block; }
+    .diagram-viewport svg .svg-table,
+    .diagram-viewport svg .svg-group { cursor: pointer; transition: opacity 0.15s; }
+    .diagram-viewport svg .svg-table:hover > rect:first-of-type { stroke: var(--accent); stroke-width: 2.2; }
+    .diagram-viewport svg .svg-edge { transition: opacity 0.15s; }
+    .diagram-viewport svg.has-hover .svg-edge { opacity: 0.22; }
+    .diagram-viewport svg.has-hover .svg-edge.is-connected { opacity: 1; }
+    .diagram-viewport svg.has-hover .svg-edge.is-connected path { stroke: var(--accent); stroke-width: 2.4; }
+    .flash-target { box-shadow: 0 0 0 3px var(--accent); transition: box-shadow 0.4s ease; }
     .diagram-hint {
       padding: 7px 14px; border-top: 1px solid var(--border); background: var(--surface-subtle);
       font-size: 11px; color: var(--muted);
@@ -1291,7 +1407,7 @@ export function exportSchemaToHtml(
     @media (max-width: 860px) { .sidebar { display: none; } .main { padding: 20px 16px; } }
     @media print {
       body { background: #ffffff; color: #0f172a; display: block; }
-      .sidebar, .actions, .diagram-toolbar, .diagram-hint, .code-copy-btn { display: none !important; }
+      .sidebar, .actions, .diagram-toolbar, .diagram-slices, .diagram-hint, .code-copy-btn { display: none !important; }
       .main { max-width: none; padding: 0; }
       .card, .readme-card { break-inside: avoid; border-color: #cbd5e1; }
       .diagram-viewport { height: auto !important; max-height: none !important; overflow: visible !important; resize: none !important; padding: 0; }
@@ -1302,9 +1418,9 @@ export function exportSchemaToHtml(
 <body>
   <aside class="sidebar">
     <h1>${escapeHtml(title)}</h1>
-    <input id="doc-filter" class="search-box" type="search" placeholder="Filter tables &amp; columns..." />
+    <input id="doc-filter" class="search-box" type="search" placeholder="Filter tables, columns &amp; tags..." />
     <a class="nav-link" href="#top">Overview</a>
-    ${options.svgDiagram ? '<a class="nav-link" href="#diagram">ER Diagram</a>' : ''}
+    ${primaryDiagramSvg ? '<a class="nav-link" href="#diagram">ER Diagram</a>' : ''}
     ${schema.tableGroups.length > 0 ? '<a class="nav-link" href="#domains">Business Domains</a>' : ''}
     <a class="nav-link" href="#tables">Tables (${sortedTables.length})</a>
     ${schema.refs.length > 0 ? `<a class="nav-link" href="#relationships">Relationships (${schema.refs.length})</a>` : ''}
@@ -1322,7 +1438,7 @@ export function exportSchemaToHtml(
           schema.project.databaseType || 'Relational Schema'
         )} · ${schema.tables.length} Tables · ${totalFields} Fields · ${
     schema.tableGroups.length
-  } Table Groups · ${schema.enums.length} Enums · ${schema.refs.length} Relationships</div>
+  } Table Groups · ${schema.enums.length} Enums · ${schema.refs.length} Relationships · ${coverage.overallPct}% Documented</div>
         <h1>${escapeHtml(title)}</h1>
         ${
           schema.project.note && !isRichMarkdownNote(schema.project.note)
@@ -1384,11 +1500,33 @@ export function exportSchemaToHtml(
         }
       });
 
+      var tableSlugs = ${tableSlugMapJson};
+      var groupSlugs = ${groupSlugMapJson};
       var viewport = document.getElementById('diagram-viewport');
-      var svg = viewport ? viewport.querySelector('svg') : null;
-      if (viewport && svg) {
-        var natW = parseFloat(svg.getAttribute('width') || '0');
-        var natH = parseFloat(svg.getAttribute('height') || '0');
+      var stage = document.getElementById('diagram-stage');
+      var label = document.getElementById('svg-zoom-label');
+      var scale = 1;
+      var natW = 1000;
+      var natH = 600;
+      var activeSvg = null;
+      var movedSinceDown = false;
+
+      function scrollToTargetElement(elId) {
+        var target = document.getElementById(elId);
+        if (!target) return;
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        target.classList.add('flash-target');
+        window.setTimeout(function () { target.classList.remove('flash-target'); }, 1400);
+      }
+
+      function bindActiveSvg(fitInitially) {
+        if (!viewport || !stage) return;
+        var svg = stage.querySelector('svg');
+        if (!svg) return;
+        activeSvg = svg;
+
+        natW = parseFloat(svg.getAttribute('width') || '0');
+        natH = parseFloat(svg.getAttribute('height') || '0');
         if ((!natW || !natH) && svg.viewBox && svg.viewBox.baseVal) {
           natW = svg.viewBox.baseVal.width;
           natH = svg.viewBox.baseVal.height;
@@ -1403,40 +1541,81 @@ export function exportSchemaToHtml(
         svg.style.display = 'block';
         svg.style.flexShrink = '0';
 
-        var scale = 1;
-        var label = document.getElementById('svg-zoom-label');
-
-        function applyZoom(nextScale, anchorClientX, anchorClientY) {
-          var clamped = Math.min(4, Math.max(0.15, nextScale));
-          var rect = viewport.getBoundingClientRect();
-          var relX = anchorClientX !== undefined ? anchorClientX - rect.left : viewport.clientWidth / 2;
-          var relY = anchorClientY !== undefined ? anchorClientY - rect.top : viewport.clientHeight / 2;
-          var contentX = (viewport.scrollLeft + relX) / scale;
-          var contentY = (viewport.scrollTop + relY) / scale;
-
-          scale = clamped;
-          svg.style.width = Math.round(natW * scale) + 'px';
-          svg.style.height = Math.round(natH * scale) + 'px';
-          if (label) label.textContent = Math.round(scale * 100) + '%';
-
-          viewport.scrollLeft = contentX * scale - relX;
-          viewport.scrollTop = contentY * scale - relY;
-        }
-
-        function fitDiagram() {
-          var availW = Math.max(240, viewport.clientWidth - 28);
-          var availH = Math.max(240, viewport.clientHeight - 28);
-          var fit = Math.min(1, availW / natW, availH / natH);
-          applyZoom(Math.max(0.15, fit));
-          viewport.scrollLeft = 0;
-          viewport.scrollTop = 0;
-        }
-
-        if (natW > viewport.clientWidth - 24) {
+        if (fitInitially && natW > viewport.clientWidth - 24) {
           fitDiagram();
         } else {
           applyZoom(1);
         }
+
+        var tables = svg.querySelectorAll('[data-table-id]');
+        tables.forEach(function (tEl) {
+          var tid = tEl.getAttribute('data-table-id') || '';
+          tEl.addEventListener('mouseenter', function () {
+            svg.classList.add('has-hover');
+            svg.querySelectorAll('.svg-edge').forEach(function (edgeEl) {
+              var fromT = edgeEl.getAttribute('data-edge-from');
+              var toT = edgeEl.getAttribute('data-edge-to');
+              edgeEl.classList.toggle('is-connected', fromT === tid || toT === tid);
+            });
+          });
+          tEl.addEventListener('mouseleave', function () {
+            svg.classList.remove('has-hover');
+            svg.querySelectorAll('.svg-edge.is-connected').forEach(function (edgeEl) {
+              edgeEl.classList.remove('is-connected');
+            });
+          });
+        });
+
+        svg.addEventListener('click', function (e) {
+          if (movedSinceDown) return;
+          var targetNode = e.target;
+          if (!targetNode || !targetNode.closest) return;
+          var tableG = targetNode.closest('[data-table-id]');
+          if (tableG) {
+            var tableId = tableG.getAttribute('data-table-id') || '';
+            var slug = tableSlugs[tableId];
+            if (slug) scrollToTargetElement('table-' + slug);
+            return;
+          }
+          var groupG = targetNode.closest('[data-group-name]');
+          if (groupG) {
+            var groupName = groupG.getAttribute('data-group-name') || '';
+            var gSlug = groupSlugs[groupName];
+            if (gSlug) scrollToTargetElement('group-' + gSlug);
+          }
+        });
+      }
+
+      function applyZoom(nextScale, anchorClientX, anchorClientY) {
+        if (!viewport || !activeSvg) return;
+        var clamped = Math.min(4, Math.max(0.15, nextScale));
+        var rect = viewport.getBoundingClientRect();
+        var relX = anchorClientX !== undefined ? anchorClientX - rect.left : viewport.clientWidth / 2;
+        var relY = anchorClientY !== undefined ? anchorClientY - rect.top : viewport.clientHeight / 2;
+        var contentX = (viewport.scrollLeft + relX) / scale;
+        var contentY = (viewport.scrollTop + relY) / scale;
+
+        scale = clamped;
+        activeSvg.style.width = Math.round(natW * scale) + 'px';
+        activeSvg.style.height = Math.round(natH * scale) + 'px';
+        if (label) label.textContent = Math.round(scale * 100) + '%';
+
+        viewport.scrollLeft = contentX * scale - relX;
+        viewport.scrollTop = contentY * scale - relY;
+      }
+
+      function fitDiagram() {
+        if (!viewport || !activeSvg) return;
+        var availW = Math.max(240, viewport.clientWidth - 28);
+        var availH = Math.max(240, viewport.clientHeight - 28);
+        var fit = Math.min(1, availW / natW, availH / natH);
+        applyZoom(Math.max(0.15, fit));
+        viewport.scrollLeft = 0;
+        viewport.scrollTop = 0;
+      }
+
+      if (viewport && stage) {
+        bindActiveSvg(true);
 
         var btnIn = document.getElementById('svg-zoom-in');
         var btnOut = document.getElementById('svg-zoom-out');
@@ -1446,6 +1625,23 @@ export function exportSchemaToHtml(
         if (btnOut) btnOut.addEventListener('click', function () { applyZoom(scale / 1.25); });
         if (btnFit) btnFit.addEventListener('click', fitDiagram);
         if (btnReset) btnReset.addEventListener('click', function () { applyZoom(1); });
+
+        var sliceBar = document.getElementById('diagram-slices');
+        if (sliceBar) {
+          sliceBar.addEventListener('click', function (e) {
+            var btn = e.target && e.target.closest ? e.target.closest('[data-slice-btn]') : null;
+            if (!btn) return;
+            var sliceId = btn.getAttribute('data-slice-btn');
+            var tpl = document.querySelector('template[data-diagram-slice="' + CSS.escape(sliceId || '') + '"]');
+            if (!tpl) return;
+            sliceBar.querySelectorAll('[data-slice-btn]').forEach(function (b) {
+              b.classList.toggle('is-active', b === btn);
+            });
+            stage.innerHTML = '';
+            stage.appendChild(tpl.content.cloneNode(true));
+            bindActiveSvg(true);
+          });
+        }
 
         viewport.addEventListener('wheel', function (e) {
           if (!e.ctrlKey && !e.metaKey) return;
@@ -1463,6 +1659,7 @@ export function exportSchemaToHtml(
         viewport.addEventListener('mousedown', function (e) {
           if (e.button !== 0) return;
           dragging = true;
+          movedSinceDown = false;
           startX = e.clientX;
           startY = e.clientY;
           startLeft = viewport.scrollLeft;
@@ -1472,8 +1669,11 @@ export function exportSchemaToHtml(
 
         window.addEventListener('mousemove', function (e) {
           if (!dragging) return;
-          viewport.scrollLeft = startLeft - (e.clientX - startX);
-          viewport.scrollTop = startTop - (e.clientY - startY);
+          var dx = e.clientX - startX;
+          var dy = e.clientY - startY;
+          if (Math.abs(dx) > 4 || Math.abs(dy) > 4) movedSinceDown = true;
+          viewport.scrollLeft = startLeft - dx;
+          viewport.scrollTop = startTop - dy;
         });
 
         window.addEventListener('mouseup', function () {

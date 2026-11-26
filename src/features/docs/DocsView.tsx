@@ -552,6 +552,7 @@ export const DocsView: React.FC<DocsViewProps> = ({
 
         {resolvedSection.kind === 'group' && activeGroup && (
           <GroupDetailPage
+            schema={schema}
             activeGroup={activeGroup}
             stickyNotes={stickyNotes}
             tableMap={tableMap}
@@ -619,6 +620,7 @@ export const DocsView: React.FC<DocsViewProps> = ({
 
         {resolvedSection.kind === 'groups' && (
           <TableGroupsPage
+            schema={schema}
             totalSchemaGroups={schema.tableGroups.length}
             filteredGroups={filteredTableGroups}
             pagedGroups={pagedTableGroups}

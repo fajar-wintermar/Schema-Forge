@@ -69,6 +69,20 @@ export type GithubBatchPushResult = InferResponseType<
   200
 >;
 
+export type GithubPullRequestResult = InferResponseType<
+  (typeof apiClient.api.github)['create-pr']['$post'],
+  200
+>;
+
+export interface GithubCreatePullRequestPayload {
+  owner: string;
+  repo: string;
+  head: string;
+  base: string;
+  title: string;
+  body?: string;
+}
+
 export interface GithubPushPayload {
   owner: string;
   repo: string;
@@ -267,6 +281,18 @@ export async function pushGithubFile(
   payload: GithubPushPayload
 ): Promise<GithubPushResult> {
   const res = await apiClient.api.github.push.$post({
+    json: payload,
+  });
+  if (!res.ok) {
+    throw await parseErrorResponse(res);
+  }
+  return await res.json();
+}
+
+export async function createGithubPullRequest(
+  payload: GithubCreatePullRequestPayload
+): Promise<GithubPullRequestResult> {
+  const res = await apiClient.api.github['create-pr'].$post({
     json: payload,
   });
   if (!res.ok) {

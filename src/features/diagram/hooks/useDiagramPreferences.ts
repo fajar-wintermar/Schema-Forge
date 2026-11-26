@@ -9,6 +9,7 @@ import {
   EDGE_ROUTING_STORAGE_KEY,
   FK_CARDINALITY_STORAGE_KEY,
   FOCUS_MODE_STORAGE_KEY,
+  LAYOUT_LOCKED_STORAGE_KEY,
 } from '../types';
 
 export interface DiagramPreferencesSnapshot {
@@ -18,6 +19,7 @@ export interface DiagramPreferencesSnapshot {
   routingMode: EdgeRoutingMode;
   crossDomainMode: CrossDomainEdgeMode;
   showCardinality: boolean;
+  layoutLocked: boolean;
 }
 
 export function readDiagramPreferences(): DiagramPreferencesSnapshot {
@@ -28,6 +30,7 @@ export function readDiagramPreferences(): DiagramPreferencesSnapshot {
     routingMode: 'bezier',
     crossDomainMode: 'show',
     showCardinality: true,
+    layoutLocked: false,
   };
   try {
     const cursorSaved = localStorage.getItem(CURSOR_MODE_STORAGE_KEY);
@@ -45,6 +48,8 @@ export function readDiagramPreferences(): DiagramPreferencesSnapshot {
     }
     defaults.showCardinality =
       localStorage.getItem(FK_CARDINALITY_STORAGE_KEY) !== 'false';
+    defaults.layoutLocked =
+      localStorage.getItem(LAYOUT_LOCKED_STORAGE_KEY) === 'true';
   } catch {
     // ignore storage errors (e.g. SSR or restricted iframes)
   }
@@ -71,6 +76,9 @@ export function useDiagramPreferences() {
   );
   const [showCardinality, setShowCardinality] = useState<boolean>(
     () => readDiagramPreferences().showCardinality
+  );
+  const [layoutLocked, setLayoutLocked] = useState<boolean>(
+    () => readDiagramPreferences().layoutLocked
   );
 
   const toggleAutoLod = useCallback(() => {
@@ -143,6 +151,18 @@ export function useDiagramPreferences() {
     });
   }, []);
 
+  const toggleLayoutLocked = useCallback(() => {
+    setLayoutLocked((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(LAYOUT_LOCKED_STORAGE_KEY, String(next));
+      } catch {
+        // ignore storage errors
+      }
+      return next;
+    });
+  }, []);
+
   return {
     snapGrid,
     setSnapGrid,
@@ -160,5 +180,7 @@ export function useDiagramPreferences() {
     updateCrossDomainMode,
     showCardinality,
     toggleShowCardinality,
+    layoutLocked,
+    toggleLayoutLocked,
   };
 }

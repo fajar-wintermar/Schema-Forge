@@ -49,6 +49,7 @@ interface UseDiagramInteractionsOptions {
   updateFocusMode: (next: boolean | ((prev: boolean) => boolean)) => void;
   snapGrid: boolean;
   readOnly: boolean;
+  layoutLocked?: boolean;
   viewport: ViewportState;
   scheduleViewportUpdate: (
     updater: ViewportState | ((prev: ViewportState) => ViewportState)
@@ -89,6 +90,7 @@ export function useDiagramInteractions({
   updateFocusMode,
   snapGrid,
   readOnly,
+  layoutLocked = false,
   viewport,
   scheduleViewportUpdate,
   clientToWorld,
@@ -475,7 +477,7 @@ export function useDiagramInteractions({
 
   const handleAlignSelected = useCallback(
     (mode: AlignMode) => {
-      if (readOnly || effectiveSelectedPosKeys.length < 2) return;
+      if (readOnly || layoutLocked || effectiveSelectedPosKeys.length < 2) return;
       const next = alignSelectedTables(
         effectiveSelectedPosKeys,
         positions,
@@ -486,6 +488,7 @@ export function useDiagramInteractions({
     },
     [
       readOnly,
+      layoutLocked,
       effectiveSelectedPosKeys,
       positions,
       visibleTableRects,
@@ -559,6 +562,12 @@ export function useDiagramInteractions({
         return;
       }
 
+      if (layoutLocked) {
+        setSelectedPosKeys([inst.posKey]);
+        selectTable(inst.table.id);
+        return;
+      }
+
       if (curSelectedSet.has(inst.posKey) && curSelectedKeys.length > 1) {
         const origPositions: Record<string, TablePosition> = {};
         for (const pk of curSelectedKeys) {
@@ -595,7 +604,7 @@ export function useDiagramInteractions({
         origGroup: inst.groupName,
       };
     },
-    []
+    [layoutLocked]
   );
 
   const handleTableStartConnectFk = useCallback(
@@ -641,6 +650,7 @@ export function useDiagramInteractions({
 
   const handleGroupStartDrag = useCallback(
     (gb: GroupBoundingBox, e: React.PointerEvent) => {
+      if (layoutLocked) return;
       const curPos = latestPropsRef.current.positions;
       const origPositions: Record<string, TablePosition> = {};
       for (const pk of gb.posKeys) {
@@ -655,7 +665,7 @@ export function useDiagramInteractions({
         origPositions,
       };
     },
-    []
+    [layoutLocked]
   );
 
   const handleToggleOnlyDomain = useCallback(
@@ -669,6 +679,7 @@ export function useDiagramInteractions({
 
   const handleStickyNoteStartDrag = useCallback(
     (note: StickyNote, e: React.PointerEvent) => {
+      if (layoutLocked) return;
       dragRef.current = {
         type: 'note',
         noteId: note.id,
@@ -678,7 +689,7 @@ export function useDiagramInteractions({
         origY: note.y,
       };
     },
-    []
+    [layoutLocked]
   );
 
   const handleCanvasPointerDown = useCallback(

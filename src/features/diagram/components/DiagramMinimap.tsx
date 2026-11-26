@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { GroupBoundingBox, TABLE_WIDTH, TableInstance } from '../../../utils/autoLayout';
 import type { TableRect } from '../canvasGeometry';
 
@@ -10,6 +10,7 @@ export interface DiagramMinimapProps {
   darkMode: boolean;
   bounds: { minX: number; minY: number; width: number; height: number };
   viewportRect?: { x: number; y: number; width: number; height: number };
+  onJumpToPoint?: (worldX: number, worldY: number) => void;
 }
 
 const DiagramMinimapComponent: React.FC<DiagramMinimapProps> = ({
@@ -20,14 +21,53 @@ const DiagramMinimapComponent: React.FC<DiagramMinimapProps> = ({
   darkMode,
   bounds,
   viewportRect,
+  onJumpToPoint,
 }) => {
+  const draggingRef = useRef(false);
+
   if (visibleInstances.length === 0 && visibleGroupBoxes.length === 0) return null;
 
+  const jumpFromPointer = (e: React.PointerEvent<SVGSVGElement>) => {
+    if (!onJumpToPoint) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return;
+    const scale = Math.min(rect.width / bounds.width, rect.height / bounds.height);
+    const renderedW = bounds.width * scale;
+    const renderedH = bounds.height * scale;
+    const offsetX = (rect.width - renderedW) / 2;
+    const offsetY = (rect.height - renderedH) / 2;
+    const worldX = bounds.minX + (e.clientX - rect.left - offsetX) / scale;
+    const worldY = bounds.minY + (e.clientY - rect.top - offsetY) / scale;
+    onJumpToPoint(worldX, worldY);
+  };
+
   return (
-    <div className="absolute bottom-4 left-4 w-44 h-28 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/90 dark:bg-slate-900/90 backdrop-blur-xs p-1.5 shadow-sm pointer-events-none hidden sm:block">
+    <div
+      onPointerDown={(e) => e.stopPropagation()}
+      title={onJumpToPoint ? 'Click or drag on minimap to pan canvas' : undefined}
+      className="absolute bottom-4 left-4 w-44 h-28 rounded-lg border border-slate-200 dark:border-slate-700 bg-white/90 dark:bg-slate-900/90 backdrop-blur-xs p-1.5 shadow-sm hidden sm:block z-10"
+    >
       <svg
         viewBox={`${bounds.minX} ${bounds.minY} ${bounds.width} ${bounds.height}`}
-        className="w-full h-full"
+        onPointerDown={(e) => {
+          if (!onJumpToPoint) return;
+          e.stopPropagation();
+          e.currentTarget.setPointerCapture?.(e.pointerId);
+          draggingRef.current = true;
+          jumpFromPointer(e);
+        }}
+        onPointerMove={(e) => {
+          if (!draggingRef.current || !onJumpToPoint) return;
+          jumpFromPointer(e);
+        }}
+        onPointerUp={(e) => {
+          draggingRef.current = false;
+          e.currentTarget.releasePointerCapture?.(e.pointerId);
+        }}
+        onPointerCancel={() => {
+          draggingRef.current = false;
+        }}
+        className={`w-full h-full ${onJumpToPoint ? 'cursor-crosshair' : ''}`}
       >
         {visibleGroupBoxes.map((gb) => (
           <rect
@@ -38,10 +78,11 @@ const DiagramMinimapComponent: React.FC<DiagramMinimapProps> = ({
             height={gb.height}
             rx={16}
             fill={gb.color || '#2563EB'}
-            fillOpacity={0.14}
+            fillOpacity={gb.collapsed ? 0.28 : 0.12}
             stroke={gb.color || '#2563EB'}
-            strokeOpacity={0.4}
-            strokeWidth={8}
+            strokeOpacity={gb.collapsed ? 0.85 : 0.45}
+            strokeDasharray={gb.collapsed ? '28 16' : undefined}
+            strokeWidth={gb.collapsed ? 14 : 8}
           />
         ))}
         {visibleInstances.map((inst) => {
@@ -71,9 +112,10 @@ const DiagramMinimapComponent: React.FC<DiagramMinimapProps> = ({
             y={viewportRect.y}
             width={viewportRect.width}
             height={viewportRect.height}
-            fill="none"
+            fill="#2563EB"
+            fillOpacity={0.08}
             stroke="#2563EB"
-            strokeOpacity={0.75}
+            strokeOpacity={0.85}
             strokeWidth={Math.max(4, bounds.width * 0.008)}
             vectorEffect="non-scaling-stroke"
           />

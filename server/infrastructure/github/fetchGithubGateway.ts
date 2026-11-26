@@ -10,6 +10,7 @@ import type {
   GithubFileResult,
   GithubGistFileResult,
   GithubInlineCommitFileInput,
+  GithubPullRequestResult,
   GithubRepoMetadata,
   GithubTreeEntry,
   GithubTreeResult,
@@ -951,6 +952,66 @@ export class FetchGithubGateway implements IGithubGateway {
           targetBranch
         )}/${f.cleanPath}`,
       })),
+    };
+  }
+
+  async createPullRequest(params: {
+    owner: string;
+    repo: string;
+    title: string;
+    body: string;
+    head: string;
+    base: string;
+    accessToken: string;
+  }): Promise<GithubPullRequestResult> {
+    const { owner, repo, title, body, head, base, accessToken } = params;
+    const prRes = await githubApiFetch(
+      `/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/pulls`,
+      accessToken,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title,
+          body,
+          head,
+          base,
+        }),
+      }
+    );
+
+    const prJson = await readJsonUnknown(prRes);
+    const prRecord = isRecord(prJson) ? prJson : {};
+
+    if (!prRes.ok) {
+      let detail = readString(prRecord, 'message') || 'Failed to create Pull Request.';
+      if (Array.isArray(prRecord.errors) && prRecord.errors.length > 0) {
+        const firstErr = prRecord.errors[0];
+        if (isRecord(firstErr)) {
+          const subMsg = readString(firstErr, 'message');
+          if (subMsg) detail = subMsg;
+        }
+      }
+      if (prRes.status === 422) {
+        throw new ConflictError(detail, { code: 'PR_CREATE_CONFLICT' });
+      }
+      throw new ExternalGatewayError(detail, {
+        upstreamStatus: prRes.status || 400,
+      });
+    }
+
+    const prNumber = readNumber(prRecord, 'number') || 0;
+    const prUrl =
+      readString(prRecord, 'html_url') ||
+      `https://github.com/${owner}/${repo}/pull/${prNumber}`;
+
+    return {
+      number: prNumber,
+      url: prUrl,
+      title: readString(prRecord, 'title') || title,
+      state: readString(prRecord, 'state') || 'open',
+      headBranch: head,
+      baseBranch: base,
     };
   }
 }

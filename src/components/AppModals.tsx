@@ -108,13 +108,26 @@ interface AppModalsProps {
   onLoadUrlResult: (res: RemoteFetchResult, openInNewWorkspace: boolean) => void;
   onCloseOpenUrl: () => void;
   onCloseGithubModal: () => void;
-  onLoadGithubFile: (file: GithubFileResult, openInNewWorkspace: boolean) => void;
-  onSyncedGithubFile: (meta: GithubFileLink, dbml?: string) => void;
-  onLoadGithubFolder: (folderResult: GithubFolderResult, openInNewWorkspace: boolean) => void;
+  onLoadGithubFile: (
+    file: GithubFileResult,
+    openInNewWorkspace: boolean,
+    layoutJson?: string
+  ) => void;
+  onSyncedGithubFile: (
+    meta: GithubFileLink,
+    dbml?: string,
+    layoutJson?: string
+  ) => void;
+  onLoadGithubFolder: (
+    folderResult: GithubFolderResult,
+    openInNewWorkspace: boolean,
+    layoutJson?: string
+  ) => void;
   onSyncedGithubFolder: (
     repoLink: GithubRepoLink,
     files: SchemaModuleFile[],
-    replaceWorkspaceContent?: boolean
+    replaceWorkspaceContent?: boolean,
+    layoutJson?: string
   ) => void;
   onCloseWorkspacesModal: () => void;
   onSelectWorkspace: (id: string) => void;

@@ -9,10 +9,12 @@ import {
   Plus,
 } from 'lucide-react';
 import { ParsedSchema, StickyNote, TableDef } from '@shared/domain/schemaTypes';
+import { extractMetadataTags } from '../../../utils/metadataTags';
 import { isRichMarkdownNote } from '../../markdown/markdownUtils';
 import { CardinalityBadge } from '../components/CardinalityBadge';
 import { DocsBreadcrumb } from '../components/DocsBreadcrumb';
 import { InlineNoteEditor } from '../components/InlineNoteEditor';
+import { MetadataTagPills } from '../components/MetadataTagPills';
 import { ReadmeNoteCard } from '../components/ReadmeNoteCard';
 import { TrimmableNote } from '../components/TrimmableNote';
 import type { DocsSection } from '../types';
@@ -72,6 +74,7 @@ export const TableDetailPage: React.FC<TableDetailPageProps> = ({
   );
   const outgoing = schema.refs.filter((r) => r.fromTable === activeTable.id);
   const incoming = schema.refs.filter((r) => r.toTable === activeTable.id);
+  const tableTags = extractMetadataTags(activeTable.note);
 
   return (
     <div className="w-full px-6 lg:px-10 py-6 space-y-6">
@@ -175,6 +178,7 @@ export const TableDetailPage: React.FC<TableDetailPageProps> = ({
                 as {activeTable.alias}
               </span>
             )}
+            <MetadataTagPills tags={tableTags} />
           </div>
           <div className="flex items-center gap-3 shrink-0">
             <span className="text-xs text-slate-500 dark:text-slate-400 tabular-nums">
@@ -280,6 +284,7 @@ export const TableDetailPage: React.FC<TableDetailPageProps> = ({
                   Boolean(onUpdateColumnNote) &&
                   !col.fromPartial &&
                   editingColumnKey === colEditKey;
+                const colTags = extractMetadataTags(col.note);
 
                 return (
                   <tr
@@ -346,6 +351,11 @@ export const TableDetailPage: React.FC<TableDetailPageProps> = ({
                             {col.check && (
                               <div className="font-mono text-[11px] text-cyan-700 dark:text-cyan-300">
                                 CHECK ({col.check})
+                              </div>
+                            )}
+                            {colTags.length > 0 && (
+                              <div>
+                                <MetadataTagPills tags={colTags} />
                               </div>
                             )}
                             {col.note && (

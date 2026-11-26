@@ -1,8 +1,11 @@
 import React, { useState } from 'react';
 import {
+  CheckCircle2,
   ExternalLink,
   FolderGit2,
   FolderTree,
+  GitPullRequest,
+  LayoutGrid,
   Loader2,
   RefreshCw,
   ShieldCheck,
@@ -17,8 +20,13 @@ import {
   SqlDialect,
   WorkspaceProject,
 } from '@shared/domain/schemaTypes';
-import { GithubAuthStatus, GithubRepoInfo } from '../../../services/api/remoteService';
+import {
+  GithubAuthStatus,
+  GithubPullRequestResult,
+  GithubRepoInfo,
+} from '../../../services/api/remoteService';
 import { cleanFolderPrefix } from '../../../utils/schemaModules';
+import { SCHEMAFORGE_LAYOUT_PATH } from '../../../utils/layoutSync';
 import { SqlMigrationViewer } from '../../../components/SqlMigrationViewer';
 import { sanitizeExternalUrl } from '../../../utils/urlSafety';
 
@@ -55,11 +63,27 @@ interface PushToGithubTabProps {
   onNewBranchNameChange: (val: string) => void;
   commitMessage: string;
   onCommitMessageChange: (val: string) => void;
+  syncLayoutJson: boolean;
+  onSyncLayoutJsonChange: (val: boolean) => void;
   pullingLatest: boolean;
   onPullLatest: () => void;
   pushing: boolean;
   hasVerifiedPushTarget: boolean;
   onPush: () => void;
+  prPanelOpen: boolean;
+  onTogglePrPanel: (open: boolean) => void;
+  prTitle: string;
+  onPrTitleChange: (val: string) => void;
+  prHeadBranch: string;
+  onPrHeadBranchChange: (val: string) => void;
+  prBaseBranch: string;
+  onPrBaseBranchChange: (val: string) => void;
+  prBody: string;
+  onPrBodyChange: (val: string) => void;
+  creatingPr: boolean;
+  prResult: GithubPullRequestResult | null;
+  onOpenPullRequestPanel: () => void;
+  onCreatePullRequest: () => void;
 }
 
 export const PushToGithubTab: React.FC<PushToGithubTabProps> = ({
@@ -95,11 +119,27 @@ export const PushToGithubTab: React.FC<PushToGithubTabProps> = ({
   onNewBranchNameChange,
   commitMessage,
   onCommitMessageChange,
+  syncLayoutJson,
+  onSyncLayoutJsonChange,
   pullingLatest,
   onPullLatest,
   pushing,
   hasVerifiedPushTarget,
   onPush,
+  prPanelOpen,
+  onTogglePrPanel,
+  prTitle,
+  onPrTitleChange,
+  prHeadBranch,
+  onPrHeadBranchChange,
+  prBaseBranch,
+  onPrBaseBranchChange,
+  prBody,
+  onPrBodyChange,
+  creatingPr,
+  prResult,
+  onOpenPullRequestPanel,
+  onCreatePullRequest,
 }) => {
   const schemaFiles: SchemaModuleFile[] = workspace.schemaFiles || [];
   const [previewTab, setPreviewTab] = useState<'diff' | 'sql'>('diff');
@@ -601,9 +641,29 @@ export const PushToGithubTab: React.FC<PushToGithubTabProps> = ({
             className="w-full px-3 py-2 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
           />
         </div>
+
+        <label className="flex items-start gap-2 p-2.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60 cursor-pointer text-xs">
+          <input
+            type="checkbox"
+            checked={syncLayoutJson}
+            onChange={(e) => onSyncLayoutJsonChange(e.target.checked)}
+            className="mt-0.5 rounded border-slate-300 text-blue-600"
+          />
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 font-semibold text-slate-800 dark:text-slate-200">
+              <LayoutGrid className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+              <span>
+                Commit diagram layout metadata (<code className="font-mono">{SCHEMAFORGE_LAYOUT_PATH}</code>)
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
+              Persists pinned table coordinates, collapsed TableGroup state, and detail level alongside DBML in Git so teammates share identical layouts.
+            </p>
+          </div>
+        </label>
       </div>
 
-      <div className="flex items-center justify-between gap-2 pt-1">
+      <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
         {(isModularWorkspace ? repoLinked : linked) ? (
           <button
             type="button"
@@ -622,37 +682,183 @@ export const PushToGithubTab: React.FC<PushToGithubTabProps> = ({
           <span />
         )}
 
-        <button
-          type="button"
-          disabled={
-            pushing ||
-            !hasVerifiedPushTarget ||
-            (isModularWorkspace
-              ? selectedPushPaths.length === 0
-              : pushMode === 'linked' &&
-                Boolean(linked) &&
-                !hasLocalChanges &&
-                !createNewBranch)
-          }
-          onClick={onPush}
-          className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white"
-        >
-          {pushing ? (
-            <Loader2 className="w-3.5 h-3.5 animate-spin" />
-          ) : (
-            <UploadCloud className="w-3.5 h-3.5" />
-          )}
-          <span>
-            {pushing
-              ? 'Pushing...'
-              : isModularWorkspace
-              ? `Commit & Push ${selectedPushPaths.length} ${
-                  selectedPushPaths.length === 1 ? 'File' : 'Files'
-                }`
-              : 'Commit & Push to GitHub'}
-          </span>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => {
+              if (prPanelOpen) onTogglePrPanel(false);
+              else onOpenPullRequestPanel();
+            }}
+            disabled={!hasVerifiedPushTarget}
+            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-200 disabled:opacity-50"
+          >
+            <GitPullRequest className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+            <span>{prPanelOpen ? 'Hide PR Form' : 'Open Pull Request'}</span>
+          </button>
+
+          <button
+            type="button"
+            disabled={
+              pushing ||
+              !hasVerifiedPushTarget ||
+              (isModularWorkspace
+                ? selectedPushPaths.length === 0 && !syncLayoutJson
+                : pushMode === 'linked' &&
+                  Boolean(linked) &&
+                  !hasLocalChanges &&
+                  !createNewBranch &&
+                  !syncLayoutJson)
+            }
+            onClick={onPush}
+            className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white"
+          >
+            {pushing ? (
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+            ) : (
+              <UploadCloud className="w-3.5 h-3.5" />
+            )}
+            <span>
+              {pushing
+                ? 'Pushing...'
+                : isModularWorkspace
+                ? `Commit & Push ${selectedPushPaths.length} ${
+                    selectedPushPaths.length === 1 ? 'File' : 'Files'
+                  }`
+                : 'Commit & Push to GitHub'}
+            </span>
+          </button>
+        </div>
       </div>
+
+      {/* Pull Request Creation Panel */}
+      {prPanelOpen && (
+        <div className="p-4 rounded-xl border border-indigo-200 dark:border-indigo-900/60 bg-indigo-50/40 dark:bg-indigo-950/20 space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-xs font-bold text-indigo-950 dark:text-indigo-200">
+              <GitPullRequest className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+              <span>Create GitHub Pull Request</span>
+            </div>
+            <span className="text-[11px] font-mono text-indigo-700 dark:text-indigo-300">
+              {prHeadBranch || selectedBranch} → {prBaseBranch || selectedRepo?.default_branch || 'main'}
+            </span>
+          </div>
+
+          {prResult && (
+            <div className="px-3 py-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-xs text-emerald-800 dark:text-emerald-200 flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                <span className="truncate font-semibold">
+                  Opened PR #{prResult.number}: {prResult.title}
+                </span>
+              </div>
+              {(() => {
+                const safePrUrl = sanitizeExternalUrl(prResult.url);
+                return safePrUrl ? (
+                  <a
+                    href={safePrUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 font-semibold text-emerald-700 dark:text-emerald-300 hover:underline shrink-0"
+                  >
+                    <span>View PR</span>
+                    <ExternalLink className="w-3 h-3" />
+                  </a>
+                ) : null;
+              })()}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            <div className="space-y-1">
+              <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400">
+                Compare Branch (head)
+              </label>
+              <input
+                type="text"
+                value={prHeadBranch}
+                onChange={(e) => onPrHeadBranchChange(e.target.value)}
+                placeholder="schema/feature-branch"
+                className="w-full px-2.5 py-1.5 font-mono text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400">
+                Base Branch (target)
+              </label>
+              {selectedRepo && selectedRepo.branches.length > 0 ? (
+                <select
+                  value={prBaseBranch}
+                  onChange={(e) => onPrBaseBranchChange(e.target.value)}
+                  className="w-full px-2.5 py-1.5 font-mono text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
+                >
+                  {selectedRepo.branches.map((b) => (
+                    <option key={b} value={b}>
+                      {b}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <input
+                  type="text"
+                  value={prBaseBranch}
+                  onChange={(e) => onPrBaseBranchChange(e.target.value)}
+                  placeholder="main"
+                  className="w-full px-2.5 py-1.5 font-mono text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
+                />
+              )}
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400">
+              Pull Request Title
+            </label>
+            <input
+              type="text"
+              value={prTitle}
+              onChange={(e) => onPrTitleChange(e.target.value)}
+              placeholder="Update database schema"
+              className="w-full px-2.5 py-1.5 text-xs rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="block text-[11px] font-medium text-slate-600 dark:text-slate-400">
+              Description (Semantic Schema Diff + SQL Migration Summary)
+            </label>
+            <textarea
+              rows={5}
+              value={prBody}
+              onChange={(e) => onPrBodyChange(e.target.value)}
+              className="w-full px-2.5 py-2 font-mono text-[11px] rounded-lg border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-950"
+            />
+          </div>
+
+          <div className="flex justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => onTogglePrPanel(false)}
+              className="px-3 py-1.5 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={onCreatePullRequest}
+              disabled={creatingPr || !prTitle.trim() || !prHeadBranch.trim() || !prBaseBranch.trim()}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white"
+            >
+              {creatingPr ? (
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              ) : (
+                <GitPullRequest className="w-3.5 h-3.5" />
+              )}
+              <span>{creatingPr ? 'Creating PR...' : 'Create Pull Request'}</span>
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

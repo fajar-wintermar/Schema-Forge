@@ -73,6 +73,7 @@ export const FOCUS_MODE_STORAGE_KEY = 'schemaforge_diagram_focus_mode';
 export const AUTO_LOD_STORAGE_KEY = 'schemaforge_diagram_auto_lod';
 export const FK_CARDINALITY_STORAGE_KEY =
   'schemaforge_diagram_show_cardinality';
+export const LAYOUT_LOCKED_STORAGE_KEY = 'schemaforge_diagram_layout_locked';
 
 export interface ViewportState {
   x: number;

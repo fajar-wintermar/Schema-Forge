@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { ForbiddenError } from '../../../../shared/domain/errors';
+import { executeCreateGithubPullRequest } from '../../../application/usecases/github/createPullRequest';
 import { executeInitGithubRepositoryBranch } from '../../../application/usecases/github/initializeBranch';
 import {
   executePushBatchGithubFiles,
@@ -64,6 +65,15 @@ const pushBatchBodySchema = z.object({
   forceWithLatestSha: z.boolean().optional(),
 });
 
+const createPrBodySchema = z.object({
+  owner: ownerField,
+  repo: repoField,
+  head: z.string().trim().min(1, 'Head branch is required.').max(200),
+  base: z.string().trim().min(1, 'Base branch is required.').max(200),
+  title: z.string().trim().min(1, 'Pull request title is required.').max(256),
+  body: z.string().max(65536).optional(),
+});
+
 export const githubWriteRoutes = new Hono<{ Bindings: AppEnv }>()
   .post('/init-branch', zValidate('json', initBranchBodySchema), async (c) => {
     if (!verifyMutatingRequestOrigin(c)) {
@@ -101,6 +111,19 @@ export const githubWriteRoutes = new Hono<{ Bindings: AppEnv }>()
     const container = createRequestContainer(c);
     const session = await container.getSession();
     const data = await executePushBatchGithubFiles({
+      githubGateway: container.githubGateway,
+      accessToken: session?.accessToken,
+      body: c.req.valid('json'),
+    });
+    return c.json(data, 200);
+  })
+  .post('/create-pr', zValidate('json', createPrBodySchema), async (c) => {
+    if (!verifyMutatingRequestOrigin(c)) {
+      throw new ForbiddenError('Invalid request origin.');
+    }
+    const container = createRequestContainer(c);
+    const session = await container.getSession();
+    const data = await executeCreateGithubPullRequest({
       githubGateway: container.githubGateway,
       accessToken: session?.accessToken,
       body: c.req.valid('json'),

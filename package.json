@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "bin": {
+    "schemaforge": "cli/schemaforge.ts"
+  },
   "scripts": {
     "sync:migrations": "node scripts/sync-migrations.mjs",
     "dev": "node scripts/sync-migrations.mjs && tsx server.ts",
@@ -11,6 +14,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "node scripts/sync-migrations.mjs && tsc --noEmit",
+    "cli": "tsx cli/schemaforge.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",

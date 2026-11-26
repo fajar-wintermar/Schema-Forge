@@ -14,17 +14,24 @@ export interface GitHubModalProps {
   initialTab?: 'browse' | 'push' | 'migrations';
   onLoadGithubFile: (
     file: GithubFileResult,
-    openInNewWorkspace: boolean
+    openInNewWorkspace: boolean,
+    layoutJson?: string
   ) => void;
-  onSyncedGithubFile: (link: GithubFileLink, updatedDbml?: string) => void;
+  onSyncedGithubFile: (
+    link: GithubFileLink,
+    updatedDbml?: string,
+    layoutJson?: string
+  ) => void;
   onLoadGithubFolder?: (
     result: GithubFolderResult,
-    openInNewWorkspace: boolean
+    openInNewWorkspace: boolean,
+    layoutJson?: string
   ) => void;
   onSyncedGithubFolder?: (
     repoLink: GithubRepoLink,
     updatedFiles: SchemaModuleFile[],
-    replaceAll?: boolean
+    replaceAll?: boolean,
+    layoutJson?: string
   ) => void;
   onClose: () => void;
 }

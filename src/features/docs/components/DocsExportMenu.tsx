@@ -4,6 +4,7 @@ import {
   Download,
   FileCode,
   FileText,
+  GitBranch,
   Printer,
 } from 'lucide-react';
 import {
@@ -17,9 +18,11 @@ import {
   downloadTextFile,
   exportSchemaToHtml,
   exportSchemaToMarkdown,
+  exportSchemaToMermaid,
   filterSchemaByDomains,
   printSchemaDocs,
 } from '../../../utils/importExport';
+import type { DiagramSlice } from '../../../utils/io/docsExport';
 import { readDiagramPreferences } from '../../diagram/hooks/useDiagramPreferences';
 
 interface DocsExportMenuProps {
@@ -83,12 +86,14 @@ export const DocsExportMenu: React.FC<DocsExportMenuProps> = ({
       positions && Object.keys(positions).length > 0
         ? positions
         : computeAutoLayout(schema, 'full');
+    const svgDark = lightSvgForPrint ? false : darkMode;
+
     const { svg } = buildDiagramSvg({
       schema,
       positions: effectivePositions,
       detailLevel: 'full',
       stickyNotes: [],
-      darkMode: lightSvgForPrint ? false : darkMode,
+      darkMode: svgDark,
       title,
       edgeRouting: prefs.routingMode,
       selectedDomains,
@@ -97,7 +102,40 @@ export const DocsExportMenu: React.FC<DocsExportMenuProps> = ({
       collapsedGroups,
     });
 
-    return { scopedSchema, svg };
+    const groupsForSlices = isFiltered
+      ? schema.tableGroups.filter((g) => selectedDomains.includes(g.name))
+      : schema.tableGroups;
+
+    const domainDiagrams: DiagramSlice[] = [];
+    if (groupsForSlices.length > 1 || (!isFiltered && groupsForSlices.length > 0)) {
+      domainDiagrams.push({
+        id: 'all',
+        label: isFiltered ? 'Filtered View' : 'All Domains',
+        svg,
+      });
+      for (const g of groupsForSlices) {
+        const sliceSvg = buildDiagramSvg({
+          schema,
+          positions: effectivePositions,
+          detailLevel: 'full',
+          stickyNotes: [],
+          darkMode: svgDark,
+          title: `${title} — ${g.name}`,
+          edgeRouting: prefs.routingMode,
+          selectedDomains: [g.name],
+          showCardinality: prefs.showCardinality,
+          crossDomainMode: 'hide',
+          collapsedGroups: [],
+        }).svg;
+        domainDiagrams.push({
+          id: `domain-${slugifyName(g.name)}`,
+          label: `${g.name} (${g.tables.length})`,
+          svg: sliceSvg,
+        });
+      }
+    }
+
+    return { scopedSchema, svg, domainDiagrams };
   };
 
   const handleExportMarkdown = () => {
@@ -110,13 +148,21 @@ export const DocsExportMenu: React.FC<DocsExportMenuProps> = ({
   };
 
   const handleExportHtml = () => {
-    const { scopedSchema, svg } = getScopedDocsInputs(false);
+    const { scopedSchema, svg, domainDiagrams } = getScopedDocsInputs(false);
     const html = exportSchemaToHtml(scopedSchema, {
       title,
       svgDiagram: svg,
+      domainDiagrams,
       darkMode,
     });
     downloadTextFile(`${fileBase}.docs.html`, html, 'text/html;charset=utf-8');
+    setOpen(false);
+  };
+
+  const handleExportMermaid = () => {
+    const { scopedSchema } = getScopedDocsInputs();
+    const mmd = exportSchemaToMermaid(scopedSchema, { title });
+    downloadTextFile(`${fileBase}.erd.mmd`, mmd, 'text/plain;charset=utf-8');
     setOpen(false);
   };
 
@@ -142,7 +188,7 @@ export const DocsExportMenu: React.FC<DocsExportMenuProps> = ({
       </button>
 
       {open && (
-        <div className="absolute right-0 mt-1.5 w-60 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-lg py-1.5 z-40">
+        <div className="absolute right-0 mt-1.5 w-64 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 shadow-lg py-1.5 z-40">
           <div className="px-3 py-1 text-[10px] font-bold uppercase tracking-wider text-slate-400">
             {selectedDomains.length > 0
               ? `Docs Export (${selectedDomains.length} filtered)`
@@ -166,9 +212,20 @@ export const DocsExportMenu: React.FC<DocsExportMenuProps> = ({
           >
             <span className="flex items-center gap-2">
               <FileCode className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 shrink-0" />
-              <span>Static HTML (.html)</span>
+              <span>Interactive HTML (.html)</span>
             </span>
-            <span className="font-mono text-[10px] text-slate-400">Offline + SVG</span>
+            <span className="font-mono text-[10px] text-slate-400">Atlas + SVG</span>
+          </button>
+          <button
+            type="button"
+            onClick={handleExportMermaid}
+            className="w-full px-3 py-2 text-left text-xs text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 flex items-center justify-between gap-2"
+          >
+            <span className="flex items-center gap-2">
+              <GitBranch className="w-3.5 h-3.5 text-cyan-600 dark:text-cyan-400 shrink-0" />
+              <span>Mermaid ERD (.mmd)</span>
+            </span>
+            <span className="font-mono text-[10px] text-slate-400">Notion / Docs</span>
           </button>
           <div className="my-1 border-t border-slate-100 dark:border-slate-800" />
           <button
