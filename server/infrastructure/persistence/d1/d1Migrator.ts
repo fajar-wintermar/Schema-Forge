@@ -17,6 +17,32 @@ const MIGRATIONS_HISTORY_TABLE_SQL = `CREATE TABLE IF NOT EXISTS _schema_migrati
 
 const migrationStateByDb = new WeakMap<D1DatabaseLike, Promise<void>>();
 
+const ADD_COLUMN_PATTERN =
+  /^\s*ALTER\s+TABLE\s+["`]?(\w+)["`]?\s+ADD\s+(?:COLUMN\s+)?["`]?(\w+)["`]?/i;
+
+/**
+ * True when `sql` is an `ALTER TABLE ... ADD COLUMN` whose column already
+ * exists. That happens when a migration was applied outside this runner (for
+ * example with `wrangler d1 migrations apply`) and so was never recorded in
+ * `_schema_migrations`. SQLite has no `ADD COLUMN IF NOT EXISTS`, so re-running
+ * the statement would fail with "duplicate column name" and block every
+ * request that waits on migrations.
+ */
+async function isAlreadyAppliedAddColumn(
+  db: D1DatabaseLike,
+  sql: string
+): Promise<boolean> {
+  const match = ADD_COLUMN_PATTERN.exec(sql);
+  if (!match) return false;
+  const [, table, column] = match;
+  const info = await db
+    .prepare(`PRAGMA table_info("${table}")`)
+    .all<{ name: string }>();
+  return (info.results || []).some(
+    (row) => row.name.toLowerCase() === column.toLowerCase()
+  );
+}
+
 async function runMigrationsInternal(db: D1DatabaseLike): Promise<void> {
   await db.prepare(MIGRATIONS_HISTORY_TABLE_SQL).run();
 
@@ -31,9 +57,16 @@ async function runMigrationsInternal(db: D1DatabaseLike): Promise<void> {
       continue;
     }
 
+    const pendingStatements: string[] = [];
+    for (const sql of migration.statements) {
+      if (!(await isAlreadyAppliedAddColumn(db, sql))) {
+        pendingStatements.push(sql);
+      }
+    }
+
     const now = new Date().toISOString();
     const batchStatements = [
-      ...migration.statements.map((sql) => db.prepare(sql)),
+      ...pendingStatements.map((sql) => db.prepare(sql)),
       db
         .prepare(
           `INSERT OR IGNORE INTO _schema_migrations (id, name, checksum, applied_at)
