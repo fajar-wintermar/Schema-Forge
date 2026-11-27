@@ -729,8 +729,6 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
                 navOpen={docsNavOpen}
                 onToggleNav={() => setDocsNavOpen((o) => !o)}
                 modKey={modKey}
-                selectedDomains={selectedDomains}
-                onClearDomainFilter={() => setSelectedDomains([])}
                 sectionRequest={docsSectionRequest}
                 onSelectTable={(id) => {
                   expandViewGroupsForTable(id);

@@ -80,7 +80,6 @@ interface WorkspaceViewportProps {
   onUpdateGroupNote: (groupName: string, note: string) => void;
   onUpdateTableNote: (tableId: string, note: string) => void;
   onUpdateColumnNote: (tableId: string, columnName: string, note: string) => void;
-  onClearDomainFilter?: () => void;
   diagramInitialViewport?: ViewportState;
   diagramViewportRestoreRequest?: {
     viewport: ViewportState;
@@ -133,7 +132,6 @@ export const WorkspaceViewport: React.FC<WorkspaceViewportProps> = ({
   onUpdateGroupNote,
   onUpdateTableNote,
   onUpdateColumnNote,
-  onClearDomainFilter,
   diagramInitialViewport,
   diagramViewportRestoreRequest,
   onDiagramViewportChange,
@@ -168,8 +166,6 @@ export const WorkspaceViewport: React.FC<WorkspaceViewportProps> = ({
               navOpen={docsNavOpen}
               onToggleNav={onToggleDocsNav}
               modKey={modKey}
-              selectedDomains={effectiveSelectedDomains}
-              onClearDomainFilter={onClearDomainFilter}
               sectionRequest={docsSectionRequest}
               onSelectTable={onSelectTableFromDocs}
               onUpdateGroupNote={onUpdateGroupNote}

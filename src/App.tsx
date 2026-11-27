@@ -686,7 +686,6 @@ export default function App() {
           onUpdateGroupNote={schemaActions.handleUpdateGroupNote}
           onUpdateTableNote={schemaActions.handleUpdateTableNote}
           onUpdateColumnNote={schemaActions.handleUpdateColumnNote}
-          onClearDomainFilter={() => handleChangeSelectedDomains([])}
           diagramInitialViewport={preservedDiagramViewportRef.current}
           diagramViewportRestoreRequest={diagramViewportRestoreRequest}
           onDiagramViewportChange={(vp) => {

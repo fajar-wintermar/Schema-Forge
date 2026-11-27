@@ -161,12 +161,28 @@ test.describe('SchemaForge E2E Smoke Suite', () => {
     await page.goto('/');
     await expect(page.locator('.cm-content').first()).toBeVisible();
 
+    // Isolating one domain on the diagram canvas must not filter tables on the Docs page
+    const isolateDomainBtn = page
+      .locator('button[title="Show only this domain"]')
+      .first();
+    await expect(isolateDomainBtn).toBeVisible();
+    await isolateDomainBtn.click();
+    await expect(
+      page.locator('button[title="Show all domains"]').first()
+    ).toBeVisible();
+
     const viewGroup = page.getByRole('group', { name: 'Workspace View Mode' });
     await viewGroup.getByRole('button', { name: 'Docs' }).click();
 
-    // Overview page stats & table list
+    // Overview page stats & full unfiltered table list
     await expect(page.getByText(/\d+ Tables/)).toBeVisible();
     await expect(page.getByText(/\d+ Fields/)).toBeVisible();
+    await expect(
+      page.getByText(/Showing tables in selected domain/i)
+    ).toHaveCount(0);
+    await expect(page.getByText('users').first()).toBeVisible();
+    await expect(page.getByText('products').first()).toBeVisible();
+    await expect(page.getByText('orders').first()).toBeVisible();
 
     // Navigate to Relationships & Enums via Overview links
     await page.getByRole('button', { name: /Enums/ }).first().click();
