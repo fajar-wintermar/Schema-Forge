@@ -6,13 +6,15 @@ import type {
 import type { IOAuthGateway } from '../../../domain/gateways/IOAuthGateway';
 import type { ITokenCipher } from '../../../domain/gateways/ITokenCipher';
 
+export const OAUTH_STATE_TTL_MS = 10 * 60 * 1000;
+
 export async function executeStartGithubOAuth(deps: {
   config: ServerConfig;
   sessionSecret: string;
   callbackUrl: string;
   tokenCipher: ITokenCipher;
   oauthGateway: IOAuthGateway;
-}): Promise<{ url: string }> {
+}): Promise<{ url: string; stateBindingToken: string }> {
   const { config, sessionSecret, callbackUrl, tokenCipher, oauthGateway } =
     deps;
 
@@ -23,8 +25,15 @@ export async function executeStartGithubOAuth(deps: {
     );
   }
 
+  const nonce = tokenCipher.randomHex(16);
+  const exp = Date.now() + OAUTH_STATE_TTL_MS;
+
   const state = await tokenCipher.encrypt<OAuthStatePayload>(
-    { nonce: tokenCipher.randomHex(16), exp: Date.now() + 10 * 60 * 1000 },
+    { nonce, exp },
+    sessionSecret
+  );
+  const stateBindingToken = await tokenCipher.encrypt<OAuthStatePayload>(
+    { nonce, exp },
     sessionSecret
   );
 
@@ -34,5 +43,6 @@ export async function executeStartGithubOAuth(deps: {
       callbackUrl,
       state,
     }),
+    stateBindingToken,
   };
 }

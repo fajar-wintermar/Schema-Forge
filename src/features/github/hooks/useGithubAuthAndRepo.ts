@@ -14,7 +14,7 @@ import {
   GithubTreeFile,
   initGithubBranch,
   logoutGithub,
-  setStoredGithubSessionToken,
+  notifyAuthChanged,
 } from '../../../services/api/remoteService';
 import { parseGithubTargetInput } from '@shared/domain/github/githubTargetParser';
 import { isTrustedOAuthMessageOrigin } from '../../../utils/urlSafety';
@@ -205,9 +205,7 @@ export function useGithubAuthAndRepo({
         event.data?.type === 'OAUTH_AUTH_SUCCESS' &&
         event.data?.provider === 'github'
       ) {
-        if (typeof event.data.sessionToken === 'string') {
-          setStoredGithubSessionToken(event.data.sessionToken);
-        }
+        notifyAuthChanged();
         setConnecting(false);
         onError(null);
         void refreshAuthStatus().then(() => {

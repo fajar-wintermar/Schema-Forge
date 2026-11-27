@@ -532,7 +532,7 @@ export const SharedViewerPage: React.FC<SharedViewerPageProps> = ({
               >
                 <option value="live">Latest Live</option>
                 {payload.publishedVersions.map((v) => (
-                  <option key={v.id} value={v.tag}>
+                  <option key={`${v.tag}-${v.createdAt}`} value={v.tag}>
                     {v.tag} — {v.title}
                   </option>
                 ))}

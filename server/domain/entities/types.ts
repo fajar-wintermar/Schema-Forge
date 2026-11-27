@@ -10,6 +10,7 @@ export interface GithubSessionPayload {
   accessToken: string;
   user: GithubUserSummary;
   iat: number;
+  jti?: string;
 }
 
 export interface OAuthStatePayload {

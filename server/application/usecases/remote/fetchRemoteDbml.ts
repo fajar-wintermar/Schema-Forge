@@ -57,10 +57,10 @@ export async function executeFetchRemoteDbml(deps: {
     !parsedUrl.pathname.endsWith('/raw')
   ) {
     const gistParts = parsedUrl.pathname.split('/').filter(Boolean);
-    const gistId = gistParts[1] || gistParts[0];
-    if (gistId) {
+    const candidateGistId = gistParts[1] || gistParts[0];
+    if (candidateGistId && /^[a-zA-Z0-9_-]{1,100}$/.test(candidateGistId)) {
       try {
-        const gistFile = await githubGateway.getGistFile(gistId);
+        const gistFile = await githubGateway.getGistFile(candidateGistId);
         if (gistFile) {
           return {
             content: gistFile.content,

@@ -12,7 +12,7 @@ import {
   ViewMode,
   WorkspaceProject,
 } from '@shared/domain/schemaTypes';
-import { isAbortError } from '../../../services/api/apiClient';
+import { ApiClientError, isAbortError } from '../../../services/api/apiClient';
 import { computeAutoLayout } from '../../../utils/autoLayout';
 import {
   connectWithGithubOAuth,
@@ -28,6 +28,7 @@ import {
   fetchDbmlFromUrl,
 } from '../../../services/api/remoteService';
 import { createInitialWorkspace } from '../../../utils/sampleSchemas';
+import { generateUniqueId } from '../../../utils/id';
 
 interface UseWorkspaceStoreOptions {
   onInitViewMode: (mode: ViewMode) => void;
@@ -256,7 +257,7 @@ export function useWorkspaceStore({
               remote.filename.replace(/\.dbml$/i, '') ||
               'Remote DBML';
             const remoteWs: WorkspaceProject = {
-              id: `ws_url_${Date.now()}`,
+              id: generateUniqueId('ws_url'),
               name: baseName,
               description: `Loaded from ${remote.originalUrl}`,
               dbml: remote.content,
@@ -266,7 +267,7 @@ export function useWorkspaceStore({
               detailLevel: 'full',
               versions: [
                 {
-                  id: `ver_${Date.now()}`,
+                  id: generateUniqueId('ver'),
                   tag: 'v1.0.0',
                   title: 'Loaded from URL',
                   description: remote.originalUrl,
@@ -411,7 +412,14 @@ export function useWorkspaceStore({
         );
         setRawCloudSyncStatus('synced');
         return syncedWs;
-      } catch {
+      } catch (err) {
+        if (err instanceof ApiClientError && err.status === 409) {
+          setRawCloudSyncStatus('error');
+          showToast(
+            'Cloud revision conflict detected — another session saved newer changes.'
+          );
+          return null;
+        }
         setRawCloudSyncStatus(
           typeof navigator !== 'undefined' && !navigator.onLine
             ? 'offline'
@@ -420,7 +428,7 @@ export function useWorkspaceStore({
         return null;
       }
     },
-    []
+    [showToast]
   );
 
   const updateActiveWorkspace = useCallback(

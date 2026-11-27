@@ -2,6 +2,7 @@ import { SchemaModuleFile, WorkspaceProject } from '@shared/domain/schemaTypes';
 import { computeAutoLayout } from './autoLayout';
 import { parseDbml } from '@shared/domain/dbml';
 import { mergeSchemaFiles } from './schemaModules';
+import { generateUniqueId } from './id';
 
 export const COMMERCE_V1_DBML = `Project OmnichannelCommerce {
   database_type: 'PostgreSQL'
@@ -440,7 +441,7 @@ export function createInitialWorkspace(): WorkspaceProject {
   const v2Date = new Date(now.getTime() - 1000 * 60 * 60 * 18).toISOString();
 
   return {
-    id: 'ws_omnichannel_commerce',
+    id: generateUniqueId('ws_commerce'),
     name: 'Omnichannel Commerce & Ledger',
     description:
       'Multi-domain relational architecture spanning Identity, Catalog, Fulfillment, and Double-Entry Billing.',
@@ -478,7 +479,7 @@ export function createInitialWorkspace(): WorkspaceProject {
     detailLevel: 'full',
     versions: [
       {
-        id: 'ver_v1_1_0',
+        id: generateUniqueId('ver'),
         tag: 'v1.1.0',
         title: 'Added Billing & Ledger Domain + Variant Inventory',
         description:
@@ -490,7 +491,7 @@ export function createInitialWorkspace(): WorkspaceProject {
         isPublished: true,
       },
       {
-        id: 'ver_v1_0_0',
+        id: generateUniqueId('ver'),
         tag: 'v1.0.0',
         title: 'Initial Commerce Core Schema',
         description:
@@ -513,7 +514,7 @@ export function createSaaSTelemetryWorkspace(): WorkspaceProject {
   const now = new Date().toISOString();
 
   return {
-    id: `ws_saas_${Date.now()}`,
+    id: generateUniqueId('ws_saas'),
     name: 'Multi-Tenant SaaS Telemetry',
     description: 'Control plane, ingestion pipelines, and alerting rules.',
     dbml: SAAS_TELEMETRY_DBML,
@@ -523,7 +524,7 @@ export function createSaaSTelemetryWorkspace(): WorkspaceProject {
     detailLevel: 'full',
     versions: [
       {
-        id: `ver_${Date.now()}`,
+        id: generateUniqueId('ver'),
         tag: 'v1.0.0',
         title: 'Initial Telemetry Schema',
         description: 'Baseline tenant control plane and incident models.',
@@ -570,7 +571,7 @@ export function createModularStarterWorkspace(): WorkspaceProject {
   const pos = computeAutoLayout(parsed, 'full');
 
   return {
-    id: `ws_modular_${Date.now()}`,
+    id: generateUniqueId('ws_modular'),
     name: 'Modular Store (schema/*.dbml)',
     description:
       'Modular per-table DBML files under schema/ merged automatically into schema.dbml on the fly.',
@@ -584,7 +585,7 @@ export function createModularStarterWorkspace(): WorkspaceProject {
     detailLevel: 'full',
     versions: [
       {
-        id: `ver_${Date.now()}`,
+        id: generateUniqueId('ver'),
         tag: 'v1.0.0',
         title: 'Initial Modular Schema',
         description:

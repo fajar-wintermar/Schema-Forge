@@ -8,11 +8,6 @@ export const SAFE_TOKEN_REGEX = /^[a-zA-Z0-9_-]{8,64}$/;
 export const GITHUB_SLUG_REGEX = /^[a-zA-Z0-9_.-]{1,100}$/;
 
 export const optionalSessionHeadersSchema = z.object({
-  'x-github-session': z
-    .string()
-    .max(4096, 'Session header is too large.')
-    .regex(/^[A-Za-z0-9_-]*$/, 'Invalid session header format.')
-    .optional(),
   'x-requested-with': z
     .string()
     .max(128, 'Invalid custom request header.')

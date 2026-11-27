@@ -1,4 +1,5 @@
 import {
+  ConflictError,
   ForbiddenError,
   PayloadTooLargeError,
   ValidationError,
@@ -46,6 +47,7 @@ export interface IncomingWorkspaceInput {
   urlLink?: unknown;
   createdAt?: unknown;
   updatedAt?: unknown;
+  cloudRevision?: unknown;
 }
 
 export async function executeSaveWorkspace(deps: {
@@ -82,6 +84,22 @@ export async function executeSaveWorkspace(deps: {
     throw new ForbiddenError(
       'You do not have permission to modify this workspace.'
     );
+  }
+
+  if (existing && body.cloudRevision !== undefined) {
+    if (
+      typeof body.cloudRevision !== 'number' ||
+      !Number.isFinite(body.cloudRevision) ||
+      body.cloudRevision < 0
+    ) {
+      throw new ValidationError('Invalid cloudRevision value.');
+    }
+    if (body.cloudRevision !== existing.revision) {
+      throw new ConflictError(
+        'This workspace was modified in another session. Refresh cloud changes before saving.',
+        { code: 'REVISION_CONFLICT' }
+      );
+    }
   }
 
   const now = new Date().toISOString();
@@ -162,8 +180,12 @@ export async function executeSaveWorkspace(deps: {
       });
     }
 
-    if (versions.length === 0) {
+    if (body.versions.length === 0) {
       clearAllVersions = true;
+    } else if (versions.length !== incomingVersions.length) {
+      throw new ValidationError(
+        'One or more workspace versions are invalid (missing id, tag, or title).'
+      );
     }
   }
 

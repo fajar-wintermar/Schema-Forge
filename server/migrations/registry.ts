@@ -30,5 +30,29 @@ export const SCHEMA_MIGRATIONS: readonly SchemaMigration[] = [
       "CREATE INDEX IF NOT EXISTS idx_share_links_token\n  ON share_links(token)",
       "CREATE INDEX IF NOT EXISTS idx_share_links_workspace\n  ON share_links(workspace_id, owner_user_id, created_at DESC)"
     ]
+  },
+  {
+    "id": "0002_share_export_toggle",
+    "file": "migrations/0002_share_export_toggle.sql",
+    "name": "Allow share link owners to toggle whether viewers can export diagrams to PNG/SVG",
+    "checksum": "10025e5d66d8d0d0",
+    "statements": [
+      "ALTER TABLE share_links ADD COLUMN allow_diagram_export INTEGER NOT NULL DEFAULT 0"
+    ]
+  },
+  {
+    "id": "0003_security_hardening",
+    "file": "migrations/0003_security_hardening.sql",
+    "name": "Security hardening: composite workspace_versions primary key & revoked_sessions store",
+    "checksum": "552f59e69576949f",
+    "statements": [
+      "CREATE TABLE IF NOT EXISTS workspace_versions_v2 (\n  id TEXT NOT NULL,\n  workspace_id TEXT NOT NULL,\n  owner_user_id TEXT NOT NULL,\n  tag TEXT NOT NULL,\n  title TEXT NOT NULL,\n  description TEXT NOT NULL DEFAULT '',\n  dbml TEXT NOT NULL,\n  table_positions_json TEXT NOT NULL,\n  sticky_notes_json TEXT NOT NULL,\n  is_published INTEGER NOT NULL DEFAULT 1,\n  created_at TEXT NOT NULL,\n  PRIMARY KEY (workspace_id, id),\n  FOREIGN KEY (workspace_id) REFERENCES workspaces(id)\n)",
+      "INSERT OR IGNORE INTO workspace_versions_v2 (\n  id,\n  workspace_id,\n  owner_user_id,\n  tag,\n  title,\n  description,\n  dbml,\n  table_positions_json,\n  sticky_notes_json,\n  is_published,\n  created_at\n)\nSELECT\n  v.id,\n  v.workspace_id,\n  v.owner_user_id,\n  v.tag,\n  v.title,\n  v.description,\n  v.dbml,\n  v.table_positions_json,\n  v.sticky_notes_json,\n  v.is_published,\n  v.created_at\nFROM workspace_versions v\nJOIN workspaces w\n  ON w.id = v.workspace_id\n AND w.owner_user_id = v.owner_user_id",
+      "DROP TABLE workspace_versions",
+      "ALTER TABLE workspace_versions_v2 RENAME TO workspace_versions",
+      "CREATE INDEX IF NOT EXISTS idx_versions_workspace_created\n  ON workspace_versions(workspace_id, created_at DESC)",
+      "CREATE TABLE IF NOT EXISTS revoked_sessions (\n  jti TEXT PRIMARY KEY,\n  expires_at INTEGER NOT NULL\n)",
+      "CREATE INDEX IF NOT EXISTS idx_revoked_sessions_expires\n  ON revoked_sessions(expires_at)"
+    ]
   }
 ];

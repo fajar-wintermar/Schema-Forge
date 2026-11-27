@@ -55,7 +55,7 @@ export const routes = new Hono<{ Bindings: AppEnv }>()
     cors({
       origin: (origin, c) => (isAllowedCorsOrigin(origin, c) ? origin : ''),
       allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-      allowHeaders: ['Content-Type', 'X-Requested-With', 'x-github-session'],
+      allowHeaders: ['Content-Type', 'X-Requested-With'],
       credentials: true,
       maxAge: 600,
     })

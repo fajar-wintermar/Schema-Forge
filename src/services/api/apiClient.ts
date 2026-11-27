@@ -1,7 +1,6 @@
 import { hc } from 'hono/client';
 import type { AppType } from '../../../server/api';
 
-const SESSION_STORAGE_KEY = 'sf_gh_session_token';
 export const AUTH_CHANGED_EVENT = 'schemaforge:auth-changed';
 
 export class ApiClientError extends Error {
@@ -23,39 +22,16 @@ export function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
 }
 
-export function getStoredGithubSessionToken(): string | null {
-  try {
-    return sessionStorage.getItem(SESSION_STORAGE_KEY);
-  } catch {
-    return null;
-  }
-}
-
 export function notifyAuthChanged(): void {
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
   }
 }
 
-export function setStoredGithubSessionToken(token: string | null): void {
-  try {
-    if (token) sessionStorage.setItem(SESSION_STORAGE_KEY, token);
-    else sessionStorage.removeItem(SESSION_STORAGE_KEY);
-  } catch {
-    // Ignore storage quota / private mode restrictions
-  }
-  notifyAuthChanged();
-}
-
 function getClientHeaders(): Record<string, string> {
-  const headers: Record<string, string> = {
+  return {
     'X-Requested-With': 'SchemaForge',
   };
-  const token = getStoredGithubSessionToken();
-  if (token) {
-    headers['x-github-session'] = token;
-  }
-  return headers;
 }
 
 export const apiClient = hc<AppType>('/', {

@@ -47,11 +47,22 @@ function getClientRateLimitKey(c: ApiContext): string {
   const cfIp = c.req.header('cf-connecting-ip')?.trim();
   if (cfIp) return cfIp;
 
-  const forwarded = c.req.header('x-forwarded-for')?.split(',')[0]?.trim();
-  if (forwarded) return forwarded;
+  const isNode =
+    typeof process !== 'undefined' && Boolean(process.versions?.node);
+  const trustProxy =
+    isNode &&
+    (process.env.TRUST_PROXY === 'true' || Boolean(process.env.K_SERVICE));
 
-  const realIp = c.req.header('x-real-ip')?.trim();
-  if (realIp) return realIp;
+  if (!isNode || trustProxy) {
+    const forwarded = c.req.header('x-forwarded-for')?.split(',')[0]?.trim();
+    if (forwarded) return forwarded;
+
+    const realIp = c.req.header('x-real-ip')?.trim();
+    if (realIp) return realIp;
+  }
+
+  const peerIp = c.req.header('x-sf-peer-ip')?.trim();
+  if (peerIp) return peerIp;
 
   return 'local-client';
 }

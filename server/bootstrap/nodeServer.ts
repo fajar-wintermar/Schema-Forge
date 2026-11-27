@@ -153,6 +153,10 @@ export async function startNodeServer(): Promise<void> {
       const server = http.createServer(async (req, res) => {
         const urlPath = req.url || '/';
         if (isHonoPath(urlPath)) {
+          delete req.headers['x-sf-peer-ip'];
+          if (req.socket?.remoteAddress) {
+            req.headers['x-sf-peer-ip'] = req.socket.remoteAddress;
+          }
           void honoListener(req, res);
           return;
         }
@@ -208,6 +212,10 @@ export async function startNodeServer(): Promise<void> {
       const urlPath = rawUrl.split('?')[0];
 
       if (isHonoPath(urlPath)) {
+        delete req.headers['x-sf-peer-ip'];
+        if (req.socket?.remoteAddress) {
+          req.headers['x-sf-peer-ip'] = req.socket.remoteAddress;
+        }
         void honoListener(req, res);
         return;
       }

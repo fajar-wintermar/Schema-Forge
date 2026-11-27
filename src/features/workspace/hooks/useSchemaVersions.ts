@@ -4,6 +4,7 @@ import { SchemaVersion, WorkspaceProject } from '@shared/domain/schemaTypes';
 import { computeAutoLayout } from '../../../utils/autoLayout';
 import { parseDbml } from '@shared/domain/dbml';
 import { splitDbmlIntoModuleFiles } from '../../../utils/schemaModules';
+import { generateUniqueId } from '../../../utils/id';
 
 interface UseSchemaVersionsOptions {
   activeWorkspace: WorkspaceProject | null;
@@ -41,7 +42,7 @@ export function useSchemaVersions({
   }) => {
     if (!activeWorkspace) return;
     const newVer: SchemaVersion = {
-      id: `ver_${Date.now()}`,
+      id: generateUniqueId('ver'),
       tag: data.tag,
       title: data.title,
       description: data.description,
@@ -64,7 +65,7 @@ export function useSchemaVersions({
   const handleRestoreVersion = (ver: SchemaVersion) => {
     if (!activeWorkspace) return;
     const backup: SchemaVersion = {
-      id: `ver_backup_${Date.now()}`,
+      id: generateUniqueId('ver_backup'),
       tag: `backup-${new Date().toLocaleTimeString([], {
         hour: '2-digit',
         minute: '2-digit',

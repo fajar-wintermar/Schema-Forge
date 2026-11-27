@@ -60,6 +60,8 @@ export function isGithubSessionPayload(
     typeof value.accessToken === 'string' &&
     value.accessToken.length > 0 &&
     typeof value.iat === 'number' &&
+    Number.isFinite(value.iat) &&
+    (value.jti === undefined || typeof value.jti === 'string') &&
     isGithubUserSummary(value.user)
   );
 }

@@ -1,93 +1,115 @@
 # Security Summary
 
-**Reviewed Files**: 26
+**Reviewed Files**: 22
 **Issues Resolved**: 9
 
 ### Issues Resolved
 | Area | File | Line | What Was Happening | Impact | Status | How It Was Fixed |
 |---|---|---|---|---|---|---|
-| Unescaped OAuth HTML & Wildcard PostMessage | `server/routes/auth.ts` | 47 | OAuth error parameters were interpolated directly into HTML and inline script blocks, and `postMessage` used wildcard `*` as its target origin. | High | Fixed | Added HTML entity escaping (`escapeHtml`), inline script JSON character escaping (`serializeJsonForInlineScript`), and explicit target-origin scoping (`getSafeTargetOrigin`), plus exact origin matching in frontend listeners (`src/utils/urlSafety.ts`). |
-| Permissive Cross-Window Message Origin Check | `src/utils/cloudService.ts` | 222 | Popup OAuth listeners accepted messages from any `.run.app` or `localhost` origin instead of strictly verifying the app's own origin. | High | Fixed | Replaced suffix/substring checks with strict equality against `window.location.origin` via `isTrustedOAuthMessageOrigin` in `src/utils/cloudService.ts` and `src/features/github/hooks/useGithubAuthAndRepo.ts`. |
-| SVG Attribute Injection in Diagram Export | `src/utils/io/diagramExport.ts` | 214 | Schema-provided group, relationship, and table header colors were written directly into SVG attribute strings without format validation. | Medium | Fixed | Added `sanitizeSvgColor()` to allow only valid hex codes and alphabetic color names before rendering SVG attributes. |
-| Protocol-Relative & Untrusted External URLs | `src/features/markdown/markdownUtils.ts` | 27 | Markdown link sanitization permitted protocol-relative (`//`) URLs, and external GitHub/workspace links were rendered without scheme checks. | Medium | Fixed | Blocked protocol-relative URLs and control characters in `sanitizeHref()`, routed bare autolinks through `sanitizeHref()`, and added `sanitizeExternalUrl()` (`http:`/`https:` only) across UI link surfaces. |
-| Redirect & Extended IP Bypass in URL Fetcher | `server/services/fetchUrlService.ts` | 153 | Remote schema fetches followed HTTP redirects automatically and network host checks did not block hex/octal/integer IPv4 or IPv4-mapped IPv6 addresses. | High | Fixed | Switched to manual redirect handling (up to 3 hops) re-validating protocol and host on every hop, and expanded `isDisallowedHostname()` in `server/lib/githubClient.ts` to block alternate IP encodings, CGNAT, metadata hosts, and private IPv6 ranges. |
-| Unbounded Input Validation Across API Routes | `server/lib/validation.ts` | 48 | Request bodies, query strings, route parameters, and session headers relied on ad-hoc checks without unified strict schemas. | Medium | Fixed | Added `@hono/zod-validator` (`zValidate`) with strict Zod schemas for all `POST`, `PUT`, `PATCH`, `DELETE`, `GET` query/param inputs, and `/api/*` session/request headers. |
-| Missing Security Headers & Permissive Origin Checks | `server/api.ts` | 18 | Responses lacked standard HTTP hardening headers, and mutating endpoints could bypass `Origin` checks when custom headers were supplied. | Medium | Fixed | Added Hono `secureHeaders()` (configured for iframe and OAuth popup compatibility), explicit origin-allowlist `cors()` (no `*`), and unconditional `Origin` validation in `verifyMutatingRequestOrigin()` whenever an `Origin` header is present. |
-| Unsanitized Error Handling | `server/api.ts` | 54 | Unhandled backend errors lacked a global JSON error sanitizer, and service catch blocks could return raw error messages to clients. | Medium | Fixed | Added global `app.onError` and `app.notFound` JSON handlers that log full error details server-side while returning generic safe error messages to clients, and sanitized error returns in backend services. |
-| Production Static Path Boundary Check | `server.ts` | 118 | Malformed percent-encoded URLs could throw during decoding and static path resolution needed an explicit directory separator boundary check. | Low | Fixed | Added `try/catch` around `decodeURIComponent` returning HTTP `400` and enforced a strict `distDir + path.sep` prefix check when serving static files. |
+| Cross-User Snapshot Overwrite | `server/infrastructure/persistence/d1/D1WorkspaceRepository.ts` | 208 | `workspace_versions` used a global primary key `id` with an unscoped `ON CONFLICT(id) DO UPDATE`, and client version IDs used predictable timestamps alongside exposed public share version IDs. | High | Fixed | Migrated `workspace_versions` to composite primary key `(workspace_id, id)` in `migrations/0003_security_hardening.sql`, scoped `ON CONFLICT(workspace_id, id) DO UPDATE` with `WHERE workspace_versions.owner_user_id = excluded.owner_user_id AND workspace_versions.workspace_id = excluded.workspace_id`, switched client IDs to `crypto.randomUUID()`, and masked internal DB version IDs on public share responses. |
+| Missing Server-Side Session Expiry & Logout Revocation | `server/presentation/http/security/httpSecurity.ts` | 214 | Session extraction decrypted tokens without validating `iat` expiration, and logout only cleared the browser cookie without invalidating existing tokens server-side. | Medium | Fixed | Added `isSessionTimestampValid()` enforcing a strict 7-day maximum lifetime and future-skew limit, added unique session `jti` identifiers recorded in `revoked_sessions` on logout, and rejected revoked sessions in `extractGithubSession()`. |
+| Browser Storage Exposure of OAuth Session Token | `src/services/api/apiClient.ts` | 1 | Encrypted OAuth sessions were transmitted in popup `postMessage`, persisted in `sessionStorage`, and replayed via `x-github-session` headers. | Medium | Fixed | Removed `sessionStorage` persistence, stopped emitting `sessionToken` in OAuth popup scripts (`server/presentation/http/views/oauthPopupHtml.ts`), and dropped `x-github-session` header auth so sessions travel strictly inside `HttpOnly` cookies. |
+| OAuth Callback Login Hijacking | `server/application/usecases/auth/completeGithubOAuth.ts` | 65 | OAuth `state` held an encrypted nonce that was not bound to the initiating browser session and could be replayed before expiry. | Medium | Fixed | Bound OAuth initiation (`GET /api/auth/github/url`) to a short-lived `HttpOnly` cookie (`sf_oauth_state`), verified constant-time nonce equality in `executeCompleteGithubOAuth()`, and deleted the state cookie on callback to guarantee single use. |
+| Remote Fetcher DNS Rebinding & Unbounded Response Buffering | `server/infrastructure/remote/safeHttpRemoteFetcher.ts` | 100 | Outbound URL fetches only checked hostnames syntactically and buffered full `response.text()` payloads before verifying the 5 MB cap. | Medium | Fixed | Added pinned DNS resolution checking every resolved IPv4/IPv6 address against `isDisallowedHostname()` before opening sockets on Node.js, normalized trailing-dot hostnames, and enforced streaming byte-count aborts at `Content-Length` and chunk boundaries (`maxBytes`). |
+| Shared Session Secret Fallback | `server/infrastructure/config/serverEnv.ts` | 153 | Production startup and `getSessionSecret()` fell back to `GITHUB_CLIENT_SECRET` when `SESSION_SECRET` was omitted. | Low | Fixed | Removed `githubClientSecret` fallback in `getSessionSecret()` and required dedicated `SESSION_SECRET` (minimum 16 characters) in production validation. |
+| Silent Save Overwrites & Malformed Version Wipe | `server/application/usecases/workspaces/saveWorkspace.ts` | 89 | Concurrent saves ignored `cloudRevision`, deleted client versions remained orphaned on the server, and arrays containing only invalid version entries triggered `clearAllVersions`. | Low | Fixed | Enforced `cloudRevision` checks throwing `409 Conflict`, scoped orphan pruning for deleted versions, and restricted `clearAllVersions` strictly to explicit empty arrays (`body.versions.length === 0`). |
+| Spoofable Rate-Limit Client IP Header | `server/presentation/http/middleware/rateLimit.ts` | 46 | Standalone Node deployments accepted untrusted `X-Forwarded-For` headers as rate-limiter keys. | Low | Fixed | Keyed on trusted Cloudflare/proxy headers only when behind an edge/trusted proxy (`TRUST_PROXY=true` or `K_SERVICE`), using server-captured socket peer IP (`x-sf-peer-ip`) otherwise. |
+| Broken CI Workflow & Dependency Lockfile Mismatch | `.github/workflows/schemaforge-pr.yml` | 28 | The pull-request check workflow ran `npm ci` against a nonexistent `package-lock.json` while the repository uses `bun.lock`. | Low | Fixed | Updated the workflow to `oven-sh/setup-bun@v2`, `bun install --frozen-lockfile`, and `bun cli/schemaforge.ts`, and updated `package.json` metadata and `engines.node`. |
 
 ### Safeguards Verified
 | Area | File | How It's Protected |
 |---|---|---|
-| API Keys & Secrets | `server/types.ts` | All secrets (`GEMINI_API_KEY`, `GITHUB_CLIENT_SECRET`, `AUTH_SESSION_SECRET`) stay strictly in server-side bindings/environment variables; zero `VITE_` or `NEXT_PUBLIC_` secret references exist in `src/`. |
-| Database Queries | `server/services/workspaceService.ts` | All Cloudflare D1 queries use bound `.bind(...)` parameters rather than string interpolation. |
-| Authenticated Requests | `server/lib/crypto.ts` | Session tokens are encrypted with AES-GCM, stored in `HttpOnly; Secure; SameSite=None; Partitioned` cookies, and mutating routes verify request origin. |
-| UI Rendering | `src/` | Zero `dangerouslySetInnerHTML`, `innerHTML`, `eval()`, or `new Function()` usage exists across frontend components. |
+| API Keys & Secrets | `server/infrastructure/config/serverEnv.ts` | `GEMINI_API_KEY`, `GITHUB_CLIENT_SECRET`, and `SESSION_SECRET` stay strictly on the server with Zod validation and zero `VITE_` secret exposure. |
+| Database Queries & Isolation | `server/infrastructure/persistence/d1/D1WorkspaceRepository.ts` | Every D1/SQLite statement uses bound `.bind(...)` parameters and owner-scoped `WHERE owner_user_id = ?` checks. |
+| Authenticated Sessions | `server/presentation/http/security/httpSecurity.ts` | Sessions are AES-GCM encrypted in `HttpOnly` cookies, expire server-side after 7 days, revoke on logout, and enforce `Origin` validation on mutations. |
+| UI Rendering | `src/` | Zero `dangerouslySetInnerHTML`, `innerHTML`, `eval()`, or `new Function()` sinks exist across React components. |
 
 ## PoC Verification
 
-### Unescaped OAuth Callback HTML & Wildcard PostMessage
+### Cross-User Snapshot Overwrite via Version ID Collision
 #### Summary
 | Field | Value |
 |---|---|
-| Issue Type | Unescaped HTML / Script Reflection and Wildcard Window Messaging |
+| Issue Type | Missing Ownership Scope on Database Conflict Upsert |
 | Impact | High |
-| Affected File | `server/routes/auth.ts:47` |
-| Test Scenario | `GET /api/auth/github/callback?error=</script><script>alert(1)</script>` |
+| Affected File | `server/infrastructure/persistence/d1/D1WorkspaceRepository.ts:208` |
+| Test Scenario | User B saves workspace `ws_bob` with a version sharing User A's published version ID `ver_shared_collision_id`, attempting to alter User A's shared schema. |
 
 #### How It Was Fixed
-Added `escapeHtml()` for HTML text nodes, `serializeJsonForInlineScript()` to escape `<`, `>`, `&`, and Unicode line separators in inline JSON payloads, and `getSafeTargetOrigin()` to scope `window.opener.postMessage` strictly to the application's own origin.
+Added migration `migrations/0003_security_hardening.sql` converting `workspace_versions` primary key to `(workspace_id, id)`, updated `ON CONFLICT(workspace_id, id) DO UPDATE` with `WHERE workspace_versions.owner_user_id = excluded.owner_user_id AND workspace_versions.workspace_id = excluded.workspace_id`, switched client ID generation to `crypto.randomUUID()`, and masked raw version IDs on public share responses.
 
 #### Step-by-Step Trace
 | Step | What Happens in the Code | Outcome |
 |---|---|---|
-| 1 | `GET /api/auth/github/callback` enters Zod query validation at `server/routes/auth.ts:138` and reaches `handleGithubCallback`. | Query strings are bounded by `githubCallbackQuerySchema`. |
-| 2 | `renderOAuthErrorHtml()` encodes `<p>${escapeHtml(msg)}</p>` at `server/routes/auth.ts:60` and passes the payload through `serializeJsonForInlineScript()` at `server/routes/auth.ts:48`. | `<` and `>` become `&lt;` / `&gt;` in HTML and `\u003c` / `\u003e` inside `<script>`. |
-| 3 | `window.opener.postMessage` uses `safeTargetOrigin` instead of `'*'` at `server/routes/auth.ts:63`. | **Handled Safely** — script breakout is impossible and messages target only the app origin. |
+| 1 | User B sends `PUT /api/workspaces/ws_bob` with version ID `ver_shared_collision_id` to `executeSaveWorkspace` (`saveWorkspace.ts:82`). | `ws_bob` ownership check passes for User B. |
+| 2 | `D1WorkspaceRepository.upsertWithVersions` (`D1WorkspaceRepository.ts:200`) executes `INSERT ... ON CONFLICT(workspace_id, id) DO UPDATE ... WHERE workspace_versions.owner_user_id = excluded.owner_user_id AND workspace_versions.workspace_id = excluded.workspace_id`. | Conflict targets `(ws_bob, ver_shared_collision_id)` only; `(ws_alice, ver_shared_collision_id)` cannot match or update. |
+| 3 | Public share resolution (`resolvePublicShare.ts:96`) serves User A's untouched snapshot and emits `v.tag` rather than internal DB IDs (`tests/unit/serverSecurity.test.ts`). | **Handled Safely** — User A's snapshots and share links stay completely isolated. |
 
 #### Conclusion
-**Fix Verified** - Crafted OAuth error strings cannot execute injected script tags or leak tokens to unrelated opener windows.
+**Fix Verified** - Neither colliding version IDs nor cross-account saves can overwrite another user's saved schema snapshots.
 
-### Redirect & Alternate IP Bypass in Remote URL Fetcher
+### Expired Session Replay, Header Spoofing & Logout Invalidation
 #### Summary
 | Field | Value |
 |---|---|
-| Issue Type | Unvalidated Outbound Redirects and IP Encoding Bypasses |
-| Impact | High |
-| Affected File | `server/services/fetchUrlService.ts:153` |
-| Test Scenario | `POST /api/fetch-url` with `{"url":"http://[::ffff:127.0.0.1]/"}` or a public URL redirecting to `http://169.254.169.254/latest/meta-data/` |
-
-#### How It Was Fixed
-Replaced automatic redirect following (`redirect: 'follow'`) with a manual redirect loop (`redirect: 'manual'`, max 3 hops) that re-validates protocol and host on every hop, and extended `isDisallowedHostname()` in `server/lib/githubClient.ts` to block alternate IP representations (`::ffff:...`, integer/hex/octal IPv4, CGNAT, and metadata hostnames).
-
-#### Step-by-Step Trace
-| Step | What Happens in the Code | Outcome |
-|---|---|---|
-| 1 | Request reaches Zod JSON validation at `server/routes/fetchUrl.ts:23` (`{ url: string }`), then enters `fetchRemoteDbmlFromUrl()`. | Non-string or empty payloads fail immediately with HTTP `400`. |
-| 2 | Initial hostname check calls `isDisallowedHostname()` (`server/lib/githubClient.ts:23`) at `server/services/fetchUrlService.ts:53`, blocking `[::ffff:127.0.0.1]`, `2130706433`, and `metadata.google.internal`. | Blocked with HTTP `400` before `fetch()` is called. |
-| 3 | Any `3xx` `Location` header is resolved in `server/services/fetchUrlService.ts:162-201` and re-checked via `isDisallowedHostname()` at line `192`. | **Handled Safely** — private redirect targets are rejected with HTTP `400`. |
-
-#### Conclusion
-**Fix Verified** - Neither alternate IP encodings nor HTTP redirects can reach loopback, private, or cloud metadata addresses.
-
-### Strict Schema Validation & Error Sanitization
-#### Summary
-| Field | Value |
-|---|---|
-| Issue Type | Unvalidated Request Payloads and Internal Error Leakage |
+| Issue Type | Unchecked Session Lifetime & Revocation Bypass |
 | Impact | Medium |
-| Affected File | `server/api.ts:39` |
-| Test Scenario | `POST /api/fetch-url` with `{}` or `GET /api/auth/me` with header `x-github-session: invalid!value` |
+| Affected File | `server/presentation/http/security/httpSecurity.ts:214` |
+| Test Scenario | Replaying an 8-day-old `sf_gh_session` cookie, sending an `x-github-session` header without cookie, or replaying a cookie after `POST /api/auth/github/logout`. |
 
 #### How It Was Fixed
-Added `@hono/zod-validator` via `zValidate()` across all request inputs and headers, plus a global `app.onError` handler in `server/api.ts` that logs full stacks server-side while returning generic JSON messages to callers.
+Removed `x-github-session` header acceptance and `sessionStorage` token storage, added `isSessionTimestampValid()` enforcing a 7-day TTL, and added `jti` revocation tracking via `revoked_sessions`.
 
 #### Step-by-Step Trace
 | Step | What Happens in the Code | Outcome |
 |---|---|---|
-| 1 | Every `/api/*` request passes `zValidate('header', optionalSessionHeadersSchema)` at `server/api.ts:39`. | Malformed session headers return HTTP `400` with a concise field error. |
-| 2 | `POST /api/fetch-url` runs `zValidate('json', fetchUrlInputSchema)` at `server/routes/fetchUrl.ts:23`. | Missing or invalid JSON fields return HTTP `400` without stack traces. |
-| 3 | Any unexpected runtime exception is caught by `app.onError` at `server/api.ts:54`. | **Handled Safely** — server logs full stack; client receives `{"error":"An internal server error occurred."}` with HTTP `500`. |
+| 1 | Request with `x-github-session` only enters `extractGithubSession` (`httpSecurity.ts:194`). | Returns `null` because only the `HttpOnly` `sf_gh_session` cookie is accepted (`401`). |
+| 2 | Request with an 8-day-old cookie passes AES-GCM decryption and reaches `isSessionTimestampValid(parsed.iat, now)` (`httpSecurity.ts:214`). | Returns `false` because `now - iat > SESSION_MAX_AGE_MS`. |
+| 3 | After `POST /api/auth/github/logout` inserts `jti` into `revoked_sessions` (`httpSecurity.ts:258`), replaying the old cookie hits the `revoked_sessions` lookup (`httpSecurity.ts:221`). | **Handled Safely** — rejected with `401 Unauthorized`. |
 
 #### Conclusion
-**Fix Verified** - Malformed payloads are rejected before reaching business logic and internal errors never expose stack traces.
+**Fix Verified** - Sessions are confined to `HttpOnly` cookies, expire cleanly after 7 days, and are invalidated immediately on logout.
+
+### OAuth Callback Login Forgery
+#### Summary
+| Field | Value |
+|---|---|
+| Issue Type | Cross-Site Login Forgery via Unbound OAuth State |
+| Impact | Medium |
+| Affected File | `server/application/usecases/auth/completeGithubOAuth.ts:65` |
+| Test Scenario | Attacker crafts `/api/auth/github/callback?code=attacker_code&state=attacker_state` and tricks a victim browser without matching `sf_oauth_state` cookie into loading it. |
+
+#### How It Was Fixed
+`GET /api/auth/github/url` now sets a short-lived `HttpOnly` cookie (`sf_oauth_state`) containing the encrypted nonce, and `handleGithubCallback` reads and immediately deletes it before calling `executeCompleteGithubOAuth` to verify constant-time nonce equality.
+
+#### Step-by-Step Trace
+| Step | What Happens in the Code | Outcome |
+|---|---|---|
+| 1 | Victim visits forged `/api/auth/github/callback` link (`authRoutes.ts:39`). | Cookie `sf_oauth_state` is missing or contains a different user's nonce; cookie is cleared immediately. |
+| 2 | `executeCompleteGithubOAuth` decrypts URL `state` and `cookieState` and runs `timingSafeEqualStrings(parsedState.nonce, parsedCookieState.nonce)` (`completeGithubOAuth.ts:65`). | Nonce check fails before code exchange runs. |
+| 3 | Callback returns HTTP `400` error HTML (`oauthPopupHtml.ts:31`). | **Handled Safely** — attacker's code is never exchanged or bound to victim's session. |
+
+#### Conclusion
+**Fix Verified** - OAuth callbacks succeed only once for the exact browser context that initiated sign-in.
+
+### Remote URL DNS Rebinding & Streaming Size Cap
+#### Summary
+| Field | Value |
+|---|---|
+| Issue Type | Private Network Resolution Bypass & Unbounded Body Read |
+| Impact | Medium |
+| Affected File | `server/infrastructure/remote/safeHttpRemoteFetcher.ts:100` |
+| Test Scenario | Fetching a domain resolving via DNS to `127.0.0.1` or streaming a chunked response exceeding `maxBytes` without a `Content-Length` header. |
+
+#### How It Was Fixed
+Added pinned DNS lookup validation on Node (`resolveValidatedAddresses`) that verifies every resolved IP with `isDisallowedHostname()` before socket connect, plus streaming byte-counter aborts (`totalBytes > options.maxBytes`) across both Node and Workers runtimes.
+
+#### Step-by-Step Trace
+| Step | What Happens in the Code | Outcome |
+|---|---|---|
+| 1 | `SafeHttpRemoteFetcher.fetchText` invokes `fetchViaNodePinnedHttp` (`safeHttpRemoteFetcher.ts:144`). | Calls `resolveValidatedAddresses` at line `154` before connecting. |
+| 2 | `dnsLookup` returns `127.0.0.1`, triggering `isDisallowedHostname('127.0.0.1')` (`urlSafetyPolicy.ts:15`). | Throws `ValidationError` before any TCP socket is opened. |
+| 3 | For oversized chunked streams on allowed public hosts, `res.on('data')` checks `totalBytes > options.maxBytes` (`safeHttpRemoteFetcher.ts:257`). | **Handled Safely** — destroys socket immediately and throws `PayloadTooLargeError` (`413`). |
+
+#### Conclusion
+**Fix Verified** - Domains resolving to internal addresses are blocked prior to connection and oversized responses abort immediately during streaming.

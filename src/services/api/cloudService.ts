@@ -10,7 +10,6 @@ import {
   notifyAuthChanged,
   parseErrorResponse,
   publicApiClient,
-  setStoredGithubSessionToken,
 } from './apiClient';
 import { getGithubAuthUrl, logoutGithub } from './remoteService';
 
@@ -219,12 +218,7 @@ export async function connectWithGithubOAuth(): Promise<void> {
       if (msgType === 'OAUTH_AUTH_SUCCESS' && provider === 'github') {
         settled = true;
         cleanup();
-        const sessionToken = Reflect.get(event.data, 'sessionToken');
-        if (typeof sessionToken === 'string') {
-          setStoredGithubSessionToken(sessionToken);
-        } else {
-          notifyAuthChanged();
-        }
+        notifyAuthChanged();
         resolve();
       } else if (msgType === 'OAUTH_AUTH_ERROR' && provider === 'github') {
         settled = true;

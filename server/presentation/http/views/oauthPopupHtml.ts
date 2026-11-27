@@ -55,13 +55,11 @@ export function renderOAuthErrorHtml(c: ApiContext, msg: string): Response {
 
 export function renderOAuthSuccessHtml(
   c: ApiContext,
-  sessionToken: string,
   user: GithubUserSummary
 ): Response {
   const payloadJson = serializeJsonForInlineScript({
     type: 'OAUTH_AUTH_SUCCESS',
     provider: 'github',
-    sessionToken,
     user,
   });
   const safeTargetOrigin = serializeJsonForInlineScript(getSafeTargetOrigin(c));

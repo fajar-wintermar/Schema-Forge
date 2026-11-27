@@ -13,7 +13,11 @@ function isDisallowedIpv4Octets(a: number, b: number): boolean {
 }
 
 export function isDisallowedHostname(hostname: string): boolean {
-  const raw = hostname.trim().toLowerCase().replace(/^\[|\]$/g, '');
+  const raw = hostname
+    .trim()
+    .toLowerCase()
+    .replace(/^\[|\]$/g, '')
+    .replace(/\.+$/, '');
   if (!raw) return true;
 
   if (
@@ -51,7 +55,8 @@ export function isDisallowedHostname(hostname: string): boolean {
       raw === '0:0:0:0:0:0:0:0' ||
       raw.startsWith('fe80:') ||
       raw.startsWith('fc') ||
-      raw.startsWith('fd')
+      raw.startsWith('fd') ||
+      raw.startsWith('ff')
     ) {
       return true;
     }

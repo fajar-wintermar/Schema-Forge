@@ -96,7 +96,7 @@ export async function executeResolvePublicShare(deps: {
     publishedVersions: share.pinnedVersionTag
       ? []
       : publishedVersions.map((v) => ({
-          id: v.id,
+          id: v.tag,
           tag: v.tag,
           title: v.title,
           description: v.description,

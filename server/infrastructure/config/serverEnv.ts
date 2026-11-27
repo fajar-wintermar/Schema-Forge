@@ -150,11 +150,7 @@ export function validateServerEnv(
     );
   }
 
-  if (
-    isProduction &&
-    !baseParsed.data.SESSION_SECRET &&
-    !baseParsed.data.GITHUB_CLIENT_SECRET
-  ) {
+  if (isProduction && !baseParsed.data.SESSION_SECRET) {
     throw new Error(
       'Missing or invalid required environment variables for production: SESSION_SECRET: SESSION_SECRET (min 16 chars) is required in production.'
     );

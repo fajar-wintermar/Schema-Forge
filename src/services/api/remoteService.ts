@@ -2,18 +2,11 @@ import type { InferResponseType } from 'hono/client';
 import {
   apiClient,
   AUTH_CHANGED_EVENT,
-  getStoredGithubSessionToken,
   notifyAuthChanged,
   parseErrorResponse,
-  setStoredGithubSessionToken,
 } from './apiClient';
 
-export {
-  AUTH_CHANGED_EVENT,
-  getStoredGithubSessionToken,
-  notifyAuthChanged,
-  setStoredGithubSessionToken,
-};
+export { AUTH_CHANGED_EVENT, notifyAuthChanged };
 
 export type RemoteFetchResult = InferResponseType<
   (typeof apiClient.api)['fetch-url']['$post'],
@@ -152,7 +145,6 @@ export async function getGithubAuthUrl(
 }
 
 export async function logoutGithub(): Promise<void> {
-  setStoredGithubSessionToken(null);
   const res = await apiClient.api.auth.github.logout.$post();
   if (!res.ok) {
     throw await parseErrorResponse(res);

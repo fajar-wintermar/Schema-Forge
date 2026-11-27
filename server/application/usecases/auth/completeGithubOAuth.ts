@@ -7,6 +7,7 @@ import type { IOAuthGateway } from '../../../domain/gateways/IOAuthGateway';
 import type { ITokenCipher } from '../../../domain/gateways/ITokenCipher';
 import { isOAuthStatePayload } from '../../../domain/policies/typeGuards';
 import type { IUserRepository } from '../../../domain/repositories/IUserRepository';
+import { timingSafeEqualStrings } from '../../../presentation/http/security/httpSecurity';
 
 export type CompleteGithubOAuthResult =
   | { ok: true; sessionToken: string; user: GithubUserSummary }
@@ -21,7 +22,12 @@ export async function executeCompleteGithubOAuth(
     oauthGateway: IOAuthGateway;
     userRepository: IUserRepository | null;
   },
-  params: { code: string; state: string; oauthError: string }
+  params: {
+    code: string;
+    state: string;
+    cookieState: string;
+    oauthError: string;
+  }
 ): Promise<CompleteGithubOAuthResult> {
   if (params.oauthError) {
     return { ok: false, error: params.oauthError };
@@ -36,11 +42,28 @@ export async function executeCompleteGithubOAuth(
     userRepository,
   } = deps;
 
-  const parsedState = params.state
-    ? await tokenCipher.decrypt(params.state, sessionSecret, isOAuthStatePayload)
-    : null;
+  const [parsedState, parsedCookieState] = await Promise.all([
+    params.state
+      ? tokenCipher.decrypt(params.state, sessionSecret, isOAuthStatePayload)
+      : Promise.resolve(null),
+    params.cookieState
+      ? tokenCipher.decrypt(
+          params.cookieState,
+          sessionSecret,
+          isOAuthStatePayload
+        )
+      : Promise.resolve(null),
+  ]);
 
-  if (!params.code || !parsedState || parsedState.exp < Date.now()) {
+  const now = Date.now();
+  if (
+    !params.code ||
+    !parsedState ||
+    !parsedCookieState ||
+    parsedState.exp < now ||
+    parsedCookieState.exp < now ||
+    !timingSafeEqualStrings(parsedState.nonce, parsedCookieState.nonce)
+  ) {
     return {
       ok: false,
       error: 'Invalid or expired OAuth state. Please try connecting again.',
@@ -78,6 +101,7 @@ export async function executeCompleteGithubOAuth(
         accessToken,
         user,
         iat: Date.now(),
+        jti: tokenCipher.randomHex(16),
       },
       sessionSecret
     );

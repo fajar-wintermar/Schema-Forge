@@ -25,16 +25,12 @@ jobs:
           ref: ${{ github.event.pull_request.base.ref }}
           path: base
 
-      - name: Setup Node.js 22
-        uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: head/package-lock.json
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
 
       - name: Install dependencies
         working-directory: head
-        run: npm ci
+        run: bun install --frozen-lockfile
 
       - name: Run SchemaForge check & comment on PR
         working-directory: head
@@ -42,9 +38,9 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           if [ -d "schema" ] && [ -d "../base/schema" ]; then
-            npx tsx cli/schemaforge.ts check schema --base ../base/schema --markdown --pr-comment --repo "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}"
+            bun cli/schemaforge.ts check schema --base ../base/schema --markdown --pr-comment --repo "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}"
           elif [ -f "schema.dbml" ] && [ -f "../base/schema.dbml" ]; then
-            npx tsx cli/schemaforge.ts check schema.dbml --base ../base/schema.dbml --markdown --pr-comment --repo "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}"
+            bun cli/schemaforge.ts check schema.dbml --base ../base/schema.dbml --markdown --pr-comment --repo "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}"
           elif [ -d "schema" ]; then
-            npx tsx cli/schemaforge.ts check schema --markdown --pr-comment --repo "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}"
+            bun cli/schemaforge.ts check schema --markdown --pr-comment --repo "${{ github.repository }}" --pr "${{ github.event.pull_request.number }}"
           fi

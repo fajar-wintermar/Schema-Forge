@@ -176,7 +176,27 @@ export class D1WorkspaceRepository implements IWorkspaceRepository {
       );
     }
 
-    if (input.versions) {
+    if (input.clearAllVersions) {
+      statements.push(
+        this.db
+          .prepare(
+            `DELETE FROM workspace_versions WHERE workspace_id = ? AND owner_user_id = ?`
+          )
+          .bind(input.workspaceId, input.ownerUserId)
+      );
+    } else if (input.versions && input.versions.length > 0) {
+      const keepIds = input.versions.map((v) => v.id);
+      const placeholders = keepIds.map(() => '?').join(', ');
+      statements.push(
+        this.db
+          .prepare(
+            `DELETE FROM workspace_versions
+             WHERE workspace_id = ? AND owner_user_id = ?
+               AND id NOT IN (${placeholders})`
+          )
+          .bind(input.workspaceId, input.ownerUserId, ...keepIds)
+      );
+
       for (const v of input.versions) {
         statements.push(
           this.db
@@ -185,14 +205,16 @@ export class D1WorkspaceRepository implements IWorkspaceRepository {
                  id, workspace_id, owner_user_id, tag, title, description,
                  dbml, table_positions_json, sticky_notes_json, is_published, created_at
                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-               ON CONFLICT(id) DO UPDATE SET
+               ON CONFLICT(workspace_id, id) DO UPDATE SET
                  tag = excluded.tag,
                  title = excluded.title,
                  description = excluded.description,
                  dbml = excluded.dbml,
                  table_positions_json = excluded.table_positions_json,
                  sticky_notes_json = excluded.sticky_notes_json,
-                 is_published = excluded.is_published`
+                 is_published = excluded.is_published
+               WHERE workspace_versions.owner_user_id = excluded.owner_user_id
+                 AND workspace_versions.workspace_id = excluded.workspace_id`
             )
             .bind(
               v.id,
@@ -209,16 +231,6 @@ export class D1WorkspaceRepository implements IWorkspaceRepository {
             )
         );
       }
-    }
-
-    if (input.clearAllVersions) {
-      statements.push(
-        this.db
-          .prepare(
-            `DELETE FROM workspace_versions WHERE workspace_id = ? AND owner_user_id = ?`
-          )
-          .bind(input.workspaceId, input.ownerUserId)
-      );
     }
 
     await this.db.batch(statements);
