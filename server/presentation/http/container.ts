@@ -78,7 +78,7 @@ export function createRequestContainer(c: ApiContext): RequestContainer {
     tokenCipher,
     oauthGateway: new FetchGithubOAuthGateway(),
     githubGateway: new FetchGithubGateway(),
-    remoteFetcher: new SafeHttpRemoteFetcher(),
+    remoteFetcher: c.env?.REMOTE_FETCHER ?? new SafeHttpRemoteFetcher(),
     aiGateway: new GeminiAiGateway(config.geminiApiKey),
     userRepository,
     workspaceRepository,

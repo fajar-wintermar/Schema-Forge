@@ -1,4 +1,5 @@
 import type { Context } from 'hono';
+import type { IRemoteFetcher } from '../../domain/gateways/IRemoteFetcher';
 import type { D1DatabaseLike } from '../../infrastructure/persistence/d1/d1Types';
 
 export interface AppEnv {
@@ -12,6 +13,7 @@ export interface AppEnv {
   GITHUB_CLIENT_SECRET?: string;
   SESSION_SECRET?: string;
   DB?: D1DatabaseLike;
+  REMOTE_FETCHER?: IRemoteFetcher;
   ASSETS?: { fetch: typeof fetch };
 }
 

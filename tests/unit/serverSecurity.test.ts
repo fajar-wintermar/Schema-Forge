@@ -22,6 +22,7 @@ import { D1ShareRepository } from '../../server/infrastructure/persistence/d1/D1
 import { D1UserRepository } from '../../server/infrastructure/persistence/d1/D1UserRepository';
 import { D1WorkspaceRepository } from '../../server/infrastructure/persistence/d1/D1WorkspaceRepository';
 import { createLocalSqliteD1 } from '../../server/infrastructure/persistence/sqlite/localSqliteD1';
+import { NodePinnedRemoteFetcher } from '../../server/infrastructure/remote/nodePinnedRemoteFetcher';
 import { SafeHttpRemoteFetcher } from '../../server/infrastructure/remote/safeHttpRemoteFetcher';
 import { WebCryptoTokenCipher } from '../../server/infrastructure/security/webCryptoTokenCipher';
 import { api, type AppEnv } from '../../server/presentation/http/app';
@@ -544,7 +545,7 @@ describe('Server security, workspace ownership, OAuth & fetcher protections', ()
     expect(isDisallowedHostname('ff02::1')).toBe(true);
 
     // DNS resolving a public-looking hostname to 127.0.0.1 must be rejected
-    const rebindFetcher = new SafeHttpRemoteFetcher({
+    const rebindFetcher = new NodePinnedRemoteFetcher({
       dnsLookup: async () => [{ address: '127.0.0.1', family: 4 }],
     });
     await expect(
@@ -582,40 +583,44 @@ describe('Server security, workspace ownership, OAuth & fetcher protections', ()
     const address = server.address();
     const port = typeof address === 'object' && address ? address.port : 0;
 
-    const testServerFetcher = new SafeHttpRemoteFetcher();
     const allowLocalInStreamTest = (host: string) => {
       if (host === '127.0.0.1') return false;
       return isDisallowedHostname(host);
     };
 
-    await expect(
-      testServerFetcher.fetchText(`http://127.0.0.1:${port}/large-stream`, {
-        timeoutMs: 3000,
-        maxRedirects: 3,
-        maxBytes: 1024,
-        isDisallowedHostname: allowLocalInStreamTest,
-      })
-    ).rejects.toBeInstanceOf(PayloadTooLargeError);
+    for (const fetcher of [
+      new NodePinnedRemoteFetcher(),
+      new SafeHttpRemoteFetcher(),
+    ]) {
+      await expect(
+        fetcher.fetchText(`http://127.0.0.1:${port}/large-stream`, {
+          timeoutMs: 3000,
+          maxRedirects: 3,
+          maxBytes: 1024,
+          isDisallowedHostname: allowLocalInStreamTest,
+        })
+      ).rejects.toBeInstanceOf(PayloadTooLargeError);
 
-    await expect(
-      testServerFetcher.fetchText(`http://127.0.0.1:${port}/redirect-private`, {
-        timeoutMs: 3000,
-        maxRedirects: 3,
-        maxBytes: 1024,
-        isDisallowedHostname: allowLocalInStreamTest,
-      })
-    ).rejects.toBeInstanceOf(ValidationError);
+      await expect(
+        fetcher.fetchText(`http://127.0.0.1:${port}/redirect-private`, {
+          timeoutMs: 3000,
+          maxRedirects: 3,
+          maxBytes: 1024,
+          isDisallowedHostname: allowLocalInStreamTest,
+        })
+      ).rejects.toBeInstanceOf(ValidationError);
 
-    const okResult = await testServerFetcher.fetchText(
-      `http://127.0.0.1:${port}/ok`,
-      {
-        timeoutMs: 3000,
-        maxRedirects: 3,
-        maxBytes: 1024,
-        isDisallowedHostname: allowLocalInStreamTest,
-      }
-    );
-    expect(okResult.ok).toBe(true);
-    expect(okResult.bodyText).toBe('Table ok { id int [pk] }');
+      const okResult = await fetcher.fetchText(
+        `http://127.0.0.1:${port}/ok`,
+        {
+          timeoutMs: 3000,
+          maxRedirects: 3,
+          maxBytes: 1024,
+          isDisallowedHostname: allowLocalInStreamTest,
+        }
+      );
+      expect(okResult.ok).toBe(true);
+      expect(okResult.bodyText).toBe('Table ok { id int [pk] }');
+    }
   });
 });

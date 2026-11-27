@@ -6,6 +6,7 @@ import { getRequestListener } from '@hono/node-server';
 import { validateServerEnv } from '../infrastructure/config/serverEnv';
 import { ensureMigrations } from '../infrastructure/persistence/d1/d1Migrator';
 import { createLocalSqliteD1 } from '../infrastructure/persistence/sqlite/localSqliteD1';
+import { NodePinnedRemoteFetcher } from '../infrastructure/remote/nodePinnedRemoteFetcher';
 import { api } from '../presentation/http/app';
 import { shutdownRateLimiters } from '../presentation/http/middleware/rateLimit';
 
@@ -123,6 +124,7 @@ export async function startNodeServer(): Promise<void> {
 
   try {
     await ensureMigrations(localSqlite.db);
+    const nodeRemoteFetcher = new NodePinnedRemoteFetcher();
     const honoListener = getRequestListener((request) =>
       api.fetch(request, {
         NODE_ENV: validatedEnv.NODE_ENV,
@@ -135,6 +137,7 @@ export async function startNodeServer(): Promise<void> {
         GITHUB_CLIENT_SECRET: validatedEnv.GITHUB_CLIENT_SECRET,
         SESSION_SECRET: validatedEnv.SESSION_SECRET,
         DB: localSqlite.db,
+        REMOTE_FETCHER: nodeRemoteFetcher,
       })
     );
 
