@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+jobs:
+  verify:
+    name: Typecheck, Unit Tests & Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Restore Bun cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.bun/install/cache
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Typecheck & sync migrations
+        run: bun run lint
+
+      - name: Run unit tests
+        run: bun run test
+
+      - name: Build frontend bundle
+        run: bun run build
+
+      - name: Verify Cloudflare Worker bundle compatibility
+        run: |
+          bunx esbuild worker.ts --bundle --format=esm --outdir=.worker-check --external:cloudflare:*
+          if grep -q "node:" .worker-check/worker.js; then
+            echo "Error: Worker bundle contains node:* imports"
+            exit 1
+          fi
+          rm -rf .worker-check
