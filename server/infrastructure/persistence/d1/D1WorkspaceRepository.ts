@@ -185,16 +185,18 @@ export class D1WorkspaceRepository implements IWorkspaceRepository {
           .bind(input.workspaceId, input.ownerUserId)
       );
     } else if (input.versions && input.versions.length > 0) {
-      const keepIds = input.versions.map((v) => v.id);
-      const placeholders = keepIds.map(() => '?').join(', ');
+      // Pass the kept IDs as one JSON array parameter. Cloudflare D1 allows at
+      // most 100 bound parameters per statement, and a workspace may hold up
+      // to 100 versions, so one placeholder per ID would exceed the limit.
+      const keepIdsJson = JSON.stringify(input.versions.map((v) => v.id));
       statements.push(
         this.db
           .prepare(
             `DELETE FROM workspace_versions
              WHERE workspace_id = ? AND owner_user_id = ?
-               AND id NOT IN (${placeholders})`
+               AND id NOT IN (SELECT value FROM json_each(?))`
           )
-          .bind(input.workspaceId, input.ownerUserId, ...keepIds)
+          .bind(input.workspaceId, input.ownerUserId, keepIdsJson)
       );
 
       for (const v of input.versions) {
